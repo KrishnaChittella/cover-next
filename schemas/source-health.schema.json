@@ -4,7 +4,7 @@
       "additionalProperties": false,
       "properties": {
         "canonical_game_id": {
-          "pattern": "^msg_[0-9]{4}$",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
           "title": "Canonical Game Id",
           "type": "string"
         },

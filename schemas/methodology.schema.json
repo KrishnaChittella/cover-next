@@ -364,6 +364,10 @@
     "SourceOperationsView": {
       "additionalProperties": false,
       "properties": {
+        "budget_group": {
+          "title": "Budget Group",
+          "type": "string"
+        },
         "cache_max_age_seconds": {
           "anyOf": [
             {
@@ -400,6 +404,7 @@
         }
       },
       "required": [
+        "budget_group",
         "rate_limit",
         "expected_publication_lag_seconds",
         "publication_lag_basis"
@@ -433,6 +438,14 @@
           ],
           "default": null,
           "title": "Attribution Text"
+        },
+        "commercial_approval_required": {
+          "title": "Commercial Approval Required",
+          "type": "string"
+        },
+        "commercial_approval_status": {
+          "title": "Commercial Approval Status",
+          "type": "string"
         },
         "commercial_use_allowed": {
           "title": "Commercial Use Allowed",
@@ -498,6 +511,13 @@
         "source": {
           "title": "Source",
           "type": "string"
+        },
+        "stage_clearance": {
+          "items": {
+            "$ref": "#/$defs/StageClearanceView"
+          },
+          "title": "Stage Clearance",
+          "type": "array"
         }
       },
       "required": [
@@ -510,6 +530,9 @@
         "attribution_required",
         "approval_required",
         "approval_status",
+        "commercial_approval_required",
+        "commercial_approval_status",
+        "stage_clearance",
         "operations",
         "display",
         "field_rules",
@@ -518,6 +541,30 @@
         "notes"
       ],
       "title": "SourcePolicyView",
+      "type": "object"
+    },
+    "StageClearanceView": {
+      "additionalProperties": false,
+      "properties": {
+        "cleared": {
+          "title": "Cleared",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "cleared",
+        "reason"
+      ],
+      "title": "StageClearanceView",
       "type": "object"
     },
     "TermView": {

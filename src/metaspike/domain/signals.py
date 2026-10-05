@@ -42,6 +42,9 @@ class SourceErrorCode(StrEnum):
     NETWORK_ERROR = "network_error"
     HTTP_ERROR = "http_error"
     INVALID_RESPONSE = "invalid_response"
+    QUOTA_EXHAUSTED = "quota_exhausted"
+    UNAUTHORIZED = "unauthorized"
+    MISSING_CREDENTIALS = "missing_credentials"
 
 
 class Signal(FrozenModel):

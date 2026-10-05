@@ -39,6 +39,32 @@ class ApprovalStatus(StrEnum):
     DENIED = "denied"
 
 
+class DeploymentStage(StrEnum):
+    """How far a source's data is allowed to travel. Each stage needs its own clearance.
+
+    Being able to build against a source says nothing about being able to store its
+    data in production, show it publicly, or earn money beside it.
+    """
+
+    PRIVATE_DEVELOPMENT = "private_development"  # local build and test
+    PRIVATE_COLLECTION = "private_collection"  # unattended internal collection and storage
+    PUBLIC_LAUNCH = "public_launch"  # shown to the public, not monetized
+    COMMERCIAL_PRODUCTION = "commercial_production"  # shown publicly and monetized
+
+
+class SourcePurpose(StrEnum):
+    """What a source is used for, which decides which permissions it must hold."""
+
+    DEMAND_SIGNALS = "demand_signals"  # metrics that features and scores derive from
+    CATALOGUE_METADATA = "catalogue_metadata"  # identity, dates and relationships
+
+
+class StageClearance(FrozenModel):
+    stage: DeploymentStage
+    cleared: bool
+    reason: NonEmptyStr
+
+
 class LimitBasis(StrEnum):
     """Where a number came from, so an assumption is never mistaken for a guarantee."""
 
@@ -84,6 +110,9 @@ class SourceOperations(FrozenModel):
     so no collector can be configured without them.
     """
 
+    # Sources that share one upstream allowance (for example one API key) share a
+    # budget group, and therefore one rate limiter and one quota ledger.
+    budget_group: NonEmptyStr
     rate_limit: RateLimit
     # None means the source documents no long-window quota.
     quota: QuotaBudget | None = None
@@ -131,8 +160,15 @@ class SourcePolicy(FrozenModel):
     redistribution_allowed: Permission
     attribution_required: Requirement
     attribution_text: str | None = None
+    # Approval needed merely to collect from the source.
     approval_required: Requirement
     approval_status: ApprovalStatus
+    # Approval needed before the source may sit beside monetization. Separate, because
+    # a source can be free to build against yet need a partnership to commercialise.
+    commercial_approval_required: Requirement
+    commercial_approval_status: ApprovalStatus
+    # An explicit, reviewed statement per stage. Never computed, never assumed.
+    stage_clearance: tuple[StageClearance, ...]
     operations: SourceOperations
     display: DisplayRules
     field_rules: tuple[FieldRule, ...] = ()
@@ -148,7 +184,58 @@ class SourcePolicy(FrozenModel):
         fields = [rule.field for rule in self.field_rules]
         if len(fields) != len(set(fields)):
             raise ValueError("more than one rule for the same field")
+        stages = [clearance.stage for clearance in self.stage_clearance]
+        if sorted(stages) != sorted(DeploymentStage):
+            raise ValueError("stage_clearance must state every deployment stage exactly once")
+        needs_commercial = self.commercial_approval_required is not Requirement.NOT_REQUIRED
+        if needs_commercial and self.commercial_approval_status is ApprovalStatus.NOT_REQUIRED:
+            raise ValueError(
+                "commercial_approval_status cannot be 'not_required' when approval may be needed"
+            )
+        if self.cleared_for(DeploymentStage.COMMERCIAL_PRODUCTION) and not (
+            self.commercial_use_allowed.permits and self._commercial_approval_settled
+        ):
+            raise ValueError(
+                "commercial production cannot be cleared without an explicit commercial "
+                "permission and settled commercial approval"
+            )
         return self
+
+    def clearance(self, stage: DeploymentStage) -> StageClearance:
+        return next(c for c in self.stage_clearance if c.stage is stage)
+
+    def cleared_for(self, stage: DeploymentStage) -> bool:
+        return self.clearance(stage).cleared
+
+    @property
+    def _approval_settled(self) -> bool:
+        return self.approval_status in (ApprovalStatus.NOT_REQUIRED, ApprovalStatus.APPROVED)
+
+    @property
+    def _commercial_approval_settled(self) -> bool:
+        return self.commercial_approval_status in (
+            ApprovalStatus.NOT_REQUIRED,
+            ApprovalStatus.APPROVED,
+        )
+
+    def registration_refusal(self, purpose: SourcePurpose, stage: DeploymentStage) -> str | None:
+        """Why this source may not be used for `purpose` at `stage`, or None if it may."""
+        if purpose is SourcePurpose.DEMAND_SIGNALS and not self.collection_permitted:
+            return (
+                "policy does not permit collection "
+                "(derived metrics must be allowed and any required approval granted)"
+            )
+        if not self._approval_settled:
+            return "policy does not permit collection (required approval has not been granted)"
+        if purpose is SourcePurpose.CATALOGUE_METADATA and self.historical_storage_allowed in (
+            Permission.UNKNOWN,
+            Permission.PROHIBITED,
+        ):
+            return "policy does not permit storing the source's metadata"
+        clearance = self.clearance(stage)
+        if not clearance.cleared:
+            return f"not cleared for {stage.value}: {clearance.reason}"
+        return None
 
     @property
     def collection_permitted(self) -> bool:
@@ -159,7 +246,12 @@ class SourcePolicy(FrozenModel):
     @property
     def commercial_production_permitted(self) -> bool:
         """Whether the source may be part of a monetized production configuration."""
-        return self.collection_permitted and self.commercial_use_allowed.permits
+        return (
+            self.cleared_for(DeploymentStage.COMMERCIAL_PRODUCTION)
+            and self.commercial_use_allowed.permits
+            and self._approval_settled
+            and self._commercial_approval_settled
+        )
 
     @property
     def public_history_permitted(self) -> bool:

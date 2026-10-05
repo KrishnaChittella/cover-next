@@ -18,6 +18,21 @@ milestone: nothing outside this repository may depend on it.
 Phase 1 of the roadmap (foundation refactor) is complete: the code no longer
 assumes one source or daily data, and v0 output is unchanged.
 
+Phase 2 (canonical entity resolution and lifecycle) is in progress. Part A is
+built: UUIDv4 canonical ids with a frozen legacy mapping, aliases and lineage;
+versioned source bindings; stage-aware source policy; a shared rate limiter;
+source-native catalogue records; and the IGDB and Steam catalogue adapters, both
+verified against the live APIs on 2026-10-05.
+
+A 200-case golden evaluation set for entity resolution exists as a **draft**
+(`tests/fixtures/resolution_golden.json`). It was built from recorded IGDB and
+Steam responses, and every label cites the recorded fields that justify it. It
+must be reviewed and frozen before any resolver is written, so that thresholds
+can never be tuned into it.
+
+Not built yet (Part B): the resolver, quarantine store, lifecycle engine and
+generated catalogue.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:
@@ -66,6 +81,11 @@ uv sync
 | `uv run metaspike validate-artifacts` | Validate what is published in `artifacts/` |
 | `uv run metaspike export-schemas` | Regenerate `schemas/` from the contract models (`--check` to verify) |
 
+`uv run --env-file .env metaspike probe-sources` makes one small authenticated
+call per catalogue source and reports the field names and vocabularies it sees. It
+is the only command that uses IGDB or Steam, it is never run by tests, and it never
+prints a credential.
+
 `run` and `collect` accept `--store-dir DIR` to also append what they collect to a
 local point-in-time observation store.
 
@@ -81,11 +101,17 @@ uv run pytest               # tests, offline
 uv run pytest -m live       # one explicit live smoke test
 ```
 
+Credentials are read from the environment only, typically from a git-ignored
+`.env`: `METASPIKE_IGDB_CLIENT_ID`, `METASPIKE_IGDB_CLIENT_SECRET` and
+`METASPIKE_STEAM_WEB_API_KEY`. The IGDB access token is generated from the first
+two and cached in `.metaspike/tokens/` (git-ignored, owner-only); it is never
+configured by hand.
+
 Exit codes: `0` success (including partial source failures, which are recorded in
 source health), `1` unexpected error, `2` invalid catalogue or usage, `3` no
 source returned any data (nothing published), `4` invalid output such as a
 contract or score-invariant violation (nothing published), `5` source-policy
-violation.
+violation, `6` a catalogue source was unavailable (for example missing credentials).
 
 The Wikimedia User-Agent identifies MetaSpike with a contact URL. Override the
 contact with the `METASPIKE_CONTACT` environment variable. No secret is needed.
@@ -101,6 +127,8 @@ src/metaspike/
   cli.py                 command-line entry point and exit codes
   domain/                typed models only, no I/O
     games.py             CanonicalGame, Catalogue, lifecycle, relationships
+    identity.py          UUIDv4 ids, aliases, lineage, versioned source bindings
+    source_records.py    source-native catalogue records and admissibility
     events.py            event vocabulary (detection not implemented)
     timeseries.py        Granularity and aligned TimeWindow
     metrics.py           metric registry: what is measured, its role and aggregation
@@ -108,11 +136,20 @@ src/metaspike/
     signals.py           SignalKey, Signal and EntitySignals (many signals, any missing)
     scores.py            score, confidence and explanation results
     source_policy.py     permissions, rate limits, quota, lag, field and display rules
-  catalogue/seed.py      bootstrap catalogue
+  catalogue/
+    seed.py              bootstrap catalogue
+    legacy_ids.py        frozen msg_NNNN -> UUIDv4 migration table
   sources/
     base.py              SourceAdapter protocol, SourceError
-    registry.py          refuses adapters without a usable policy or known metrics
+    registry.py          refuses adapters whose policy does not clear the stage
+    limiter.py           per-budget-group rate limiter and quota ledger
+    http.py              the limited HTTP client every adapter must use; redaction
+    credentials.py       secrets from the environment that cannot be printed
     wikimedia.py         Wikimedia Pageviews adapter and its policy
+    igdb_auth.py         Twitch OAuth client-credentials with a cached token
+    igdb.py              IGDB identity-metadata adapter and its policy
+    steam_catalogue.py   Steam app-list adapter and its policy
+    catalogue_sources.py wiring for the catalogue sources
     replay.py            offline client that replays recorded responses
   features/attention.py  daily feature maths and machine-readable definitions
   scoring/
@@ -126,6 +163,10 @@ src/metaspike/
   storage/
     base.py              ObservationStore contract (append-only, point-in-time)
     local.py             local JSON Lines implementation
+    records.py           local store for source-native records
+  resolution/
+    golden.py            the golden evaluation set's model and integrity rules
+    recorded.py          loads recorded IGDB/Steam rows through the real parsers
   publishing/
     artifacts.py         the artifact contract: view models only, no domain imports
     mapping.py           the only place domain models become contract views
@@ -134,7 +175,8 @@ src/metaspike/
     validation.py        validate written artifacts
     schemas.py           JSON Schema export
 schemas/                 generated JSON Schemas, checked in
-tests/                   offline tests, recorded fixtures, v0 golden file
+tests/                   offline tests, recorded fixtures, v0 golden file,
+                         recorded IGDB/Steam rows and the resolution golden set
 docs/architecture.md     intended eventual flow, cloud parts labelled FUTURE
 ```
 
@@ -142,6 +184,14 @@ See [docs/architecture.md](docs/architecture.md) for the intended eventual flow.
 
 ## Domain model
 
+- **Identity**: `canonical_game_id` is a lowercase UUIDv4, never derived from a
+  title or a source id. The 15 original `msg_NNNN` ids map to fixed UUIDs in a
+  frozen table and remain resolvable as aliases. Merges and splits are recorded
+  as lineage; nothing is rewritten. Which source record belongs to which entity
+  is a versioned, point-in-time binding.
+- **Source records**: what a source says about one of its own products, keyed
+  only by the source's id. DLC, demos, betas, playtests, bundles and soundtracks
+  are never eligible to become entities.
 - **CanonicalGame**: `canonical_game_id` (opaque, stable), `slug`, `name`,
   `aliases`, `source_identifiers` (source + namespace + value, so any platform
   can be added), `relationships` (`parent_game_id` + `relationship_type`), and
@@ -173,6 +223,15 @@ publication lag, each tagged documented, self-imposed or observed), display
 requirements, and per-field rules that can only narrow the source-level policy. A permission is one of `allowed`,
 `restricted`, `prohibited` or `unknown`, and only `allowed` permits.
 
+- Each policy states explicitly whether the source is cleared for four stages:
+  private development, private collection, public launch and commercial
+  production. A registry serves one stage and refuses any source not cleared for
+  it. IGDB and Steam are cleared for private development only: IGDB needs a
+  partnership for monetized use, and Steam's terms do not address commercial use.
+- Limits are enforced, not just recorded: every request goes through the rate
+  limiter for its budget group (requests per interval, concurrency, daily quota,
+  Retry-After, bounded backoff). An exhausted quota refuses the request before it
+  is sent.
 - An adapter cannot be registered without a policy, with a policy for a different
   source, or with a policy that does not permit derived metrics and settled
   approval.

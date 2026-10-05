@@ -29,7 +29,12 @@ SCOPE_NOTE = (
 
 SemVer = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
 RunId = Annotated[str, StringConstraints(pattern=r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$")]
-GameIdView = Annotated[str, StringConstraints(pattern=r"^msg_[0-9]{4}$")]
+GameIdView = Annotated[
+    str,
+    StringConstraints(
+        pattern=r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    ),
+]
 SlugView = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 
 LifecycleStateView = Literal[
@@ -330,6 +335,7 @@ class QuotaView(ContractModel):
 
 
 class SourceOperationsView(ContractModel):
+    budget_group: str
     rate_limit: RateLimitView
     quota: QuotaView | None = None
     cache_max_age_seconds: int | None = None
@@ -350,6 +356,12 @@ class FieldRuleView(ContractModel):
     note: str
 
 
+class StageClearanceView(ContractModel):
+    stage: str
+    cleared: bool
+    reason: str
+
+
 class SourcePolicyView(ContractModel):
     source: str
     raw_storage_allowed: str
@@ -362,6 +374,9 @@ class SourcePolicyView(ContractModel):
     attribution_text: str | None = None
     approval_required: str
     approval_status: str
+    commercial_approval_required: str
+    commercial_approval_status: str
+    stage_clearance: tuple[StageClearanceView, ...]
     operations: SourceOperationsView
     display: DisplayRulesView
     field_rules: tuple[FieldRuleView, ...]

@@ -7,7 +7,6 @@ import logging
 import os
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Literal
 from urllib.parse import quote
@@ -22,6 +21,7 @@ from metaspike.domain.observations import Freshness, Observation, ObservationSta
 from metaspike.domain.signals import SignalSpec, SourceErrorCode
 from metaspike.domain.source_policy import (
     ApprovalStatus,
+    DeploymentStage,
     DisplayRules,
     FieldRule,
     LimitBasis,
@@ -30,9 +30,13 @@ from metaspike.domain.source_policy import (
     Requirement,
     SourceOperations,
     SourcePolicy,
+    StageClearance,
 )
 from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
 from metaspike.sources.base import SourceError
+from metaspike.sources.http import LimitedHttpClient, build_http_client
+from metaspike.sources.http import RetryConfig as RetryConfig
+from metaspike.sources.limiter import Clock, RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +63,14 @@ WIKIMEDIA_PAGEVIEWS_POLICY = SourcePolicy(
     attribution_text="Pageview data from the Wikimedia Analytics API (CC0 1.0).",
     approval_required=Requirement.NOT_REQUIRED,
     approval_status=ApprovalStatus.NOT_REQUIRED,
+    commercial_approval_required=Requirement.NOT_REQUIRED,
+    commercial_approval_status=ApprovalStatus.NOT_REQUIRED,
+    stage_clearance=tuple(
+        StageClearance(stage=stage, cleared=True, reason="CC0 1.0 data with no usage condition.")
+        for stage in DeploymentStage
+    ),
     operations=SourceOperations(
+        budget_group="wikimedia",
         rate_limit=RateLimit(
             max_requests=200,
             per_seconds=60,
@@ -109,18 +120,6 @@ WIKIMEDIA_PAGEVIEWS_POLICY = SourcePolicy(
 )
 
 
-@dataclass(frozen=True)
-class RetryConfig:
-    max_attempts: int = 4
-    base_delay_seconds: float = 0.5
-    max_delay_seconds: float = 8.0
-
-    def delay(self, attempt: int, retry_after: float | None = None) -> float:
-        """Exponential backoff for the given 1-based attempt, never above the cap."""
-        backoff = self.base_delay_seconds * 2.0 ** (attempt - 1)
-        return min(self.max_delay_seconds, max(backoff, retry_after or 0.0))
-
-
 class _PageviewItem(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
@@ -142,23 +141,22 @@ def user_agent() -> str:
 
 
 def build_client() -> httpx.Client:
-    return httpx.Client(
-        headers={"User-Agent": user_agent(), "Accept": "application/json"},
-        timeout=httpx.Timeout(10.0, connect=5.0),
-        follow_redirects=False,
-    )
+    return build_http_client(user_agent())
 
 
 class WikimediaPageviewsAdapter:
     def __init__(
         self,
-        client: httpx.Client,
+        client: httpx.Client | LimitedHttpClient,
         retry: RetryConfig | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        self._client = client
-        self._retry = retry or RetryConfig()
-        self._sleep = sleep
+        """Take a limited client, or a bare transport that is wrapped in this source's limits."""
+        if isinstance(client, LimitedHttpClient):
+            self._http = client
+        else:
+            limiter = RateLimiter(WIKIMEDIA_PAGEVIEWS_POLICY.operations, clock=Clock(sleep))
+            self._http = LimitedHttpClient(client, limiter, retry)
 
     @property
     def source(self) -> str:
@@ -190,51 +188,20 @@ class WikimediaPageviewsAdapter:
             f"{quote(identifier.value, safe='')}/daily/"
             f"{window.start:%Y%m%d}/{window.end:%Y%m%d}"
         )
-        response = self._get_with_retries(url, identifier.value)
-        views_by_day = _parse(response.content, window, identifier.value)
+        article = identifier.value
+        response = self._http.request("GET", url, label=article)
+        if response.status_code == httpx.codes.NOT_FOUND:
+            raise SourceError(
+                SourceErrorCode.NOT_FOUND,
+                f"{article}: no pageview data for this article and date range",
+            )
+        if response.status_code != httpx.codes.OK:
+            raise SourceError(SourceErrorCode.HTTP_ERROR, f"{article}: HTTP {response.status_code}")
+        views_by_day = _parse(response.content, window, article)
         return [
             _observation(game, identifier, day, views, observed_at)
             for day, views in sorted(views_by_day.items())
         ]
-
-    def _get_with_retries(self, url: str, article: str) -> httpx.Response:
-        error = SourceError(SourceErrorCode.NETWORK_ERROR, f"{article}: no attempt was made")
-        for attempt in range(1, self._retry.max_attempts + 1):
-            retry_after: float | None = None
-            try:
-                response = self._client.get(url)
-            except httpx.TimeoutException:
-                error = SourceError(SourceErrorCode.TIMEOUT, f"{article}: request timed out")
-            except httpx.TransportError as exc:
-                error = SourceError(
-                    SourceErrorCode.NETWORK_ERROR, f"{article}: {type(exc).__name__}"
-                )
-            else:
-                status = response.status_code
-                if status == httpx.codes.OK:
-                    return response
-                if status == httpx.codes.NOT_FOUND:
-                    raise SourceError(
-                        SourceErrorCode.NOT_FOUND,
-                        f"{article}: no pageview data for this article and date range",
-                    )
-                if status == httpx.codes.TOO_MANY_REQUESTS:
-                    error = SourceError(SourceErrorCode.RATE_LIMITED, f"{article}: rate limited")
-                    retry_after = _retry_after_seconds(response)
-                elif status >= httpx.codes.INTERNAL_SERVER_ERROR:
-                    error = SourceError(SourceErrorCode.HTTP_ERROR, f"{article}: HTTP {status}")
-                else:
-                    raise SourceError(SourceErrorCode.HTTP_ERROR, f"{article}: HTTP {status}")
-            if attempt < self._retry.max_attempts:
-                delay = self._retry.delay(attempt, retry_after)
-                logger.info("%s; retrying in %.1fs (attempt %d)", error.message, delay, attempt)
-                self._sleep(delay)
-        raise error
-
-
-def _retry_after_seconds(response: httpx.Response) -> float | None:
-    header = response.headers.get("Retry-After", "")
-    return float(header) if header.isdigit() else None
 
 
 def _parse(content: bytes, window: TimeWindow, article: str) -> dict[date, int]:

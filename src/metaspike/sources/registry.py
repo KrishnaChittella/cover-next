@@ -5,8 +5,10 @@ from dataclasses import dataclass
 import httpx
 
 from metaspike.domain.metrics import MetricRegistry, default_metrics
-from metaspike.domain.source_policy import SourcePolicy
-from metaspike.sources.base import SourceAdapter
+from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
+from metaspike.sources.base import CatalogueAdapter, SourceAdapter
+from metaspike.sources.http import LimitedHttpClient
+from metaspike.sources.limiter import LimiterPool
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, WikimediaPageviewsAdapter
 
 
@@ -24,27 +26,52 @@ class RegisteredSource:
     policy: SourcePolicy
 
 
+@dataclass(frozen=True)
+class RegisteredCatalogueSource:
+    adapter: CatalogueAdapter
+    policy: SourcePolicy
+
+
 class SourceRegistry:
-    def __init__(self, metrics: MetricRegistry | None = None) -> None:
+    """Sources usable at one deployment stage.
+
+    Registration is where policy is enforced: a source is refused unless its policy
+    grants what its purpose needs and clears the stage this registry serves.
+    """
+
+    def __init__(
+        self,
+        metrics: MetricRegistry | None = None,
+        stage: DeploymentStage = DeploymentStage.PRIVATE_DEVELOPMENT,
+    ) -> None:
         self.metrics = metrics or default_metrics()
+        self.stage = stage
         self._entries: dict[str, RegisteredSource] = {}
+        self._catalogue: dict[str, RegisteredCatalogueSource] = {}
 
     def register(self, adapter: SourceAdapter, policy: SourcePolicy) -> None:
-        if not isinstance(policy, SourcePolicy):
-            raise SourcePolicyError(f"{adapter.source}: a SourcePolicy is required to register")
-        if policy.source != adapter.source:
-            raise SourcePolicyError(
-                f"policy is for '{policy.source}' but the adapter is '{adapter.source}'"
-            )
-        if not policy.collection_permitted:
-            raise SourcePolicyError(
-                f"{adapter.source}: policy does not permit collection "
-                "(derived metrics must be allowed and any required approval granted)"
-            )
-        if adapter.source in self._entries:
-            raise SourcePolicyError(f"{adapter.source}: already registered")
+        """Register a source of demand signals."""
+        self._check_policy(adapter.source, policy, SourcePurpose.DEMAND_SIGNALS)
         self._check_signals(adapter)
         self._entries[adapter.source] = RegisteredSource(adapter=adapter, policy=policy)
+
+    def register_catalogue(self, adapter: CatalogueAdapter, policy: SourcePolicy) -> None:
+        """Register a source of catalogue metadata."""
+        self._check_policy(adapter.source, policy, SourcePurpose.CATALOGUE_METADATA)
+        self._catalogue[adapter.source] = RegisteredCatalogueSource(adapter=adapter, policy=policy)
+
+    def _check_policy(self, source: str, policy: SourcePolicy, purpose: SourcePurpose) -> None:
+        if not isinstance(policy, SourcePolicy):
+            raise SourcePolicyError(f"{source}: a SourcePolicy is required to register")
+        if policy.source != source:
+            raise SourcePolicyError(
+                f"policy is for '{policy.source}' but the adapter is '{source}'"
+            )
+        refusal = policy.registration_refusal(purpose, self.stage)
+        if refusal is not None:
+            raise SourcePolicyError(f"{source}: {refusal}")
+        if source in self._entries or source in self._catalogue:
+            raise SourcePolicyError(f"{source}: already registered")
 
     def _check_signals(self, adapter: SourceAdapter) -> None:
         signals = adapter.signals
@@ -66,11 +93,19 @@ class SourceRegistry:
     def entries(self) -> tuple[RegisteredSource, ...]:
         return tuple(self._entries[source] for source in sorted(self._entries))
 
+    def catalogue_entries(self) -> tuple[RegisteredCatalogueSource, ...]:
+        return tuple(self._catalogue[source] for source in sorted(self._catalogue))
+
     def policy(self, source: str) -> SourcePolicy:
+        if source in self._catalogue:
+            return self._catalogue[source].policy
         return self._entries[source].policy
 
 
-def default_registry(client: httpx.Client) -> SourceRegistry:
+def default_registry(client: httpx.Client, pool: LimiterPool | None = None) -> SourceRegistry:
+    """The demand-signal sources, each behind the limiter for its budget group."""
+    limiters = pool or LimiterPool()
     registry = SourceRegistry()
-    registry.register(WikimediaPageviewsAdapter(client), WIKIMEDIA_PAGEVIEWS_POLICY)
+    http = LimitedHttpClient(client, limiters.for_policy(WIKIMEDIA_PAGEVIEWS_POLICY))
+    registry.register(WikimediaPageviewsAdapter(http), WIKIMEDIA_PAGEVIEWS_POLICY)
     return registry

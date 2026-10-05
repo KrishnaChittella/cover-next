@@ -46,3 +46,15 @@ class SourceAdapter(Protocol):
         a period the source omitted, and never turn a failure into zero activity.
         """
         ...
+
+
+class CatalogueAdapter(Protocol):
+    """A source of catalogue metadata (identity, dates, relationships), not of signals."""
+
+    @property
+    def source(self) -> str: ...
+
+    @property
+    def description(self) -> str:
+        """One public sentence saying exactly what this source provides."""
+        ...

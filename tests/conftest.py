@@ -1,5 +1,6 @@
 """Shared test helpers. Nothing here touches the network."""
 
+import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from metaspike.catalogue.legacy_ids import canonical_id_for_legacy
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.domain.games import CanonicalGame, Catalogue, LifecycleState, SourceIdentifier
 from metaspike.domain.observations import (
@@ -15,11 +17,14 @@ from metaspike.domain.observations import (
     ObservationStatus,
     TimeSeries,
 )
+from metaspike.domain.source_policy import SourceOperations
 from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
 from metaspike.pipeline.collection import window_ending
 from metaspike.pipeline.normalize import build_time_series
 from metaspike.pipeline.run import RunResult, run_pipeline
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
+from metaspike.sources.http import LimitedHttpClient, RetryConfig
+from metaspike.sources.limiter import Clock, QuotaLedger, RateLimiter
 from metaspike.sources.registry import default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import ENGLISH_WIKIPEDIA, SOURCE_ID
@@ -27,7 +32,7 @@ from metaspike.sources.wikimedia import ENGLISH_WIKIPEDIA, SOURCE_ID
 RECORDINGS = Path(__file__).parent / "fixtures" / "wikimedia"
 RECORDED_END = date(2026, 10, 3)
 RUN_TIME = datetime(2026, 10, 4, 6, 0, tzinfo=UTC)
-GAME_ID = "msg_0001"
+GAME_ID = canonical_id_for_legacy("msg_0001")
 
 WIKI_IDENTIFIER = SourceIdentifier(
     source=SOURCE_ID, namespace=ENGLISH_WIKIPEDIA, value="Grand_Theft_Auto_V"
@@ -90,6 +95,11 @@ def run_fixture_pipeline(artifacts_dir: Path, when: datetime = RUN_TIME) -> RunR
         )
 
 
+def make_id(number: int) -> str:
+    """A deterministic, valid canonical id for tests."""
+    return str(uuid.UUID(int=number, version=4))
+
+
 def mock_client(handler: Callable[[httpx.Request], httpx.Response]) -> httpx.Client:
     return httpx.Client(transport=httpx.MockTransport(handler))
 
@@ -102,3 +112,16 @@ def catalogue() -> Catalogue:
 @pytest.fixture
 def artifacts_dir(tmp_path: Path) -> Path:
     return tmp_path / "artifacts"
+
+
+def limited_client(
+    handler: Callable[[httpx.Request], httpx.Response],
+    operations: SourceOperations,
+    sleeps: list[float] | None = None,
+    ledger: QuotaLedger | None = None,
+    retry: RetryConfig | None = None,
+) -> LimitedHttpClient:
+    """A limited client over a mock transport, with virtual time recorded in `sleeps`."""
+    recorded = sleeps if sleeps is not None else []
+    limiter = RateLimiter(operations, ledger=ledger, clock=Clock(recorded.append))
+    return LimitedHttpClient(mock_client(handler), limiter, retry)

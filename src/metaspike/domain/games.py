@@ -7,8 +7,10 @@ from pydantic import Field, StringConstraints, model_validator
 
 from metaspike.domain.model import FrozenModel
 
-# Opaque and stable: a game keeps its id even if its slug or name changes.
-GameId = Annotated[str, StringConstraints(pattern=r"^msg_[0-9]{4}$")]
+# Opaque and stable: a lowercase UUIDv4. A game keeps its id even if its slug, name or
+# source identifiers change. It is never derived from a title or a source's id.
+CANONICAL_ID_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+GameId = Annotated[str, StringConstraints(pattern=CANONICAL_ID_PATTERN)]
 Slug = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 NonEmptyStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 

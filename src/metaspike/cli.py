@@ -4,7 +4,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -28,8 +28,18 @@ from metaspike.publishing.publisher import to_json
 from metaspike.publishing.schemas import export_schemas, stale_schemas
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
 from metaspike.scoring.v0 import ScoreInvariantError
+from metaspike.sources.base import SourceError
+from metaspike.sources.catalogue_sources import (
+    build_igdb,
+    build_steam,
+    default_limiter_pool,
+    register_catalogue_sources,
+)
+from metaspike.sources.igdb import LOOKUP_TABLES
+from metaspike.sources.limiter import LimiterPool
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
 from metaspike.sources.replay import replay_client
+from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY, SteamAppKind
 from metaspike.sources.wikimedia import build_client
 from metaspike.storage.base import StoragePolicyError
 from metaspike.storage.local import LocalObservationStore
@@ -40,6 +50,7 @@ EXIT_INVALID_CATALOGUE = 2  # argparse also uses 2 for invalid usage
 EXIT_COLLECTION_FAILED = 3
 EXIT_INVALID_OUTPUT = 4
 EXIT_SOURCE_POLICY = 5
+EXIT_SOURCE_UNAVAILABLE = 6
 
 DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
@@ -100,6 +111,14 @@ def _parser() -> argparse.ArgumentParser:
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
     check.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     check.set_defaults(handler=_validate_artifacts)
+
+    probe = commands.add_parser(
+        "probe-sources",
+        help="LIVE: one small authenticated call per catalogue source; reports field "
+        "names and vocabularies, never credentials",
+    )
+    probe.add_argument("--source", choices=["steam", "igdb", "all"], default="all")
+    probe.set_defaults(handler=_probe_sources)
 
     schemas = commands.add_parser("export-schemas", help="write JSON Schemas for the artifacts")
     schemas.add_argument("--schemas-dir", type=Path, default=DEFAULT_SCHEMAS_DIR)
@@ -217,6 +236,65 @@ def _export_schemas(args: argparse.Namespace) -> int:
     for path in export_schemas(args.schemas_dir):
         print(f"Wrote {path}")
     return EXIT_OK
+
+
+def _probe_sources(args: argparse.Namespace) -> int:
+    """Explicit live check of the catalogue sources. Never run by tests."""
+    registry = SourceRegistry()
+    pool = default_limiter_pool()
+    outcome = EXIT_OK
+    with build_client() as client:
+        probes = {"steam": _probe_steam, "igdb": _probe_igdb}
+        for name in probes if args.source == "all" else [args.source]:
+            try:
+                probes[name](client, pool, registry)
+            except SourceError as error:
+                print(f"{name}: {error.code.value}: {error.message}")
+                outcome = EXIT_SOURCE_UNAVAILABLE
+    return outcome
+
+
+def _probe_steam(client: httpx.Client, pool: LimiterPool, registry: SourceRegistry) -> None:
+    steam = build_steam(client, pool)
+    register_catalogue_sources(registry, steam=steam)
+    first = steam.fetch_page(SteamAppKind.GAMES, max_results=5)
+    print("steam: a normal Web API key was accepted on api.steampowered.com")
+    print(f"steam: envelope fields observed: {sorted(first.observed_envelope_fields)}")
+    print(f"steam: app fields observed: {sorted(first.observed_app_fields)}")
+    print(
+        f"steam: games page of 5 -> {first.apps_returned} apps, "
+        f"{first.apps_without_a_name} without a name, has_more={first.has_more}, "
+        f"next_after_appid={first.next_after_appid}"
+    )
+    second = steam.fetch_page(SteamAppKind.GAMES, after_appid=first.next_after_appid, max_results=5)
+    overlap = {r.key for r in first.records} & {r.key for r in second.records}
+    print(f"steam: continuation page -> {second.apps_returned} apps, {len(overlap)} repeated")
+    recent = steam.fetch_page(
+        SteamAppKind.GAMES, modified_since=_now() - timedelta(days=1), max_results=5
+    )
+    print(f"steam: modified in the last day (page of 5) -> {recent.apps_returned} apps")
+    dlc = steam.fetch_page(SteamAppKind.DLC, max_results=5)
+    print(f"steam: dlc-only page of 5 -> {dlc.apps_returned} apps")
+    print(
+        f"steam: quota remaining today: {pool.for_policy(STEAM_CATALOGUE_POLICY).quota_remaining()}"
+    )
+
+
+def _probe_igdb(client: httpx.Client, pool: LimiterPool, registry: SourceRegistry) -> None:
+    igdb = build_igdb(client, pool)
+    register_catalogue_sources(registry, igdb=igdb)
+    for table in LOOKUP_TABLES:
+        print(f"igdb: {table}: {list(igdb.vocabulary(table))}")
+    sample = igdb.search_games("Grand Theft Auto V", limit=3)
+    print(f"igdb: search returned {len(sample)} records")
+    for record in sample:
+        populated = sorted(
+            name for name, value in record if value not in (None, (), "") and name != "key"
+        )
+        print(
+            f"igdb: {record.key.source_id} {record.title!r} type={record.product_type.value} "
+            f"category={record.source_category!r} populated={populated}"
+        )
 
 
 def _print_collection(report: CollectionReport) -> None:

@@ -35,7 +35,7 @@ from metaspike.pipeline.normalize import build_time_series
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
 from metaspike.sources.registry import SourceRegistrationError, SourceRegistry
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, WikimediaPageviewsAdapter
-from tests.conftest import GAME_ID, RECORDED_END, RUN_TIME, series_of, spiking
+from tests.conftest import GAME_ID, RECORDED_END, RUN_TIME, make_id, series_of, spiking
 
 PLAYERS = MetricDefinition(
     metric_id="concurrent_players",
@@ -328,7 +328,7 @@ def test_signal_invariants() -> None:
     with pytest.raises(ValueError, match="same signal twice"):
         EntitySignals(canonical_game_id=GAME_ID, signals=twice)
     with pytest.raises(ValueError, match="belong to the entity"):
-        EntitySignals(canonical_game_id="msg_0099", signals=(v0_signal(spiking()),))
+        EntitySignals(canonical_game_id=make_id(99), signals=(v0_signal(spiking()),))
 
 
 def test_assessment_scores_from_its_input_signal_and_ignores_the_others() -> None:

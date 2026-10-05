@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from metaspike import cli
+from metaspike.catalogue.legacy_ids import canonical_id_for_legacy
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.domain.signals import SignalKey
 from metaspike.domain.source_policy import (
@@ -418,6 +419,9 @@ def test_cli_can_persist_a_run_to_the_local_store(tmp_path: Path) -> None:
     assert cli.main(args) == cli.EXIT_OK
 
     files = sorted(p.name for p in (tmp_path / "store").rglob("*.jsonl"))
-    assert len(files) == 6 and "msg_0011.jsonl" in files
-    stored = tmp_path / "store" / "wikimedia_pageviews" / "pageviews" / "daily" / "msg_0011.jsonl"
+    minecraft = canonical_id_for_legacy("msg_0011")
+    assert len(files) == 6 and f"{minecraft}.jsonl" in files
+    stored = (
+        tmp_path / "store" / "wikimedia_pageviews" / "pageviews" / "daily" / f"{minecraft}.jsonl"
+    )
     assert len(stored.read_text().splitlines()) == 90  # the second run added nothing

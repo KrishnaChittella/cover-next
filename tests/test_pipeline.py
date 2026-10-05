@@ -10,6 +10,7 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from metaspike import cli
+from metaspike.catalogue.legacy_ids import canonical_id_for_legacy
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.pipeline.collection import window_ending
 from metaspike.pipeline.run import CollectionFailedError, run_pipeline
@@ -150,12 +151,15 @@ def test_game_artifact_carries_identity_features_history_and_relationships(
     recorded = load(RECORDINGS / "Grand_Theft_Auto_VI.json")["items"]
     game = load(artifacts_dir / "games" / "gta-vi.json")
 
-    assert game["canonical_game_id"] == "msg_0004" and game["name"] == "Grand Theft Auto VI"
+    assert (
+        game["canonical_game_id"] == canonical_id_for_legacy("msg_0004")
+        and game["name"] == "Grand Theft Auto VI"
+    )
     assert game["lifecycle_state"] == "PRE_RELEASE"
     assert game["relationships"] == [
         {
             "relationship_type": "SEQUEL",
-            "parent_game_id": "msg_0001",
+            "parent_game_id": canonical_id_for_legacy("msg_0001"),
             "parent_slug": "gta-v",
             "parent_name": "Grand Theft Auto V",
         }

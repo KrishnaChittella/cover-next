@@ -32,6 +32,7 @@ from metaspike.publishing.artifacts import (
     ScoreView,
     SourceOperationsView,
     SourcePolicyView,
+    StageClearanceView,
     TermView,
 )
 from metaspike.scoring.v0 import TermDefinition
@@ -103,6 +104,9 @@ def policy_view(policy: SourcePolicy) -> SourcePolicyView:
             SourceOperationsView,
             rate_limit=_project(operations.rate_limit, RateLimitView),
             quota=None if operations.quota is None else _project(operations.quota, QuotaView),
+        ),
+        stage_clearance=tuple(
+            _project(clearance, StageClearanceView) for clearance in policy.stage_clearance
         ),
         display=_project(policy.display, DisplayRulesView),
         field_rules=tuple(_project(rule, FieldRuleView) for rule in policy.field_rules),

@@ -12,6 +12,11 @@ unmapped instead of borrowing another page's traffic.
 
 from pydantic import ValidationError
 
+from metaspike.catalogue.legacy_ids import (
+    LegacyMappingError,
+    canonical_id_for_legacy,
+    verify_legacy_mapping,
+)
 from metaspike.domain.games import (
     CanonicalGame,
     Catalogue,
@@ -27,11 +32,16 @@ class CatalogueError(Exception):
     """The catalogue violates a domain rule."""
 
 
+def _id(legacy_id: str) -> str:
+    """The canonical id of a seed entity, named here by the legacy id it replaced."""
+    return canonical_id_for_legacy(legacy_id)
+
+
 def _wiki(article: str) -> tuple[SourceIdentifier, ...]:
     return (SourceIdentifier(source=SOURCE_ID, namespace=ENGLISH_WIKIPEDIA, value=article),)
 
 
-GTA_V = "msg_0001"
+GTA_V = _id("msg_0001")
 
 _SEED_GAMES: tuple[CanonicalGame, ...] = (
     CanonicalGame(
@@ -43,7 +53,7 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.EVERGREEN,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0002",
+        canonical_game_id=_id("msg_0002"),
         slug="gta-online",
         name="Grand Theft Auto Online",
         aliases=("GTA Online", "GTAO"),
@@ -56,7 +66,7 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0003",
+        canonical_game_id=_id("msg_0003"),
         slug="fivem",
         name="FiveM",
         aliases=("Five M", "FiveM RP"),
@@ -68,7 +78,7 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0004",
+        canonical_game_id=_id("msg_0004"),
         slug="gta-vi",
         name="Grand Theft Auto VI",
         aliases=("GTA VI", "GTA 6"),
@@ -79,7 +89,7 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.PRE_RELEASE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0005",
+        canonical_game_id=_id("msg_0005"),
         slug="escape-from-tarkov",
         name="Escape from Tarkov",
         aliases=("Tarkov", "EFT"),
@@ -87,14 +97,14 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0006",
+        canonical_game_id=_id("msg_0006"),
         slug="star-citizen",
         name="Star Citizen",
         source_identifiers=_wiki("Star_Citizen"),
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0007",
+        canonical_game_id=_id("msg_0007"),
         slug="no-mans-sky",
         name="No Man's Sky",
         aliases=("NMS",),
@@ -102,7 +112,7 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0008",
+        canonical_game_id=_id("msg_0008"),
         slug="counter-strike-2",
         name="Counter-Strike 2",
         aliases=("CS2",),
@@ -110,35 +120,35 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0009",
+        canonical_game_id=_id("msg_0009"),
         slug="dota-2",
         name="Dota 2",
         source_identifiers=_wiki("Dota_2"),
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0010",
+        canonical_game_id=_id("msg_0010"),
         slug="fortnite",
         name="Fortnite",
         source_identifiers=_wiki("Fortnite"),
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0011",
+        canonical_game_id=_id("msg_0011"),
         slug="minecraft",
         name="Minecraft",
         source_identifiers=_wiki("Minecraft"),
         lifecycle_state=LifecycleState.EVERGREEN,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0012",
+        canonical_game_id=_id("msg_0012"),
         slug="elden-ring",
         name="Elden Ring",
         source_identifiers=_wiki("Elden_Ring"),
         lifecycle_state=LifecycleState.RELEASED,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0013",
+        canonical_game_id=_id("msg_0013"),
         slug="baldurs-gate-3",
         name="Baldur's Gate 3",
         aliases=("BG3",),
@@ -146,14 +156,14 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
         lifecycle_state=LifecycleState.RELEASED,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0014",
+        canonical_game_id=_id("msg_0014"),
         slug="helldivers-2",
         name="Helldivers 2",
         source_identifiers=_wiki("Helldivers_2"),
         lifecycle_state=LifecycleState.LIVE_SERVICE,
     ),
     CanonicalGame(
-        canonical_game_id="msg_0015",
+        canonical_game_id=_id("msg_0015"),
         slug="rust",
         name="Rust",
         source_identifiers=_wiki("Rust_(video_game)"),
@@ -171,4 +181,8 @@ def build_catalogue(games: tuple[CanonicalGame, ...]) -> Catalogue:
 
 
 def load_seed_catalogue() -> Catalogue:
+    try:
+        verify_legacy_mapping()
+    except LegacyMappingError as error:
+        raise CatalogueError(str(error)) from None
     return build_catalogue(_SEED_GAMES)

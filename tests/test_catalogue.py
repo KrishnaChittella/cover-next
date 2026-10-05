@@ -9,6 +9,7 @@ from metaspike.domain.games import (
     RelationshipType,
 )
 from metaspike.sources.wikimedia import SOURCE_ID
+from tests.conftest import make_id
 
 
 def game(number: int, slug: str, parent: int | None = None) -> CanonicalGame:
@@ -16,11 +17,11 @@ def game(number: int, slug: str, parent: int | None = None) -> CanonicalGame:
     if parent is not None:
         relationships = (
             GameRelationship(
-                parent_game_id=f"msg_{parent:04d}", relationship_type=RelationshipType.SEQUEL
+                parent_game_id=make_id(parent), relationship_type=RelationshipType.SEQUEL
             ),
         )
     return CanonicalGame(
-        canonical_game_id=f"msg_{number:04d}",
+        canonical_game_id=make_id(number),
         slug=slug,
         name=slug.title(),
         relationships=relationships,
@@ -104,7 +105,7 @@ def test_identifiers_must_be_well_formed() -> None:
         )
     with pytest.raises(ValueError):
         CanonicalGame(
-            canonical_game_id="msg_0001",
+            canonical_game_id=make_id(1),
             slug="GTA V",
             name="GTA V",
             lifecycle_state=LifecycleState.RELEASED,

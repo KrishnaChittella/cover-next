@@ -6,6 +6,7 @@ It exists for development and tests. The warehouse implementation will satisfy t
 same `ObservationStore` contract.
 """
 
+import json
 import re
 from collections.abc import Callable
 from datetime import datetime
@@ -13,6 +14,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from metaspike.domain.identity import IdentityLedger
 from metaspike.domain.observations import Observation, TimeSeries
 from metaspike.domain.signals import SignalKey
 from metaspike.domain.source_policy import SourcePolicy
@@ -24,9 +26,16 @@ _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class LocalObservationStore:
-    def __init__(self, root: Path, policy_for: Callable[[str], SourcePolicy]) -> None:
+    def __init__(
+        self,
+        root: Path,
+        policy_for: Callable[[str], SourcePolicy],
+        identity: IdentityLedger | None = None,
+    ) -> None:
         self._root = root
         self._policy_for = policy_for
+        # Lets history written under a retired id be read under the id that replaced it.
+        self._identity = identity or IdentityLedger()
 
     def write(self, series: TimeSeries) -> int:
         policy = self._policy_for(series.source)
@@ -36,7 +45,9 @@ class LocalObservationStore:
             )
         key = SignalKey(source=series.source, metric=series.metric, granularity=series.granularity)
         path = self._path(series.canonical_game_id, key)
-        latest = {record.period_start: record for record in self._records(path)}
+        latest = {
+            record.period_start: record for record in self._records(path, series.canonical_game_id)
+        }
         fresh = [
             point
             for point in series.points
@@ -54,11 +65,15 @@ class LocalObservationStore:
     def read(
         self, canonical_game_id: str, key: SignalKey, window: TimeWindow, as_of: datetime
     ) -> TimeSeries:
+        canonical = self._identity.resolve(canonical_game_id, as_of)
+        # Oldest identity first, so a later write under the current id wins.
+        stored_under = (*self._identity.aliases_of(canonical, as_of), canonical)
         known: dict[datetime, Observation] = {}
-        for record in self._records(self._path(canonical_game_id, key)):
-            if record.observed_at <= as_of and window.contains(record.period_start):
-                known[record.period_start] = record  # file order is write order: last wins
-        return build_time_series(canonical_game_id, key, window, list(known.values()), as_of)
+        for identifier in stored_under:
+            for record in self._records(self._path(identifier, key), canonical):
+                if record.observed_at <= as_of and window.contains(record.period_start):
+                    known[record.period_start] = record  # write order: last version wins
+        return build_time_series(canonical, key, window, list(known.values()), as_of)
 
     def signals(self, canonical_game_id: str) -> tuple[SignalKey, ...]:
         keys = [
@@ -80,14 +95,23 @@ class LocalObservationStore:
             / f"{_segment(canonical_game_id)}.jsonl"
         )
 
-    def _records(self, path: Path) -> list[Observation]:
+    def _records(self, path: Path, canonical_game_id: str) -> list[Observation]:
+        """Stored observations, attributed to the canonical id they are being read for.
+
+        A file written under a retired id still carries that id on every line; it is
+        replaced on the way in, which is what keeps old history reachable.
+        """
         if not path.is_file():
             return []
         records = []
         for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
             try:
-                records.append(Observation.model_validate_json(line))
-            except ValidationError:
+                stored = json.loads(line)
+                if not isinstance(stored, dict):
+                    raise ValueError("not an object")
+                stored["canonical_game_id"] = canonical_game_id
+                records.append(Observation.model_validate(stored))
+            except (ValidationError, ValueError):
                 raise StorageCorruptionError(
                     f"{path.name}: line {number} is not a valid observation"
                 ) from None
