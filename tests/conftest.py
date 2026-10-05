@@ -10,16 +10,16 @@ import pytest
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.domain.games import CanonicalGame, Catalogue, LifecycleState, SourceIdentifier
 from metaspike.domain.observations import (
-    DailySeries,
     Freshness,
-    Metric,
     Observation,
     ObservationStatus,
+    TimeSeries,
 )
+from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
 from metaspike.pipeline.collection import window_ending
-from metaspike.pipeline.normalize import build_daily_series
+from metaspike.pipeline.normalize import build_time_series
 from metaspike.pipeline.run import RunResult, run_pipeline
-from metaspike.sources.base import FetchWindow
+from metaspike.scoring.v0 import V0_INPUT_SIGNAL
 from metaspike.sources.registry import default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import ENGLISH_WIKIPEDIA, SOURCE_ID
@@ -42,12 +42,13 @@ GAME = CanonicalGame(
 
 
 def observation(day: date, value: float, observed_at: datetime = RUN_TIME) -> Observation:
-    period_end = datetime(day.year, day.month, day.day, tzinfo=UTC) + timedelta(days=1)
+    period_end = start_of_day(day) + timedelta(days=1)
     return Observation(
         canonical_game_id=GAME_ID,
         source=SOURCE_ID,
-        metric=Metric.DAILY_PAGEVIEWS,
-        period_start=day,
+        metric=V0_INPUT_SIGNAL.metric,
+        granularity=Granularity.DAILY,
+        period_start=start_of_day(day),
         value=value,
         status=ObservationStatus.OBSERVED,
         observed_at=observed_at,
@@ -55,17 +56,15 @@ def observation(day: date, value: float, observed_at: datetime = RUN_TIME) -> Ob
     )
 
 
-def series_of(values: Sequence[float | None], end: date = RECORDED_END) -> DailySeries:
+def series_of(values: Sequence[float | None], end: date = RECORDED_END) -> TimeSeries:
     """A daily series ending on `end`; None entries become explicit missing days."""
-    window = FetchWindow(start=end - timedelta(days=len(values) - 1), end=end)
+    window = TimeWindow.of_days(end - timedelta(days=len(values) - 1), end)
     observations = [
         observation(window.start + timedelta(days=offset), value)
         for offset, value in enumerate(values)
         if value is not None
     ]
-    return build_daily_series(
-        GAME_ID, SOURCE_ID, Metric.DAILY_PAGEVIEWS, window, observations, RUN_TIME
-    )
+    return build_time_series(GAME_ID, V0_INPUT_SIGNAL, window, observations, RUN_TIME)
 
 
 def steady(days: int = 90) -> list[float | None]:

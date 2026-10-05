@@ -1,0 +1,671 @@
+{
+ "_comment": "v0 outputs for tests/fixtures/wikimedia as produced by commit 2c054b1 (window ending 2026-10-03). Never regenerate from newer code: this file is the parity reference.",
+ "games": {
+  "baldurs-gate-3": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "counter-strike-2": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "dota-2": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "elden-ring": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "escape-from-tarkov": {
+   "rank": 3,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 0.0,
+    "components": {
+     "significance": 0.0,
+     "magnitude": 0.0,
+     "anomaly": 0.0,
+     "momentum": 0.0
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 539.0,
+    "avg_3d": 534.6667,
+    "avg_7d": 543.2857,
+    "prior_avg_3d": 564.3333,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 582.75,
+    "baseline_median_28d": 574.5,
+    "baseline_std_28d": 51.1017,
+    "baseline_mad_28d": 34.5,
+    "lift_ratio": 0.9307,
+    "lift_pct": -6.9336,
+    "lift_7d_pct": -5.4333,
+    "velocity_ratio": 0.9474,
+    "velocity_pct": -5.2569,
+    "consecutive_rising_days": 1,
+    "z_score": -0.8561,
+    "robust_z_score": -0.694,
+    "robust_scale_method": "mad",
+    "history_percentile": 24.1573,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574.",
+    "reasons": [
+     {
+      "code": "lift_normal",
+      "text": "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  },
+  "fivem": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: no source currently covers this game.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: no source currently covers this game."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: no source currently covers this game."
+    ]
+   }
+  },
+  "fortnite": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "gta-online": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "gta-v": {
+   "rank": 4,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 0.0,
+    "components": {
+     "significance": 0.0,
+     "magnitude": 0.0,
+     "anomaly": 0.0,
+     "momentum": 0.0
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 6140.0,
+    "avg_3d": 5984.6667,
+    "avg_7d": 6463.5714,
+    "prior_avg_3d": 6405.6667,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 10350.1429,
+    "baseline_median_28d": 9307.5,
+    "baseline_std_28d": 3145.5531,
+    "baseline_mad_28d": 1235.5,
+    "lift_ratio": 0.643,
+    "lift_pct": -35.7006,
+    "lift_7d_pct": -30.5552,
+    "velocity_ratio": 0.9343,
+    "velocity_pct": -6.5723,
+    "consecutive_rising_days": 2,
+    "z_score": -1.3384,
+    "robust_z_score": -1.7292,
+    "robust_scale_method": "mad",
+    "history_percentile": 5.618,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is 36% below its 28-day baseline: a 3-day average of 5,985 daily views against a typical 9,308.",
+    "reasons": [
+     {
+      "code": "lift_depressed",
+      "text": "Attention is 36% below its 28-day baseline: a 3-day average of 5,985 daily views against a typical 9,308."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is 36% below its 28-day baseline: a 3-day average of 5,985 daily views against a typical 9,308.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  },
+  "gta-vi": {
+   "rank": 2,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 2.3,
+    "components": {
+     "significance": 0.0,
+     "magnitude": 0.0,
+     "anomaly": 0.0,
+     "momentum": 0.0755
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 10524.0,
+    "avg_3d": 10552.0,
+    "avg_7d": 10219.2857,
+    "prior_avg_3d": 10014.0,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 15746.0714,
+    "baseline_median_28d": 12400.5,
+    "baseline_std_28d": 8139.8694,
+    "baseline_mad_28d": 1892.5,
+    "lift_ratio": 0.8509,
+    "lift_pct": -14.9067,
+    "lift_7d_pct": -17.5897,
+    "velocity_ratio": 1.0537,
+    "velocity_pct": 5.3725,
+    "consecutive_rising_days": 0,
+    "z_score": -0.6415,
+    "robust_z_score": -0.6688,
+    "robust_scale_method": "mad",
+    "history_percentile": 55.0562,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400.",
+    "reasons": [
+     {
+      "code": "lift_normal",
+      "text": "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  },
+  "helldivers-2": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "minecraft": {
+   "rank": 1,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 12.2,
+    "components": {
+     "significance": 0.1268,
+     "magnitude": 0.142,
+     "anomaly": 0.1342,
+     "momentum": 0.0945
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 6013.0,
+    "avg_3d": 7415.6667,
+    "avg_7d": 7253.5714,
+    "prior_avg_3d": 6945.6667,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 5625.3929,
+    "baseline_median_28d": 5520.0,
+    "baseline_std_28d": 597.3485,
+    "baseline_mad_28d": 374.5,
+    "lift_ratio": 1.3434,
+    "lift_pct": 34.3418,
+    "lift_7d_pct": 31.4053,
+    "velocity_ratio": 1.0677,
+    "velocity_pct": 6.7668,
+    "consecutive_rising_days": 0,
+    "z_score": 0.6489,
+    "robust_z_score": 0.8879,
+    "robust_scale_method": "mad",
+    "history_percentile": 85.3933,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is 1.3× its 28-day baseline: a 3-day average of 7,416 daily views against a typical 5,520.",
+    "reasons": [
+     {
+      "code": "lift_elevated",
+      "text": "Attention is 1.3× its 28-day baseline: a 3-day average of 7,416 daily views against a typical 5,520."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is 1.3× its 28-day baseline: a 3-day average of 7,416 daily views against a typical 5,520.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  },
+  "no-mans-sky": {
+   "rank": 5,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 0.0,
+    "components": {
+     "significance": 0.0,
+     "magnitude": 0.0,
+     "anomaly": 0.0,
+     "momentum": 0.0
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 723.0,
+    "avg_3d": 717.6667,
+    "avg_7d": 750.4286,
+    "prior_avg_3d": 752.0,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 1109.1071,
+    "baseline_median_28d": 909.5,
+    "baseline_std_28d": 552.3089,
+    "baseline_mad_28d": 249.0,
+    "lift_ratio": 0.7891,
+    "lift_pct": -21.0922,
+    "lift_7d_pct": -17.49,
+    "velocity_ratio": 0.9543,
+    "velocity_pct": -4.5656,
+    "consecutive_rising_days": 1,
+    "z_score": -0.6991,
+    "robust_z_score": -0.5052,
+    "robust_scale_method": "mad",
+    "history_percentile": 42.6966,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910.",
+    "reasons": [
+     {
+      "code": "lift_depressed",
+      "text": "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  },
+  "rust": {
+   "rank": null,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+   },
+   "confidence": null,
+   "features": null,
+   "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+     {
+      "code": "no_data",
+      "text": "Not scored: data collection failed for this game in the latest run."
+     }
+    ],
+    "top_reasons": [
+     "Not scored: data collection failed for this game in the latest run."
+    ]
+   }
+  },
+  "star-citizen": {
+   "rank": 6,
+   "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 0.0,
+    "components": {
+     "significance": 0.0,
+     "magnitude": 0.0,
+     "anomaly": 0.0,
+     "momentum": 0.0
+    },
+    "unscored_reason": null
+   },
+   "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+     "source_ceiling": 0.6,
+     "freshness": 1.0,
+     "history": 1.0,
+     "completeness": 1.0,
+     "samples": 1.0
+    }
+   },
+   "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 856.0,
+    "avg_3d": 860.3333,
+    "avg_7d": 962.5714,
+    "prior_avg_3d": 1033.3333,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 1305.1071,
+    "baseline_median_28d": 1194.0,
+    "baseline_std_28d": 457.8857,
+    "baseline_mad_28d": 182.0,
+    "lift_ratio": 0.7205,
+    "lift_pct": -27.9453,
+    "lift_7d_pct": -19.3826,
+    "velocity_ratio": 0.8326,
+    "velocity_pct": -16.7419,
+    "consecutive_rising_days": 0,
+    "z_score": -0.9808,
+    "robust_z_score": -1.2526,
+    "robust_scale_method": "mad",
+    "history_percentile": 8.9888,
+    "percentile_samples": 89,
+    "flags": []
+   },
+   "explanation": {
+    "summary": "Attention is 28% below its 28-day baseline: a 3-day average of 860 daily views against a typical 1,194.",
+    "reasons": [
+     {
+      "code": "lift_depressed",
+      "text": "Attention is 28% below its 28-day baseline: a 3-day average of 860 daily views against a typical 1,194."
+     },
+     {
+      "code": "single_source",
+      "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+     }
+    ],
+    "top_reasons": [
+     "Attention is 28% below its 28-day baseline: a 3-day average of 860 daily views against a typical 1,194.",
+     "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+   }
+  }
+ }
+}

@@ -1,5 +1,8 @@
 """Attention features from a DAILY series, each game measured against its own normal.
 
+These definitions are specific to daily granularity; an intraday series is rejected
+rather than silently read as if each period were a day.
+
 All windows are anchored on `t`, the latest day that has an observation. Missing
 days are never treated as zero: they are left out of every window, and a window
 with too few observed days yields no value (None) rather than a guess.
@@ -14,12 +17,13 @@ progress cannot inflate the "normal" it is being compared against.
 """
 
 import statistics
-from datetime import date, timedelta
+from datetime import date
 from enum import StrEnum
 from typing import Literal
 
 from metaspike.domain.model import FrozenModel
-from metaspike.domain.observations import DailySeries
+from metaspike.domain.observations import TimeSeries
+from metaspike.domain.timeseries import Granularity
 
 SHORT_WINDOW_DAYS = 3
 LONG_WINDOW_DAYS = 7
@@ -185,7 +189,10 @@ FEATURE_DEFINITIONS: tuple[FeatureDefinition, ...] = (
     FeatureDefinition(
         name="staleness_days",
         unit="days",
-        definition="Days between the last day of the requested window and t.",
+        definition=(
+            "Days by which t trails the latest day the source was due to have published, "
+            "given its expected publication lag. Never negative."
+        ),
         valid_when="at least one observed day in the window",
     ),
     FeatureDefinition(
@@ -197,7 +204,11 @@ FEATURE_DEFINITIONS: tuple[FeatureDefinition, ...] = (
 )
 
 
-def compute_attention_features(series: DailySeries) -> AttentionFeatures:
+def compute_attention_features(series: TimeSeries) -> AttentionFeatures:
+    if series.granularity is not Granularity.DAILY:
+        raise ValueError(
+            f"attention features are defined for daily series, not {series.granularity.value}"
+        )
     values = series.values()
     observed = [index for index, value in enumerate(values) if value is not None]
     if not observed:
@@ -263,7 +274,8 @@ def compute_attention_features(series: DailySeries) -> AttentionFeatures:
 
     span = t - first + 1
     missing = span - len(observed)
-    staleness = len(values) - 1 - t
+    due = Granularity.DAILY.periods_between(series.period_start_at(t), series.latest_due)
+    staleness = max(0, due)
     if missing:
         flags.append(FeatureFlag.HAS_MISSING_DAYS)
     if staleness:
@@ -271,7 +283,7 @@ def compute_attention_features(series: DailySeries) -> AttentionFeatures:
 
     # AttentionFeatures rejects NaN and Infinity, so a non-finite value fails here.
     return AttentionFeatures(
-        as_of_day=series.window_start + timedelta(days=t),
+        as_of_day=series.points[t].period_day,
         window_days=len(values),
         observed_days=len(observed),
         history_span_days=span,

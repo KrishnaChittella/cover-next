@@ -44,6 +44,12 @@
       "title": "Content Hash",
       "type": "string"
     },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
+    },
     "game_count": {
       "minimum": 0,
       "title": "Game Count",
@@ -80,6 +86,7 @@
   },
   "required": [
     "schema_version",
+    "contract_status",
     "generated_at",
     "run_id",
     "score_version",

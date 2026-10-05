@@ -6,13 +6,15 @@ from datetime import datetime
 from pathlib import Path
 
 from metaspike.domain.games import Catalogue
+from metaspike.domain.signals import CollectionStatus
+from metaspike.domain.timeseries import TimeWindow
 from metaspike.pipeline.assess import assess
 from metaspike.pipeline.collection import CollectionReport, collect
 from metaspike.publishing.artifacts import ArtifactBundle
 from metaspike.publishing.build import build_bundle
 from metaspike.publishing.publisher import publish
-from metaspike.sources.base import FetchWindow
 from metaspike.sources.registry import SourceRegistry
+from metaspike.storage.base import ObservationStore
 
 
 class CollectionFailedError(Exception):
@@ -47,9 +49,22 @@ def build_and_publish(
 def run_pipeline(
     catalogue: Catalogue,
     registry: SourceRegistry,
-    window: FetchWindow,
+    window: TimeWindow,
     artifacts_dir: Path,
     clock: Callable[[], datetime],
+    store: ObservationStore | None = None,
 ) -> RunResult:
     report = collect(catalogue, registry, window, observed_at=clock(), clock=clock)
+    if store is not None:
+        store_report(report, store)
     return build_and_publish(catalogue, report, registry, artifacts_dir, generated_at=clock())
+
+
+def store_report(report: CollectionReport, store: ObservationStore) -> int:
+    """Persist every collected series. Returns how many new observation versions were kept."""
+    return sum(
+        store.write(outcome.series)
+        for run in report.runs
+        for outcome in run.with_status(CollectionStatus.COLLECTED)
+        if outcome.series is not None
+    )

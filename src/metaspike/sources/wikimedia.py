@@ -8,7 +8,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime
 from typing import Literal
 from urllib.parse import quote
 
@@ -17,9 +17,22 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from metaspike import __version__
 from metaspike.domain.games import CanonicalGame, SourceIdentifier
-from metaspike.domain.observations import Freshness, Metric, Observation, ObservationStatus
-from metaspike.domain.source_policy import ApprovalStatus, Permission, Requirement, SourcePolicy
-from metaspike.sources.base import FetchWindow, SourceError, SourceErrorCode
+from metaspike.domain.metrics import PAGEVIEWS
+from metaspike.domain.observations import Freshness, Observation, ObservationStatus
+from metaspike.domain.signals import SignalSpec, SourceErrorCode
+from metaspike.domain.source_policy import (
+    ApprovalStatus,
+    DisplayRules,
+    FieldRule,
+    LimitBasis,
+    Permission,
+    RateLimit,
+    Requirement,
+    SourceOperations,
+    SourcePolicy,
+)
+from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
+from metaspike.sources.base import SourceError
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +41,7 @@ ENGLISH_WIKIPEDIA = "en.wikipedia.org"
 BASE_URL = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article"
 CONTACT_ENV_VAR = "METASPIKE_CONTACT"
 DEFAULT_CONTACT = "https://krishnachittella.dev"
+DAILY_PAGEVIEWS = SignalSpec(metric=PAGEVIEWS.metric_id, granularity=Granularity.DAILY)
 
 # Assumptions recorded from the official documentation on the review date. The data
 # licence (CC0 1.0) is stated by the Analytics API access policy; CC0 waives the
@@ -45,16 +59,52 @@ WIKIMEDIA_PAGEVIEWS_POLICY = SourcePolicy(
     attribution_text="Pageview data from the Wikimedia Analytics API (CC0 1.0).",
     approval_required=Requirement.NOT_REQUIRED,
     approval_status=ApprovalStatus.NOT_REQUIRED,
+    operations=SourceOperations(
+        rate_limit=RateLimit(
+            max_requests=200,
+            per_seconds=60,
+            max_concurrency=1,
+            basis=LimitBasis.DOCUMENTED,
+            note=(
+                "200 requests/minute for unauthenticated clients with a compliant "
+                "User-Agent. The Analytics API asks clients to wait for each request to "
+                "finish before sending another, hence a concurrency of 1."
+            ),
+        ),
+        quota=None,
+        cache_max_age_seconds=None,
+        expected_publication_lag_seconds=24 * 60 * 60,
+        publication_lag_basis=LimitBasis.OBSERVED,
+    ),
+    display=DisplayRules(
+        link_back_required=Requirement.NOT_REQUIRED,
+        branding_required=Requirement.NOT_REQUIRED,
+        note=(
+            "CC0 data carries no display condition. Wikimedia marks must not be used in a "
+            "way that implies endorsement."
+        ),
+    ),
+    field_rules=(
+        FieldRule(
+            field=PAGEVIEWS.metric_id,
+            storage_allowed=Permission.ALLOWED,
+            display_allowed=Permission.ALLOWED,
+            note="Aggregate daily counts; no personal data.",
+        ),
+    ),
     reviewed_at=date(2026, 10, 4),
     references=(
         "https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/documentation/access-policy.html",
         "https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy",
         "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+        "https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits",
     ),
     notes=(
         "API data is published under CC0 1.0. Use is subject to the Wikimedia Terms of Use: "
         "a descriptive User-Agent with contact information is mandatory, requests must be "
-        "made one at a time, and clients that endanger service stability may be blocked."
+        "made one at a time, and clients that endanger service stability may be blocked. "
+        "No publication schedule is documented for daily data: one hour after a day ended "
+        "it was not yet available, so a 24-hour lag is allowed for until measured."
     ),
 )
 
@@ -115,8 +165,8 @@ class WikimediaPageviewsAdapter:
         return SOURCE_ID
 
     @property
-    def metric(self) -> Metric:
-        return Metric.DAILY_PAGEVIEWS
+    def signals(self) -> tuple[SignalSpec, ...]:
+        return (DAILY_PAGEVIEWS,)
 
     @property
     def description(self) -> str:
@@ -129,9 +179,12 @@ class WikimediaPageviewsAdapter:
         self,
         game: CanonicalGame,
         identifier: SourceIdentifier,
-        window: FetchWindow,
+        signal: SignalSpec,
+        window: TimeWindow,
         observed_at: datetime,
     ) -> list[Observation]:
+        if signal != DAILY_PAGEVIEWS:
+            raise ValueError(f"{SOURCE_ID} does not provide {signal.metric}/{signal.granularity}")
         url = (
             f"{BASE_URL}/{identifier.namespace}/all-access/user/"
             f"{quote(identifier.value, safe='')}/daily/"
@@ -184,7 +237,7 @@ def _retry_after_seconds(response: httpx.Response) -> float | None:
     return float(header) if header.isdigit() else None
 
 
-def _parse(content: bytes, window: FetchWindow, article: str) -> dict[date, int]:
+def _parse(content: bytes, window: TimeWindow, article: str) -> dict[date, int]:
     try:
         payload = _PageviewResponse.model_validate_json(content)
     except ValidationError as exc:
@@ -201,7 +254,7 @@ def _parse(content: bytes, window: FetchWindow, article: str) -> dict[date, int]
             raise SourceError(
                 SourceErrorCode.INVALID_RESPONSE, f"{article}: unparseable timestamp"
             ) from None
-        if not window.start <= day <= window.end:
+        if not window.contains(start_of_day(day)):
             raise SourceError(
                 SourceErrorCode.INVALID_RESPONSE, f"{article}: day outside the requested range"
             )
@@ -218,13 +271,14 @@ def _observation(
     views: int,
     observed_at: datetime,
 ) -> Observation:
-    period_start = datetime(day.year, day.month, day.day, tzinfo=UTC)
-    period_end = period_start + timedelta(days=1)
+    period_start = start_of_day(day)
+    period_end = period_start + Granularity.DAILY.step
     return Observation(
         canonical_game_id=game.canonical_game_id,
         source=SOURCE_ID,
-        metric=Metric.DAILY_PAGEVIEWS,
-        period_start=day,
+        metric=DAILY_PAGEVIEWS.metric,
+        granularity=DAILY_PAGEVIEWS.granularity,
+        period_start=period_start,
         value=float(views),
         status=ObservationStatus.OBSERVED,
         observed_at=observed_at,

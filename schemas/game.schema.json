@@ -1,6 +1,201 @@
 {
   "$defs": {
-    "AttentionFeatures": {
+    "ConfidenceFactorsView": {
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Completeness",
+          "type": "number"
+        },
+        "freshness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Freshness",
+          "type": "number"
+        },
+        "history": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "History",
+          "type": "number"
+        },
+        "samples": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Samples",
+          "type": "number"
+        },
+        "source_ceiling": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Source Ceiling",
+          "type": "number"
+        }
+      },
+      "required": [
+        "source_ceiling",
+        "freshness",
+        "history",
+        "completeness",
+        "samples"
+      ],
+      "title": "ConfidenceFactorsView",
+      "type": "object"
+    },
+    "ConfidenceView": {
+      "additionalProperties": false,
+      "properties": {
+        "band": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Band",
+          "type": "string"
+        },
+        "ceiling": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Ceiling",
+          "type": "number"
+        },
+        "factors": {
+          "$ref": "#/$defs/ConfidenceFactorsView"
+        },
+        "independent_sources": {
+          "minimum": 0,
+          "title": "Independent Sources",
+          "type": "integer"
+        },
+        "value": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "band",
+        "ceiling",
+        "independent_sources",
+        "factors"
+      ],
+      "title": "ConfidenceView",
+      "type": "object"
+    },
+    "EventView": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ends On"
+        },
+        "event_type": {
+          "enum": [
+            "release",
+            "major_patch",
+            "minor_patch",
+            "season",
+            "wipe",
+            "expansion",
+            "dlc",
+            "expedition",
+            "beta",
+            "playtest",
+            "free_weekend",
+            "trailer",
+            "showcase",
+            "platform_release",
+            "major_in_game_event"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "starts_on": {
+          "format": "date",
+          "title": "Starts On",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "event_type",
+        "title",
+        "starts_on",
+        "source"
+      ],
+      "title": "EventView",
+      "type": "object"
+    },
+    "ExplanationView": {
+      "additionalProperties": false,
+      "properties": {
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/ReasonView"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "top_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Top Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "summary",
+        "reasons",
+        "top_reasons"
+      ],
+      "title": "ExplanationView",
+      "type": "object"
+    },
+    "FeaturesView": {
       "additionalProperties": false,
       "properties": {
         "as_of_day": {
@@ -101,7 +296,7 @@
         "flags": {
           "default": [],
           "items": {
-            "$ref": "#/$defs/FeatureFlag"
+            "type": "string"
           },
           "title": "Flags",
           "type": "array"
@@ -287,233 +482,7 @@
         "window_days",
         "observed_days"
       ],
-      "title": "AttentionFeatures",
-      "type": "object"
-    },
-    "ConfidenceBand": {
-      "enum": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "title": "ConfidenceBand",
-      "type": "string"
-    },
-    "ConfidenceFactors": {
-      "additionalProperties": false,
-      "properties": {
-        "completeness": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Completeness",
-          "type": "number"
-        },
-        "freshness": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Freshness",
-          "type": "number"
-        },
-        "history": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "History",
-          "type": "number"
-        },
-        "samples": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Samples",
-          "type": "number"
-        },
-        "source_ceiling": {
-          "maximum": 1,
-          "minimum": 0,
-          "title": "Source Ceiling",
-          "type": "number"
-        }
-      },
-      "required": [
-        "source_ceiling",
-        "freshness",
-        "history",
-        "completeness",
-        "samples"
-      ],
-      "title": "ConfidenceFactors",
-      "type": "object"
-    },
-    "ConfidenceResult": {
-      "additionalProperties": false,
-      "properties": {
-        "band": {
-          "$ref": "#/$defs/ConfidenceBand"
-        },
-        "ceiling": {
-          "maximum": 100,
-          "minimum": 0,
-          "title": "Ceiling",
-          "type": "number"
-        },
-        "factors": {
-          "$ref": "#/$defs/ConfidenceFactors"
-        },
-        "independent_sources": {
-          "minimum": 0,
-          "title": "Independent Sources",
-          "type": "integer"
-        },
-        "value": {
-          "maximum": 100,
-          "minimum": 0,
-          "title": "Value",
-          "type": "number"
-        }
-      },
-      "required": [
-        "value",
-        "band",
-        "ceiling",
-        "independent_sources",
-        "factors"
-      ],
-      "title": "ConfidenceResult",
-      "type": "object"
-    },
-    "CoverageStatus": {
-      "enum": [
-        "covered",
-        "failed",
-        "not_mapped"
-      ],
-      "title": "CoverageStatus",
-      "type": "string"
-    },
-    "EventType": {
-      "enum": [
-        "release",
-        "major_patch",
-        "minor_patch",
-        "season",
-        "wipe",
-        "expansion",
-        "dlc",
-        "expedition",
-        "beta",
-        "playtest",
-        "free_weekend",
-        "trailer",
-        "showcase",
-        "platform_release",
-        "major_in_game_event"
-      ],
-      "title": "EventType",
-      "type": "string"
-    },
-    "Explanation": {
-      "additionalProperties": false,
-      "properties": {
-        "reasons": {
-          "items": {
-            "$ref": "#/$defs/Reason"
-          },
-          "title": "Reasons",
-          "type": "array"
-        },
-        "summary": {
-          "title": "Summary",
-          "type": "string"
-        },
-        "top_reasons": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Top Reasons",
-          "type": "array"
-        }
-      },
-      "required": [
-        "summary",
-        "reasons",
-        "top_reasons"
-      ],
-      "title": "Explanation",
-      "type": "object"
-    },
-    "FeatureFlag": {
-      "enum": [
-        "no_observations",
-        "insufficient_recent_data",
-        "insufficient_history",
-        "zero_baseline",
-        "zero_dispersion",
-        "velocity_undefined",
-        "stale",
-        "has_missing_days"
-      ],
-      "title": "FeatureFlag",
-      "type": "string"
-    },
-    "GameEvent": {
-      "additionalProperties": false,
-      "properties": {
-        "canonical_game_id": {
-          "pattern": "^msg_[0-9]{4}$",
-          "title": "Canonical Game Id",
-          "type": "string"
-        },
-        "ends_on": {
-          "anyOf": [
-            {
-              "format": "date",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Ends On"
-        },
-        "event_type": {
-          "$ref": "#/$defs/EventType"
-        },
-        "reference": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Reference"
-        },
-        "source": {
-          "minLength": 1,
-          "title": "Source",
-          "type": "string"
-        },
-        "starts_on": {
-          "format": "date",
-          "title": "Starts On",
-          "type": "string"
-        },
-        "title": {
-          "minLength": 1,
-          "title": "Title",
-          "type": "string"
-        }
-      },
-      "required": [
-        "canonical_game_id",
-        "event_type",
-        "title",
-        "starts_on",
-        "source"
-      ],
-      "title": "GameEvent",
+      "title": "FeaturesView",
       "type": "object"
     },
     "HistoryPoint": {
@@ -577,7 +546,8 @@
           "type": "string"
         },
         "metric": {
-          "$ref": "#/$defs/Metric"
+          "title": "Metric",
+          "type": "string"
         },
         "points": {
           "items": {
@@ -599,18 +569,6 @@
       ],
       "title": "HistorySeries",
       "type": "object"
-    },
-    "LifecycleState": {
-      "enum": [
-        "PRE_RELEASE",
-        "LAUNCH_WINDOW",
-        "RELEASED",
-        "EVERGREEN",
-        "LIVE_SERVICE",
-        "DORMANT"
-      ],
-      "title": "LifecycleState",
-      "type": "string"
     },
     "MethodologyRef": {
       "additionalProperties": false,
@@ -636,14 +594,7 @@
       "title": "MethodologyRef",
       "type": "object"
     },
-    "Metric": {
-      "enum": [
-        "daily_pageviews"
-      ],
-      "title": "Metric",
-      "type": "string"
-    },
-    "Reason": {
+    "ReasonView": {
       "additionalProperties": false,
       "properties": {
         "code": {
@@ -659,17 +610,8 @@
         "code",
         "text"
       ],
-      "title": "Reason",
+      "title": "ReasonView",
       "type": "object"
-    },
-    "RelationshipType": {
-      "enum": [
-        "MOD_ECOSYSTEM",
-        "ONLINE_COMPONENT",
-        "SEQUEL"
-      ],
-      "title": "RelationshipType",
-      "type": "string"
     },
     "RelationshipView": {
       "additionalProperties": false,
@@ -689,7 +631,13 @@
           "type": "string"
         },
         "relationship_type": {
-          "$ref": "#/$defs/RelationshipType"
+          "enum": [
+            "MOD_ECOSYSTEM",
+            "ONLINE_COMPONENT",
+            "SEQUEL"
+          ],
+          "title": "Relationship Type",
+          "type": "string"
         }
       },
       "required": [
@@ -701,7 +649,7 @@
       "title": "RelationshipView",
       "type": "object"
     },
-    "ScoreComponents": {
+    "ScoreComponentsView": {
       "additionalProperties": false,
       "properties": {
         "anomaly": {
@@ -735,16 +683,16 @@
         "anomaly",
         "momentum"
       ],
-      "title": "ScoreComponents",
+      "title": "ScoreComponentsView",
       "type": "object"
     },
-    "ScoreResult": {
+    "ScoreView": {
       "additionalProperties": false,
       "properties": {
         "components": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ScoreComponents"
+              "$ref": "#/$defs/ScoreComponentsView"
             },
             {
               "type": "null"
@@ -757,18 +705,31 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/$defs/ScoreStatus"
+          "enum": [
+            "scored",
+            "unscored"
+          ],
+          "title": "Status",
+          "type": "string"
         },
         "unscored_reason": {
           "anyOf": [
             {
-              "$ref": "#/$defs/UnscoredReason"
+              "enum": [
+                "no_observations",
+                "insufficient_history",
+                "insufficient_recent_data",
+                "zero_baseline",
+                "zero_dispersion"
+              ],
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Unscored Reason"
         },
         "value": {
           "anyOf": [
@@ -789,16 +750,8 @@
         "score_version",
         "status"
       ],
-      "title": "ScoreResult",
+      "title": "ScoreView",
       "type": "object"
-    },
-    "ScoreStatus": {
-      "enum": [
-        "scored",
-        "unscored"
-      ],
-      "title": "ScoreStatus",
-      "type": "string"
     },
     "SourceCoverage": {
       "additionalProperties": false,
@@ -855,7 +808,13 @@
           "title": "Staleness Days"
         },
         "status": {
-          "$ref": "#/$defs/CoverageStatus"
+          "enum": [
+            "covered",
+            "failed",
+            "not_mapped"
+          ],
+          "title": "Status",
+          "type": "string"
         }
       },
       "required": [
@@ -864,17 +823,6 @@
       ],
       "title": "SourceCoverage",
       "type": "object"
-    },
-    "UnscoredReason": {
-      "enum": [
-        "no_observations",
-        "insufficient_history",
-        "insufficient_recent_data",
-        "zero_baseline",
-        "zero_dispersion"
-      ],
-      "title": "UnscoredReason",
-      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -895,7 +843,7 @@
     "confidence": {
       "anyOf": [
         {
-          "$ref": "#/$defs/ConfidenceResult"
+          "$ref": "#/$defs/ConfidenceView"
         },
         {
           "type": "null"
@@ -903,21 +851,27 @@
       ],
       "default": null
     },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
+    },
     "events": {
       "default": [],
       "items": {
-        "$ref": "#/$defs/GameEvent"
+        "$ref": "#/$defs/EventView"
       },
       "title": "Events",
       "type": "array"
     },
     "explanation": {
-      "$ref": "#/$defs/Explanation"
+      "$ref": "#/$defs/ExplanationView"
     },
     "features": {
       "anyOf": [
         {
-          "$ref": "#/$defs/AttentionFeatures"
+          "$ref": "#/$defs/FeaturesView"
         },
         {
           "type": "null"
@@ -938,7 +892,16 @@
       "type": "array"
     },
     "lifecycle_state": {
-      "$ref": "#/$defs/LifecycleState"
+      "enum": [
+        "PRE_RELEASE",
+        "LAUNCH_WINDOW",
+        "RELEASED",
+        "EVERGREEN",
+        "LIVE_SERVICE",
+        "DORMANT"
+      ],
+      "title": "Lifecycle State",
+      "type": "string"
     },
     "methodology": {
       "$ref": "#/$defs/MethodologyRef"
@@ -978,7 +941,7 @@
       "type": "string"
     },
     "score": {
-      "$ref": "#/$defs/ScoreResult"
+      "$ref": "#/$defs/ScoreView"
     },
     "score_version": {
       "title": "Score Version",
@@ -1004,6 +967,7 @@
   },
   "required": [
     "schema_version",
+    "contract_status",
     "generated_at",
     "run_id",
     "score_version",

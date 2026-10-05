@@ -1,15 +1,5 @@
 {
   "$defs": {
-    "ApprovalStatus": {
-      "enum": [
-        "not_required",
-        "pending",
-        "approved",
-        "denied"
-      ],
-      "title": "ApprovalStatus",
-      "type": "string"
-    },
     "ConfidenceMethodology": {
       "additionalProperties": false,
       "properties": {
@@ -40,7 +30,7 @@
         },
         "terms": {
           "items": {
-            "$ref": "#/$defs/TermDefinition"
+            "$ref": "#/$defs/TermView"
           },
           "title": "Terms",
           "type": "array"
@@ -55,7 +45,31 @@
       "title": "ConfidenceMethodology",
       "type": "object"
     },
-    "FeatureDefinition": {
+    "DisplayRulesView": {
+      "additionalProperties": false,
+      "properties": {
+        "branding_required": {
+          "title": "Branding Required",
+          "type": "string"
+        },
+        "link_back_required": {
+          "title": "Link Back Required",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "link_back_required",
+        "branding_required",
+        "note"
+      ],
+      "title": "DisplayRulesView",
+      "type": "object"
+    },
+    "FeatureDefinitionView": {
       "additionalProperties": false,
       "properties": {
         "definition": {
@@ -81,7 +95,7 @@
         "definition",
         "valid_when"
       ],
-      "title": "FeatureDefinition",
+      "title": "FeatureDefinitionView",
       "type": "object"
     },
     "FeatureMethodology": {
@@ -89,7 +103,7 @@
       "properties": {
         "definitions": {
           "items": {
-            "$ref": "#/$defs/FeatureDefinition"
+            "$ref": "#/$defs/FeatureDefinitionView"
           },
           "title": "Definitions",
           "type": "array"
@@ -116,31 +130,149 @@
       "title": "FeatureMethodology",
       "type": "object"
     },
-    "Metric": {
-      "enum": [
-        "daily_pageviews"
+    "FieldRuleView": {
+      "additionalProperties": false,
+      "properties": {
+        "display_allowed": {
+          "title": "Display Allowed",
+          "type": "string"
+        },
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "storage_allowed": {
+          "title": "Storage Allowed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "storage_allowed",
+        "display_allowed",
+        "note"
       ],
-      "title": "Metric",
-      "type": "string"
+      "title": "FieldRuleView",
+      "type": "object"
     },
-    "Permission": {
-      "enum": [
-        "allowed",
-        "restricted",
-        "prohibited",
-        "unknown"
+    "MetricView": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregation": {
+          "title": "Aggregation",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "display_name": {
+          "title": "Display Name",
+          "type": "string"
+        },
+        "granularities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Granularities",
+          "type": "array"
+        },
+        "metric_id": {
+          "title": "Metric Id",
+          "type": "string"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric_id",
+        "display_name",
+        "unit",
+        "description",
+        "role",
+        "aggregation",
+        "granularities"
       ],
-      "title": "Permission",
-      "type": "string"
+      "title": "MetricView",
+      "type": "object"
     },
-    "Requirement": {
-      "enum": [
-        "required",
-        "not_required",
-        "unknown"
+    "QuotaView": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "title": "Basis",
+          "type": "string"
+        },
+        "limit": {
+          "title": "Limit",
+          "type": "integer"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "period": {
+          "title": "Period",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "limit",
+        "unit",
+        "period",
+        "basis",
+        "note"
       ],
-      "title": "Requirement",
-      "type": "string"
+      "title": "QuotaView",
+      "type": "object"
+    },
+    "RateLimitView": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "title": "Basis",
+          "type": "string"
+        },
+        "max_concurrency": {
+          "title": "Max Concurrency",
+          "type": "integer"
+        },
+        "max_requests": {
+          "title": "Max Requests",
+          "type": "integer"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "per_seconds": {
+          "title": "Per Seconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_requests",
+        "per_seconds",
+        "max_concurrency",
+        "basis",
+        "note"
+      ],
+      "title": "RateLimitView",
+      "type": "object"
     },
     "ScoreMethodology": {
       "additionalProperties": false,
@@ -161,7 +293,7 @@
         },
         "terms": {
           "items": {
-            "$ref": "#/$defs/TermDefinition"
+            "$ref": "#/$defs/TermView"
           },
           "title": "Terms",
           "type": "array"
@@ -179,6 +311,25 @@
       "title": "ScoreMethodology",
       "type": "object"
     },
+    "SignalView": {
+      "additionalProperties": false,
+      "properties": {
+        "granularity": {
+          "title": "Granularity",
+          "type": "string"
+        },
+        "metric": {
+          "title": "Metric",
+          "type": "string"
+        }
+      },
+      "required": [
+        "metric",
+        "granularity"
+      ],
+      "title": "SignalView",
+      "type": "object"
+    },
     "SourceMethodology": {
       "additionalProperties": false,
       "properties": {
@@ -186,15 +337,15 @@
           "title": "Description",
           "type": "string"
         },
-        "granularity": {
-          "title": "Granularity",
-          "type": "string"
-        },
-        "metric": {
-          "$ref": "#/$defs/Metric"
-        },
         "policy": {
-          "$ref": "#/$defs/SourcePolicy"
+          "$ref": "#/$defs/SourcePolicyView"
+        },
+        "signals": {
+          "items": {
+            "$ref": "#/$defs/SignalView"
+          },
+          "title": "Signals",
+          "type": "array"
         },
         "source": {
           "title": "Source",
@@ -203,25 +354,73 @@
       },
       "required": [
         "source",
-        "metric",
-        "granularity",
+        "signals",
         "description",
         "policy"
       ],
       "title": "SourceMethodology",
       "type": "object"
     },
-    "SourcePolicy": {
+    "SourceOperationsView": {
+      "additionalProperties": false,
+      "properties": {
+        "cache_max_age_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Max Age Seconds"
+        },
+        "expected_publication_lag_seconds": {
+          "title": "Expected Publication Lag Seconds",
+          "type": "integer"
+        },
+        "publication_lag_basis": {
+          "title": "Publication Lag Basis",
+          "type": "string"
+        },
+        "quota": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuotaView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rate_limit": {
+          "$ref": "#/$defs/RateLimitView"
+        }
+      },
+      "required": [
+        "rate_limit",
+        "expected_publication_lag_seconds",
+        "publication_lag_basis"
+      ],
+      "title": "SourceOperationsView",
+      "type": "object"
+    },
+    "SourcePolicyView": {
       "additionalProperties": false,
       "properties": {
         "approval_required": {
-          "$ref": "#/$defs/Requirement"
+          "title": "Approval Required",
+          "type": "string"
         },
         "approval_status": {
-          "$ref": "#/$defs/ApprovalStatus"
+          "title": "Approval Status",
+          "type": "string"
         },
         "attribution_required": {
-          "$ref": "#/$defs/Requirement"
+          "title": "Attribution Required",
+          "type": "string"
         },
         "attribution_text": {
           "anyOf": [
@@ -236,38 +435,52 @@
           "title": "Attribution Text"
         },
         "commercial_use_allowed": {
-          "$ref": "#/$defs/Permission"
+          "title": "Commercial Use Allowed",
+          "type": "string"
         },
         "derived_metrics_allowed": {
-          "$ref": "#/$defs/Permission"
+          "title": "Derived Metrics Allowed",
+          "type": "string"
+        },
+        "display": {
+          "$ref": "#/$defs/DisplayRulesView"
+        },
+        "field_rules": {
+          "items": {
+            "$ref": "#/$defs/FieldRuleView"
+          },
+          "title": "Field Rules",
+          "type": "array"
         },
         "historical_storage_allowed": {
-          "$ref": "#/$defs/Permission"
+          "title": "Historical Storage Allowed",
+          "type": "string"
         },
         "notes": {
-          "default": "",
           "title": "Notes",
           "type": "string"
         },
+        "operations": {
+          "$ref": "#/$defs/SourceOperationsView"
+        },
         "raw_storage_allowed": {
-          "$ref": "#/$defs/Permission"
+          "title": "Raw Storage Allowed",
+          "type": "string"
         },
         "redistribution_allowed": {
-          "$ref": "#/$defs/Permission"
+          "title": "Redistribution Allowed",
+          "type": "string"
         },
         "references": {
           "items": {
-            "minLength": 1,
             "type": "string"
           },
-          "minItems": 1,
           "title": "References",
           "type": "array"
         },
         "retention_days": {
           "anyOf": [
             {
-              "minimum": 0,
               "type": "integer"
             },
             {
@@ -283,7 +496,6 @@
           "type": "string"
         },
         "source": {
-          "minLength": 1,
           "title": "Source",
           "type": "string"
         }
@@ -298,13 +510,17 @@
         "attribution_required",
         "approval_required",
         "approval_status",
+        "operations",
+        "display",
+        "field_rules",
         "reviewed_at",
-        "references"
+        "references",
+        "notes"
       ],
-      "title": "SourcePolicy",
+      "title": "SourcePolicyView",
       "type": "object"
     },
-    "TermDefinition": {
+    "TermView": {
       "additionalProperties": false,
       "properties": {
         "formula": {
@@ -325,7 +541,7 @@
         "formula",
         "rationale"
       ],
-      "title": "TermDefinition",
+      "title": "TermView",
       "type": "object"
     }
   },
@@ -334,6 +550,12 @@
   "properties": {
     "confidence": {
       "$ref": "#/$defs/ConfidenceMethodology"
+    },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
     },
     "explanations": {
       "title": "Explanations",
@@ -352,6 +574,13 @@
         "type": "string"
       },
       "title": "Limitations",
+      "type": "array"
+    },
+    "metrics": {
+      "items": {
+        "$ref": "#/$defs/MetricView"
+      },
+      "title": "Metrics",
       "type": "array"
     },
     "run_id": {
@@ -385,6 +614,7 @@
   },
   "required": [
     "schema_version",
+    "contract_status",
     "generated_at",
     "run_id",
     "score_version",
@@ -393,6 +623,7 @@
     "confidence",
     "features",
     "explanations",
+    "metrics",
     "sources",
     "limitations"
   ],

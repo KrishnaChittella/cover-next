@@ -2,10 +2,14 @@
 
 ## Status
 
+MetaSpike has one public release. Everything in this repository today is an
+internal engineering milestone, not a product version.
+
 | Component | Status |
 | --- | --- |
-| Catalogue, Wikimedia collector, source policy, features, score v0, confidence v0, explanations, local atomic artifact publishing | **Implemented**, runs locally |
-| Raw storage (GCS), BigQuery, dbt, scheduled collection (Cloud Run + Scheduler), R2 artifact publishing, MetaSpike web app | **FUTURE**, not built and not deployed |
+| Catalogue, Wikimedia collector, source policy, generic time series and signals, metric registry, features, score v0, confidence v0, explanations, local point-in-time store, local atomic artifact publishing | **Implemented**, runs locally |
+| More sources, entity resolution, event detection, launch scoring model | **FUTURE** |
+| Raw storage (GCS), BigQuery, dbt, scheduled collection (Cloud Run Jobs + Scheduler), R2 artifact publishing, web app | **FUTURE**, not built and not deployed |
 
 Nothing in this repository talks to a cloud provider.
 
@@ -54,6 +58,16 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
   observation through to the artifact.
 - **Scores are versioned.** `metaspike_score_v0` is frozen by its tests. A change
   in meaning becomes `v1`, published alongside its own methodology.
+- **One scoring engine.** Features, score, confidence and explanations are
+  computed in Python only. The warehouse cleans, aggregates and builds baselines;
+  it never re-implements scoring.
+- **Supply never enters the base score.** Metrics carry a role. Creator-supply
+  metrics from permission-gated sources are reported separately so the base score
+  means the same thing for every game.
+- **Storage is point-in-time.** Observations are append-only with the time they
+  were seen, so a past score can be replayed without look-ahead.
+- **Contract views are separate from domain models.** The current `1.x` contract
+  is internal and non-binding.
 - **Canonical ids are opaque.** Slugs and names can change; `canonical_game_id`
   cannot. Related entities (GTA V, GTA Online, FiveM) stay separate and are
   linked by typed relationships.

@@ -1,17 +1,5 @@
 {
   "$defs": {
-    "SourceErrorCode": {
-      "enum": [
-        "not_found",
-        "rate_limited",
-        "timeout",
-        "network_error",
-        "http_error",
-        "invalid_response"
-      ],
-      "title": "SourceErrorCode",
-      "type": "string"
-    },
     "SourceFailure": {
       "additionalProperties": false,
       "properties": {
@@ -21,7 +9,8 @@
           "type": "string"
         },
         "error_code": {
-          "$ref": "#/$defs/SourceErrorCode"
+          "title": "Error Code",
+          "type": "string"
         },
         "slug": {
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
@@ -128,7 +117,13 @@
           "type": "string"
         },
         "status": {
-          "$ref": "#/$defs/SourceStatus"
+          "enum": [
+            "healthy",
+            "degraded",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
         }
       },
       "required": [
@@ -143,20 +138,17 @@
       ],
       "title": "SourceHealthEntry",
       "type": "object"
-    },
-    "SourceStatus": {
-      "enum": [
-        "healthy",
-        "degraded",
-        "failed"
-      ],
-      "title": "SourceStatus",
-      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
+    },
     "generated_at": {
       "format": "date-time",
       "title": "Generated At",
@@ -186,6 +178,7 @@
   },
   "required": [
     "schema_version",
+    "contract_status",
     "generated_at",
     "run_id",
     "score_version",

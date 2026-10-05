@@ -8,9 +8,19 @@ This repository is the data-intelligence pipeline behind that question. It is a
 separate project from the portfolio site that will eventually display its output
 at `krishnachittella.dev/metaspike`.
 
-## What this phase implements
+## Status
 
-The first end-to-end, locally runnable vertical slice. One command:
+**Internal engineering foundation. Not a product release.** MetaSpike has one
+public release, after the full approved scope is built and validated. Everything
+here, including `metaspike_score_v0` and artifact schema `1.x`, is an internal
+milestone: nothing outside this repository may depend on it.
+
+Phase 1 of the roadmap (foundation refactor) is complete: the code no longer
+assumes one source or daily data, and v0 output is unchanged.
+
+## What is implemented
+
+An end-to-end, locally runnable pipeline. One command:
 
 ```
 uv run metaspike run
@@ -54,7 +64,10 @@ uv sync
 | `uv run metaspike collect` | Collect only, into `.metaspike/cache/` |
 | `uv run metaspike build` | Score and publish from the cached collection |
 | `uv run metaspike validate-artifacts` | Validate what is published in `artifacts/` |
-| `uv run metaspike export-schemas` | Regenerate `schemas/` from the typed models (`--check` to verify) |
+| `uv run metaspike export-schemas` | Regenerate `schemas/` from the contract models (`--check` to verify) |
+
+`run` and `collect` accept `--store-dir DIR` to also append what they collect to a
+local point-in-time observation store.
 
 Add `-v` before the command for progress logging, e.g. `uv run metaspike -v run`.
 
@@ -89,32 +102,39 @@ src/metaspike/
   domain/                typed models only, no I/O
     games.py             CanonicalGame, Catalogue, lifecycle, relationships
     events.py            event vocabulary (detection not implemented)
-    observations.py      Observation, DailySeries, explicit missing data
+    timeseries.py        Granularity and aligned TimeWindow
+    metrics.py           metric registry: what is measured, its role and aggregation
+    observations.py      Observation and gap-free TimeSeries at any granularity
+    signals.py           SignalKey, Signal and EntitySignals (many signals, any missing)
     scores.py            score, confidence and explanation results
-    source_policy.py     SourcePolicy and permissions
+    source_policy.py     permissions, rate limits, quota, lag, field and display rules
   catalogue/seed.py      bootstrap catalogue
   sources/
     base.py              SourceAdapter protocol, SourceError
-    registry.py          registry that refuses adapters without a usable policy
+    registry.py          refuses adapters without a usable policy or known metrics
     wikimedia.py         Wikimedia Pageviews adapter and its policy
     replay.py            offline client that replays recorded responses
-  features/attention.py  feature maths and machine-readable definitions
+  features/attention.py  daily feature maths and machine-readable definitions
   scoring/
-    v0.py                metaspike_score_v0 and confidence v0
+    v0.py                metaspike_score_v0, confidence v0, and the one signal v0 reads
     explanations.py      deterministic explanation templates
   pipeline/
-    collection.py        per-game failure isolation
-    normalize.py         gap-free series, missing days made explicit
-    assess.py            features -> score -> confidence -> explanation
+    collection.py        per-signal failure isolation
+    normalize.py         gap-free series, publication-lag awareness
+    assess.py            per-signal features -> score -> confidence -> explanation
     run.py               orchestration
+  storage/
+    base.py              ObservationStore contract (append-only, point-in-time)
+    local.py             local JSON Lines implementation
   publishing/
-    artifacts.py         the public artifact contract
+    artifacts.py         the artifact contract: view models only, no domain imports
+    mapping.py           the only place domain models become contract views
     build.py             assemble a bundle (pure)
     publisher.py         atomic local publishing
     validation.py        validate written artifacts
     schemas.py           JSON Schema export
 schemas/                 generated JSON Schemas, checked in
-tests/                   offline tests and recorded Wikimedia fixtures
+tests/                   offline tests, recorded fixtures, v0 golden file
 docs/architecture.md     intended eventual flow, cloud parts labelled FUTURE
 ```
 
@@ -128,16 +148,29 @@ See [docs/architecture.md](docs/architecture.md) for the intended eventual flow.
   `lifecycle_state`.
 - GTA V, GTA Online and FiveM are three distinct entities. GTA Online is an
   `ONLINE_COMPONENT` of GTA V; FiveM is a `MOD_ECOSYSTEM` of GTA V.
-- **Observation**: one value for one game, source, metric and UTC day, with
-  `observed_at`, `source_timestamp`, freshness and quality metadata. A day with
-  no data is an explicit `missing` observation, never a zero.
+- **Observation**: one value for one game, source, metric and period, with
+  `observed_at`, `source_timestamp`, freshness and quality metadata. A period
+  with no data is an explicit `missing` observation, never a zero.
+- **TimeSeries**: one point per period at a `Granularity` (15 minutes, hourly or
+  daily), aligned to UTC. It also records `latest_due`, the latest period the
+  source was expected to have published when it was collected.
+- **Metric registry**: a metric says what is measured, never how often. Each has
+  a role (`demand` or `creator_supply`) and an aggregation rule. Only `demand`
+  metrics may ever feed the base opportunity score.
+- **Signals**: a signal is a (source, metric, granularity). `EntitySignals` holds
+  every signal an entity could have, each either collected, failed or not mapped.
+  Each score version names the signals it reads; `metaspike_score_v0` reads only
+  daily Wikimedia pageviews, so other signals cannot change it.
 
 ## Source policy
 
 Compliance is part of the type system. Every source has a `SourcePolicy` covering
 raw storage, retention, historical storage, derived metrics, commercial use,
 redistribution, attribution and approval, plus a `reviewed_at` date and the
-official references it was read from. A permission is one of `allowed`,
+official references it was read from. It also carries the operational limits a
+scheduler must obey (rate limit, quota budget, cache duration, expected
+publication lag, each tagged documented, self-imposed or observed), display
+requirements, and per-field rules that can only narrow the source-level policy. A permission is one of `allowed`,
 `restricted`, `prohibited` or `unknown`, and only `allowed` permits.
 
 - An adapter cannot be registered without a policy, with a policy for a different
@@ -146,10 +179,17 @@ official references it was read from. A permission is one of `allowed`,
 - Daily values appear in public artifacts only if the policy allows both
   redistribution and historical storage.
 - The collection cache is refused if the policy does not allow raw storage.
+- The observation store refuses a metric whose policy does not allow history.
+- MetaSpike is engineered to be commercial-capable. A source is eligible for a
+  monetized production configuration only if `commercial_use_allowed` is
+  explicitly `allowed`; anything unclear stays `unknown` or `restricted`.
 
 Wikimedia Pageviews: the Analytics API states its data is available under CC0
 1.0, requires a descriptive User-Agent, and asks clients to make one request at
-a time. Reviewed 2026-10-04. These are recorded assumptions from the official
+a time; the documented rate limit is 200 requests per minute for identified
+unauthenticated clients. No publication schedule is documented for daily data,
+so a 24-hour lag is allowed for (marked `observed`, to be measured).
+Reviewed 2026-10-04. These are recorded assumptions from the official
 documentation, not legal advice.
 
 ## Features
@@ -222,6 +262,15 @@ low `< 30`, medium `30–60`, high `> 60` (unreachable in this phase).
 
 ## Artifacts
 
+**The `1.x` contract is INTERNAL and non-binding.** Every artifact carries
+`contract_status: "internal"`. The public contract is defined once, for the
+production release.
+
+The contract is a set of view models that import nothing from the domain. Domain
+models reach an artifact only through `publishing/mapping.py`, so a field added
+internally is not published until a view opts in, and a field a view needs cannot
+disappear silently.
+
 Published to `artifacts/` (git-ignored, reproducible):
 
 ```
@@ -266,9 +315,9 @@ articles; the other games have no recording, which exercises partial failure.
 - One source. Nothing is corroborated.
 - Wikipedia readership is a proxy for public attention, not player counts,
   viewership, search demand or creator supply.
-- Daily, UTC. The newest point is the last complete day. Wikimedia publishes a
-  day some hours after it ends, so a run shortly after 00:00 UTC sees data one
-  day stale and loses a quarter of its freshness factor.
+- Daily, UTC. The newest point is the last complete day. Staleness is measured
+  against the day the source was due to have published, using its expected
+  publication lag, so a normal delay is not penalised.
 - English Wikipedia only. Redirect titles are not counted. A game without its
   own article (FiveM) has no coverage.
 - Weekly seasonality is not modelled.
@@ -278,7 +327,7 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Review this slice and the artifact contract. Then: a second independent source
-to lift the confidence ceiling, followed by the cloud foundation (scheduled
-collection, policy-aware raw storage, warehouse, and artifact publishing to
-object storage). Nothing cloud-related exists yet.
+Phase 2 of the internal roadmap: canonical entity resolution and lifecycle
+(IGDB and the Steam app list). No cloud resources exist yet; private collection
+infrastructure begins in Phase 4, and nothing is public before the single
+production release.

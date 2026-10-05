@@ -1,28 +1,31 @@
-"""Assemble the typed artifact bundle for one run. Pure: no filesystem access."""
+"""Assemble the artifact bundle for one run. Pure: no filesystem access.
+
+Everything published is built from contract views (`publishing/artifacts.py`);
+internal domain models reach an artifact only through `publishing/mapping.py`.
+"""
 
 import hashlib
 import json
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any
 
 from metaspike.domain.games import CanonicalGame, Catalogue
-from metaspike.domain.observations import DailySeries
+from metaspike.domain.observations import TimeSeries
+from metaspike.domain.signals import CollectionStatus, Signal
 from metaspike.domain.source_policy import SourcePolicy
+from metaspike.domain.timeseries import Granularity
 from metaspike.features.attention import (
     FEATURE_DEFINITIONS,
     HISTORY_DAYS,
     LONG_WINDOW_DAYS,
     MIN_LONG_SAMPLES,
-    AttentionFeatures,
     rolling_mean,
 )
 from metaspike.pipeline.assess import GameAssessment
-from metaspike.pipeline.collection import (
-    CollectionReport,
-    CollectionStatus,
-    GameCollection,
-    SourceRun,
-)
+from metaspike.pipeline.collection import CollectionReport, SourceRun
+from metaspike.pipeline.normalize import latest_due_period
 from metaspike.publishing.artifacts import (
+    CONTRACT_STATUS,
     CURRENT_FILE,
     METHODOLOGY_FILE,
     SCHEMA_VERSION,
@@ -31,7 +34,6 @@ from metaspike.publishing.artifacts import (
     VERSIONS_DIR,
     ArtifactBundle,
     ConfidenceMethodology,
-    CoverageStatus,
     CurrentArtifact,
     FeatureMethodology,
     GameArtifact,
@@ -44,15 +46,26 @@ from metaspike.publishing.artifacts import (
     MethodologyRef,
     RelationshipView,
     ScoreMethodology,
+    SignalView,
     SourceCoverage,
     SourceFailure,
     SourceFreshness,
     SourceHealthArtifact,
     SourceHealthEntry,
     SourceMethodology,
-    SourceStatus,
+    SourceStatusView,
     UnrankedEntry,
     game_file,
+)
+from metaspike.publishing.mapping import (
+    confidence_view,
+    explanation_view,
+    feature_definition_view,
+    features_view,
+    metric_view,
+    policy_view,
+    score_view,
+    term_view,
 )
 from metaspike.scoring.v0 import (
     CONFIDENCE_HIGH_ABOVE,
@@ -60,11 +73,11 @@ from metaspike.scoring.v0 import (
     CONFIDENCE_TERMS,
     SCORE_TERMS,
     SCORE_VERSION,
+    V0_INDEPENDENT_SOURCES,
     source_ceiling,
 )
 from metaspike.sources.registry import SourceRegistry
 
-FEATURE_DECIMALS = 4
 _PENDING_RUN_ID = "00000000T000000Z-00000000"
 # Fields that describe when a run happened rather than what it found. They are left
 # out of the content hash so identical inputs always produce an identical hash.
@@ -95,13 +108,12 @@ def build_bundle(
     registry: SourceRegistry,
     generated_at: datetime,
 ) -> ArtifactBundle:
-    policies = {entry.policy.source: entry.policy for entry in registry.entries()}
     by_game = {assessment.canonical_game_id: assessment for assessment in assessments}
     ranks = _ranks(catalogue, by_game)
 
     drafts = {
         game.slug: _game_artifact(
-            game, catalogue, by_game[game.canonical_game_id], report, policies, ranks, generated_at
+            game, catalogue, by_game[game.canonical_game_id], report, registry, ranks, generated_at
         )
         for game in catalogue.games
     }
@@ -112,13 +124,10 @@ def build_bundle(
     games = {slug: draft.model_copy(update={"run_id": run_id}) for slug, draft in drafts.items()}
     methodology = methodology.model_copy(update={"run_id": run_id})
     current = _current(games, report, generated_at, run_id)
-    source_health = _source_health(catalogue, report, generated_at, run_id)
+    source_health = _source_health(catalogue, report, registry, generated_at, run_id)
     version_path = f"{VERSIONS_DIR}/{run_id}"
     manifest = Manifest(
-        schema_version=SCHEMA_VERSION,
-        generated_at=generated_at,
-        run_id=run_id,
-        score_version=SCORE_VERSION,
+        **_header(generated_at, run_id),
         content_hash=content_hash,
         version_path=version_path,
         artifacts=ManifestPaths(
@@ -137,6 +146,16 @@ def build_bundle(
         source_health=source_health,
         methodology=methodology,
     )
+
+
+def _header(generated_at: datetime, run_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "contract_status": CONTRACT_STATUS,
+        "generated_at": generated_at,
+        "run_id": run_id,
+        "score_version": SCORE_VERSION,
+    }
 
 
 def _ranks(catalogue: Catalogue, by_game: dict[str, GameAssessment]) -> dict[str, int]:
@@ -161,43 +180,44 @@ def _game_artifact(
     catalogue: Catalogue,
     assessment: GameAssessment,
     report: CollectionReport,
-    policies: dict[str, SourcePolicy],
+    registry: SourceRegistry,
     ranks: dict[str, int],
     generated_at: datetime,
 ) -> GameArtifact:
     history: tuple[HistorySeries, ...] = ()
-    series = assessment.series
-    if series is not None and policies[series.source].public_history_permitted:
-        history = (_history(series, policies[series.source]),)
+    series = assessment.scored_series
+    if series is not None:
+        policy = registry.policy(series.source)
+        if policy.field_display_permitted(series.metric):
+            history = (_history(series, policy),)
     relationships = []
     for relationship in game.relationships:
         parent = catalogue.get(relationship.parent_game_id)
         relationships.append(
             RelationshipView(
-                relationship_type=relationship.relationship_type,
+                relationship_type=relationship.relationship_type.value,
                 parent_game_id=parent.canonical_game_id,
                 parent_slug=parent.slug,
                 parent_name=parent.name,
             )
         )
+    features = assessment.scored_features
+    confidence = assessment.confidence
     return GameArtifact(
-        schema_version=SCHEMA_VERSION,
-        generated_at=generated_at,
-        run_id=_PENDING_RUN_ID,
-        score_version=SCORE_VERSION,
+        **_header(generated_at, _PENDING_RUN_ID),
         canonical_game_id=game.canonical_game_id,
         slug=game.slug,
         name=game.name,
         aliases=game.aliases,
-        lifecycle_state=game.lifecycle_state,
+        lifecycle_state=game.lifecycle_state.value,
         relationships=tuple(relationships),
         rank=ranks.get(game.canonical_game_id),
-        score=assessment.score,
-        confidence=assessment.confidence,
-        features=None if assessment.features is None else _rounded(assessment.features),
-        explanation=assessment.explanation,
+        score=score_view(assessment.score),
+        confidence=None if confidence is None else confidence_view(confidence),
+        features=None if features is None else features_view(features),
+        explanation=explanation_view(assessment.explanation),
         history=history,
-        source_coverage=_coverage(game, report, policies),
+        source_coverage=_coverage(game, report, registry),
         methodology=MethodologyRef(
             score_version=SCORE_VERSION, path=METHODOLOGY_FILE, scope_note=SCOPE_NOTE
         ),
@@ -205,24 +225,17 @@ def _game_artifact(
     )
 
 
-def _rounded(features: AttentionFeatures) -> AttentionFeatures:
-    rounded = {
-        name: round(value, FEATURE_DECIMALS) for name, value in features if isinstance(value, float)
-    }
-    return features.model_copy(update=rounded)
-
-
-def _history(series: DailySeries, policy: SourcePolicy) -> HistorySeries:
+def _history(series: TimeSeries, policy: SourcePolicy) -> HistorySeries:
     values = series.values()
     means = rolling_mean(values, LONG_WINDOW_DAYS, MIN_LONG_SAMPLES)
     return HistorySeries(
         source=series.source,
         metric=series.metric,
-        granularity="daily",
+        granularity=series.granularity.value,
         attribution=policy.attribution_text,
         points=tuple(
             HistoryPoint(
-                day=point.period_start,
+                day=point.period_day,
                 value=point.value,
                 rolling_mean_7d=None if mean is None else round(mean, 2),
             )
@@ -231,43 +244,55 @@ def _history(series: DailySeries, policy: SourcePolicy) -> HistorySeries:
     )
 
 
+def _observed_days(signals: list[Signal]) -> list[date]:
+    """Distinct UTC days on which any of the signals has an observation, in order."""
+    return sorted(
+        {
+            point.period_day
+            for signal in signals
+            if signal.series is not None
+            for point in signal.series.points
+            if point.value is not None
+        }
+    )
+
+
 def _coverage(
-    game: CanonicalGame, report: CollectionReport, policies: dict[str, SourcePolicy]
+    game: CanonicalGame, report: CollectionReport, registry: SourceRegistry
 ) -> tuple[SourceCoverage, ...]:
     coverage = []
     for run in report.runs:
-        outcome = _outcome(run, game.canonical_game_id)
-        attribution = policies[run.source].attribution_text
-        if outcome.series is None:
-            status = (
-                CoverageStatus.FAILED
-                if outcome.status is CollectionStatus.FAILED
-                else CoverageStatus.NOT_MAPPED
+        outcomes = [o for o in run.outcomes if o.canonical_game_id == game.canonical_game_id]
+        collected = [outcome for outcome in outcomes if outcome.available]
+        if not collected:
+            failed = any(outcome.status is CollectionStatus.FAILED for outcome in outcomes)
+            coverage.append(
+                SourceCoverage(source=run.source, status="failed" if failed else "not_mapped")
             )
-            coverage.append(SourceCoverage(source=run.source, status=status))
             continue
-        observed = [p.period_start for p in outcome.series.points if p.value is not None]
-        latest = max(observed, default=None)
-        span = (latest - min(observed)).days + 1 if latest else 0
+        observed = _observed_days(collected)
+        latest = observed[-1] if observed else None
+        span = (observed[-1] - observed[0]).days + 1 if observed else 0
+        due = _due_day(run.source, report, registry)
         coverage.append(
             SourceCoverage(
                 source=run.source,
-                status=CoverageStatus.COVERED,
+                status="covered",
                 latest_observed_day=latest,
-                staleness_days=(report.window.end - latest).days if latest else None,
+                staleness_days=max(0, (due - latest).days) if latest else None,
                 observed_days=len(observed),
                 missing_days=span - len(observed),
-                attribution=attribution,
+                attribution=registry.policy(run.source).attribution_text,
             )
         )
     return tuple(coverage)
 
 
-def _outcome(run: SourceRun, canonical_game_id: str) -> GameCollection:
-    for outcome in run.outcomes:
-        if outcome.canonical_game_id == canonical_game_id:
-            return outcome
-    raise KeyError(f"{run.source} has no outcome for {canonical_game_id}")
+def _due_day(source: str, report: CollectionReport, registry: SourceRegistry) -> date:
+    """The latest day the source was due to have published when the run collected."""
+    lag = registry.policy(source).operations.expected_publication_lag
+    due = latest_due_period(Granularity.DAILY, report.observed_at, lag)
+    return min(due, report.window.end).date()
 
 
 def _current(
@@ -317,13 +342,10 @@ def _current(
                 )
             )
     return CurrentArtifact(
-        schema_version=SCHEMA_VERSION,
-        generated_at=generated_at,
-        run_id=run_id,
-        score_version=SCORE_VERSION,
+        **_header(generated_at, run_id),
         scope_note=SCOPE_NOTE,
-        expected_latest_day=report.window.end,
-        confidence_ceiling=round(100 * source_ceiling(len(report.runs)), 1),
+        expected_latest_day=report.window.end.date(),
+        confidence_ceiling=round(100 * source_ceiling(V0_INDEPENDENT_SOURCES), 1),
         active_sources=tuple(run.source for run in report.runs),
         entries=tuple(sorted(entries, key=lambda entry: entry.rank)),
         unranked=tuple(unranked),
@@ -331,78 +353,86 @@ def _current(
 
 
 def _source_health(
-    catalogue: Catalogue, report: CollectionReport, generated_at: datetime, run_id: str
+    catalogue: Catalogue,
+    report: CollectionReport,
+    registry: SourceRegistry,
+    generated_at: datetime,
+    run_id: str,
 ) -> SourceHealthArtifact:
-    entries = []
-    for run in report.runs:
-        succeeded = run.with_status(CollectionStatus.COLLECTED)
-        failed = run.with_status(CollectionStatus.FAILED)
-        observed_days = [
-            point.period_start
-            for outcome in succeeded
-            if outcome.series is not None
-            for point in outcome.series.points
-            if point.value is not None
-        ]
-        latest = max(observed_days, default=None)
-        if not succeeded:
-            status = SourceStatus.FAILED
-        elif failed:
-            status = SourceStatus.DEGRADED
-        else:
-            status = SourceStatus.HEALTHY
-        entries.append(
-            SourceHealthEntry(
-                source=run.source,
-                status=status,
-                last_success=run.finished_at if succeeded else None,
-                freshness=SourceFreshness(
-                    expected_latest_day=report.window.end,
-                    latest_observed_day=latest,
-                    staleness_days=(report.window.end - latest).days if latest else None,
-                ),
-                entities_attempted=len(succeeded) + len(failed),
-                entities_succeeded=len(succeeded),
-                entities_failed=len(failed),
-                entities_not_mapped=len(run.with_status(CollectionStatus.NOT_MAPPED)),
-                failures=tuple(
-                    SourceFailure(
-                        canonical_game_id=outcome.canonical_game_id,
-                        slug=catalogue.get(outcome.canonical_game_id).slug,
-                        error_code=outcome.error_code,
-                    )
-                    for outcome in failed
-                    if outcome.error_code is not None
-                ),
-            )
-        )
     return SourceHealthArtifact(
-        schema_version=SCHEMA_VERSION,
-        generated_at=generated_at,
-        run_id=run_id,
-        score_version=SCORE_VERSION,
-        sources=tuple(entries),
+        **_header(generated_at, run_id),
+        sources=tuple(
+            _source_health_entry(run, catalogue, report, registry) for run in report.runs
+        ),
+    )
+
+
+def _source_health_entry(
+    run: SourceRun, catalogue: Catalogue, report: CollectionReport, registry: SourceRegistry
+) -> SourceHealthEntry:
+    by_status: dict[CollectionStatus, list[str]] = {status: [] for status in CollectionStatus}
+    for game_id, entity_status in run.entity_status().items():
+        by_status[entity_status].append(game_id)
+    succeeded = by_status[CollectionStatus.COLLECTED]
+    failed = by_status[CollectionStatus.FAILED]
+
+    status: SourceStatusView = "healthy"
+    if not succeeded:
+        status = "failed"
+    elif failed:
+        status = "degraded"
+
+    observed = _observed_days(list(run.with_status(CollectionStatus.COLLECTED)))
+    latest = observed[-1] if observed else None
+    due = _due_day(run.source, report, registry)
+    first_error = {
+        outcome.canonical_game_id: outcome.error_code
+        for outcome in reversed(run.with_status(CollectionStatus.FAILED))
+        if outcome.error_code is not None
+    }
+    return SourceHealthEntry(
+        source=run.source,
+        status=status,
+        last_success=run.finished_at if succeeded else None,
+        freshness=SourceFreshness(
+            expected_latest_day=report.window.end.date(),
+            latest_observed_day=latest,
+            staleness_days=max(0, (due - latest).days) if latest else None,
+        ),
+        entities_attempted=len(succeeded) + len(failed),
+        entities_succeeded=len(succeeded),
+        entities_failed=len(failed),
+        entities_not_mapped=len(by_status[CollectionStatus.NOT_MAPPED]),
+        failures=tuple(
+            SourceFailure(
+                canonical_game_id=game_id,
+                slug=catalogue.get(game_id).slug,
+                error_code=first_error[game_id].value,
+            )
+            for game_id in failed
+            if game_id in first_error
+        ),
     )
 
 
 def _methodology(registry: SourceRegistry, generated_at: datetime) -> MethodologyArtifact:
-    sources = registry.entries()
     return MethodologyArtifact(
-        schema_version=SCHEMA_VERSION,
-        generated_at=generated_at,
-        run_id=_PENDING_RUN_ID,
-        score_version=SCORE_VERSION,
+        **_header(generated_at, _PENDING_RUN_ID),
         scope_note=SCOPE_NOTE,
-        score=ScoreMethodology(version=SCORE_VERSION, range=(0, 100), terms=SCORE_TERMS),
+        score=ScoreMethodology(
+            version=SCORE_VERSION,
+            range=(0, 100),
+            terms=tuple(term_view(term) for term in SCORE_TERMS),
+        ),
         confidence=ConfidenceMethodology(
             range=(0, 100),
-            current_ceiling=round(100 * source_ceiling(len(sources)), 1),
+            current_ceiling=round(100 * source_ceiling(V0_INDEPENDENT_SOURCES), 1),
             bands={
                 "low": f"< {CONFIDENCE_MEDIUM_FROM:g}",
                 "medium": f"{CONFIDENCE_MEDIUM_FROM:g} to {CONFIDENCE_HIGH_ABOVE:g}",
                 "high": f"> {CONFIDENCE_HIGH_ABOVE:g} (unreachable with one source)",
             },
-            terms=CONFIDENCE_TERMS,
+            terms=tuple(term_view(term) for term in CONFIDENCE_TERMS),
         ),
         features=FeatureMethodology(
             granularity="daily",
@@ -412,21 +442,24 @@ def _methodology(registry: SourceRegistry, generated_at: datetime) -> Methodolog
                 "games' raw popularity. All windows are anchored on t, the latest observed "
                 "day; missing days are excluded from every window, never counted as zero."
             ),
-            definitions=FEATURE_DEFINITIONS,
+            definitions=tuple(feature_definition_view(d) for d in FEATURE_DEFINITIONS),
         ),
         explanations=(
             "Deterministic templates rendered from computed features. A sentence appears "
             "only when its backing feature crosses a fixed threshold. No language model."
         ),
+        metrics=tuple(metric_view(metric) for metric in registry.metrics.definitions()),
         sources=tuple(
             SourceMethodology(
                 source=entry.policy.source,
-                metric=entry.adapter.metric,
-                granularity="daily",
+                signals=tuple(
+                    SignalView(metric=signal.metric, granularity=signal.granularity.value)
+                    for signal in entry.adapter.signals
+                ),
                 description=entry.adapter.description,
-                policy=entry.policy,
+                policy=policy_view(entry.policy),
             )
-            for entry in sources
+            for entry in registry.entries()
         ),
         limitations=LIMITATIONS,
     )

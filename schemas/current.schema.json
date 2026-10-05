@@ -1,23 +1,5 @@
 {
   "$defs": {
-    "ConfidenceBand": {
-      "enum": [
-        "low",
-        "medium",
-        "high"
-      ],
-      "title": "ConfidenceBand",
-      "type": "string"
-    },
-    "CoverageStatus": {
-      "enum": [
-        "covered",
-        "failed",
-        "not_mapped"
-      ],
-      "title": "CoverageStatus",
-      "type": "string"
-    },
     "LeaderboardEntry": {
       "additionalProperties": false,
       "properties": {
@@ -42,10 +24,25 @@
           "type": "number"
         },
         "confidence_band": {
-          "$ref": "#/$defs/ConfidenceBand"
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "title": "Confidence Band",
+          "type": "string"
         },
         "lifecycle_state": {
-          "$ref": "#/$defs/LifecycleState"
+          "enum": [
+            "PRE_RELEASE",
+            "LAUNCH_WINDOW",
+            "RELEASED",
+            "EVERGREEN",
+            "LIVE_SERVICE",
+            "DORMANT"
+          ],
+          "title": "Lifecycle State",
+          "type": "string"
         },
         "name": {
           "title": "Name",
@@ -110,18 +107,6 @@
       "title": "LeaderboardEntry",
       "type": "object"
     },
-    "LifecycleState": {
-      "enum": [
-        "PRE_RELEASE",
-        "LAUNCH_WINDOW",
-        "RELEASED",
-        "EVERGREEN",
-        "LIVE_SERVICE",
-        "DORMANT"
-      ],
-      "title": "LifecycleState",
-      "type": "string"
-    },
     "SourceCoverage": {
       "additionalProperties": false,
       "properties": {
@@ -177,7 +162,13 @@
           "title": "Staleness Days"
         },
         "status": {
-          "$ref": "#/$defs/CoverageStatus"
+          "enum": [
+            "covered",
+            "failed",
+            "not_mapped"
+          ],
+          "title": "Status",
+          "type": "string"
         }
       },
       "required": [
@@ -200,14 +191,31 @@
           "type": "string"
         },
         "lifecycle_state": {
-          "$ref": "#/$defs/LifecycleState"
+          "enum": [
+            "PRE_RELEASE",
+            "LAUNCH_WINDOW",
+            "RELEASED",
+            "EVERGREEN",
+            "LIVE_SERVICE",
+            "DORMANT"
+          ],
+          "title": "Lifecycle State",
+          "type": "string"
         },
         "name": {
           "title": "Name",
           "type": "string"
         },
         "reason": {
-          "$ref": "#/$defs/UnscoredReason"
+          "enum": [
+            "no_observations",
+            "insufficient_history",
+            "insufficient_recent_data",
+            "zero_baseline",
+            "zero_dispersion"
+          ],
+          "title": "Reason",
+          "type": "string"
         },
         "slug": {
           "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
@@ -244,17 +252,6 @@
       ],
       "title": "UnrankedEntry",
       "type": "object"
-    },
-    "UnscoredReason": {
-      "enum": [
-        "no_observations",
-        "insufficient_history",
-        "insufficient_recent_data",
-        "zero_baseline",
-        "zero_dispersion"
-      ],
-      "title": "UnscoredReason",
-      "type": "string"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -272,6 +269,12 @@
       "minimum": 0,
       "title": "Confidence Ceiling",
       "type": "number"
+    },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
     },
     "entries": {
       "items": {
@@ -318,6 +321,7 @@
   },
   "required": [
     "schema_version",
+    "contract_status",
     "generated_at",
     "run_id",
     "score_version",

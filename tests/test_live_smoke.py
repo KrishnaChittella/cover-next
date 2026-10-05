@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from metaspike.catalogue.seed import load_seed_catalogue
-from metaspike.pipeline.collection import CollectionStatus, latest_complete_day, window_ending
+from metaspike.domain.signals import CollectionStatus
+from metaspike.pipeline.collection import latest_complete_day, window_ending
 from metaspike.pipeline.run import run_pipeline
 from metaspike.publishing.validation import validate_published
 from metaspike.sources.registry import default_registry

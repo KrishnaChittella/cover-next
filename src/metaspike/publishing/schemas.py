@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from metaspike.domain.model import FrozenModel
 from metaspike.publishing.artifacts import (
+    ContractModel,
     CurrentArtifact,
     GameArtifact,
     Manifest,
@@ -12,7 +12,7 @@ from metaspike.publishing.artifacts import (
     SourceHealthArtifact,
 )
 
-ARTIFACT_MODELS: dict[str, type[FrozenModel]] = {
+ARTIFACT_MODELS: dict[str, type[ContractModel]] = {
     "manifest": Manifest,
     "current": CurrentArtifact,
     "game": GameArtifact,
@@ -21,7 +21,7 @@ ARTIFACT_MODELS: dict[str, type[FrozenModel]] = {
 }
 
 
-def schema_text(model: type[FrozenModel]) -> str:
+def schema_text(model: type[ContractModel]) -> str:
     schema = {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         **model.model_json_schema(mode="serialization"),

@@ -11,14 +11,19 @@ import httpx
 from pydantic import ValidationError
 
 from metaspike.catalogue.seed import CatalogueError, load_seed_catalogue
+from metaspike.domain.signals import CollectionStatus
 from metaspike.pipeline.collection import (
     CollectionReport,
-    CollectionStatus,
     collect,
     latest_complete_day,
     window_ending,
 )
-from metaspike.pipeline.run import CollectionFailedError, RunResult, build_and_publish
+from metaspike.pipeline.run import (
+    CollectionFailedError,
+    RunResult,
+    build_and_publish,
+    store_report,
+)
 from metaspike.publishing.publisher import to_json
 from metaspike.publishing.schemas import export_schemas, stale_schemas
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
@@ -26,6 +31,8 @@ from metaspike.scoring.v0 import ScoreInvariantError
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import build_client
+from metaspike.storage.base import StoragePolicyError
+from metaspike.storage.local import LocalObservationStore
 
 EXIT_OK = 0
 EXIT_UNEXPECTED = 1
@@ -58,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _fail(EXIT_COLLECTION_FAILED, f"collection failed: {error}")
     except (ArtifactValidationError, ScoreInvariantError, ValidationError) as error:
         return _fail(EXIT_INVALID_OUTPUT, f"invalid output, nothing was published: {error}")
-    except SourcePolicyError as error:
+    except (SourcePolicyError, StoragePolicyError) as error:
         return _fail(EXIT_SOURCE_POLICY, f"source policy: {error}")
     except Exception:
         logger.exception("unexpected failure")
@@ -116,6 +123,13 @@ def _add_collection_options(parser: argparse.ArgumentParser) -> None:
         metavar="DIR",
         help="replay recorded responses from DIR instead of calling the network",
     )
+    parser.add_argument(
+        "--store-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="also append collected observations to a local point-in-time store in DIR",
+    )
 
 
 def _validate_catalogue(_: argparse.Namespace) -> int:
@@ -132,7 +146,11 @@ def _client(args: argparse.Namespace) -> httpx.Client:
 def _collect_report(args: argparse.Namespace, registry: SourceRegistry) -> CollectionReport:
     catalogue = load_seed_catalogue()
     window = window_ending(args.as_of or latest_complete_day(_now()))
-    return collect(catalogue, registry, window, observed_at=_now(), clock=_now)
+    report = collect(catalogue, registry, window, observed_at=_now(), clock=_now)
+    if args.store_dir is not None:
+        kept = store_report(report, LocalObservationStore(args.store_dir, registry.policy))
+        logger.info("stored %d new observation versions in %s", kept, args.store_dir)
+    return report
 
 
 def _collect(args: argparse.Namespace) -> int:
@@ -202,7 +220,8 @@ def _export_schemas(args: argparse.Namespace) -> int:
 
 
 def _print_collection(report: CollectionReport) -> None:
-    print(f"Window: {report.window.start} to {report.window.end} ({report.window.days} days)")
+    first, last = report.window.start.date(), report.window.end.date()
+    print(f"Window: {first} to {last} ({(last - first).days + 1} days)")
     for run in report.runs:
         succeeded = len(run.with_status(CollectionStatus.COLLECTED))
         failed = run.with_status(CollectionStatus.FAILED)

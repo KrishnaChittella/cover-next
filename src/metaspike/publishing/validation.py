@@ -4,7 +4,6 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from metaspike.domain.model import FrozenModel
 from metaspike.publishing.artifacts import (
     CURRENT_FILE,
     GAMES_DIR,
@@ -12,6 +11,7 @@ from metaspike.publishing.artifacts import (
     METHODOLOGY_FILE,
     SCHEMA_VERSION,
     SOURCE_HEALTH_FILE,
+    ContractModel,
     CurrentArtifact,
     GameArtifact,
     Manifest,
@@ -25,7 +25,7 @@ class ArtifactValidationError(Exception):
     """A written artifact breaks the public contract."""
 
 
-def read_artifact[ModelT: FrozenModel](path: Path, model: type[ModelT]) -> ModelT:
+def read_artifact[ModelT: ContractModel](path: Path, model: type[ModelT]) -> ModelT:
     try:
         return model.model_validate_json(path.read_bytes())
     except FileNotFoundError:

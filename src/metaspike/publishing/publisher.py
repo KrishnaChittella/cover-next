@@ -24,7 +24,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from metaspike.domain.model import FrozenModel
+from pydantic import BaseModel
+
 from metaspike.publishing.artifacts import (
     GAMES_DIR,
     MANIFEST_FILE,
@@ -37,7 +38,7 @@ KEEP_VERSIONS = 5
 _STAGING_PREFIX = ".staging-"
 
 
-def to_json(artifact: FrozenModel) -> str:
+def to_json(artifact: BaseModel) -> str:
     """Stable, human-readable JSON. allow_nan=False makes NaN/Infinity a hard error."""
     return (
         json.dumps(artifact.model_dump(mode="json"), indent=2, ensure_ascii=False, allow_nan=False)

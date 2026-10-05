@@ -15,6 +15,7 @@ single source and is NOT a complete measure of creator demand or supply.
 
 import math
 
+from metaspike.domain.metrics import PAGEVIEWS
 from metaspike.domain.model import FrozenModel
 from metaspike.domain.scores import (
     ConfidenceBand,
@@ -25,6 +26,8 @@ from metaspike.domain.scores import (
     ScoreStatus,
     UnscoredReason,
 )
+from metaspike.domain.signals import SignalKey
+from metaspike.domain.timeseries import Granularity
 from metaspike.features.attention import (
     BASELINE_DAYS,
     HISTORY_DAYS,
@@ -32,8 +35,15 @@ from metaspike.features.attention import (
     AttentionFeatures,
     FeatureFlag,
 )
+from metaspike.sources.wikimedia import SOURCE_ID as WIKIMEDIA_SOURCE_ID
 
 SCORE_VERSION = "metaspike_score_v0"
+# v0 reads exactly one signal. Other signals an entity may have are ignored by v0,
+# so they can never change a v0 score or raise its confidence ceiling.
+V0_INPUT_SIGNAL = SignalKey(
+    source=WIKIMEDIA_SOURCE_ID, metric=PAGEVIEWS.metric_id, granularity=Granularity.DAILY
+)
+V0_INDEPENDENT_SOURCES = 1
 
 # 3.5 is the conventional outlier threshold for a modified (median/MAD) z-score
 # (Iglewicz & Hoaglin, 1993). Saturating at twice that gives half credit exactly at

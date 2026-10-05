@@ -1,23 +1,12 @@
 """The contract every source adapter implements."""
 
-from datetime import date, datetime
-from enum import StrEnum
-from typing import Protocol, Self
-
-from pydantic import model_validator
+from datetime import datetime
+from typing import Protocol
 
 from metaspike.domain.games import CanonicalGame, SourceIdentifier
-from metaspike.domain.model import FrozenModel
-from metaspike.domain.observations import Metric, Observation
-
-
-class SourceErrorCode(StrEnum):
-    NOT_FOUND = "not_found"
-    RATE_LIMITED = "rate_limited"
-    TIMEOUT = "timeout"
-    NETWORK_ERROR = "network_error"
-    HTTP_ERROR = "http_error"
-    INVALID_RESPONSE = "invalid_response"
+from metaspike.domain.observations import Observation
+from metaspike.domain.signals import SignalSpec, SourceErrorCode
+from metaspike.domain.timeseries import TimeWindow
 
 
 class SourceError(Exception):
@@ -29,29 +18,14 @@ class SourceError(Exception):
         self.message = message
 
 
-class FetchWindow(FrozenModel):
-    """Inclusive range of UTC days."""
-
-    start: date
-    end: date
-
-    @model_validator(mode="after")
-    def _ordered(self) -> Self:
-        if self.start > self.end:
-            raise ValueError("window start must not be after its end")
-        return self
-
-    @property
-    def days(self) -> int:
-        return (self.end - self.start).days + 1
-
-
 class SourceAdapter(Protocol):
     @property
     def source(self) -> str: ...
 
     @property
-    def metric(self) -> Metric: ...
+    def signals(self) -> tuple[SignalSpec, ...]:
+        """Every metric this source provides, each at the granularity it is fetched at."""
+        ...
 
     @property
     def description(self) -> str:
@@ -62,12 +36,13 @@ class SourceAdapter(Protocol):
         self,
         game: CanonicalGame,
         identifier: SourceIdentifier,
-        window: FetchWindow,
+        signal: SignalSpec,
+        window: TimeWindow,
         observed_at: datetime,
     ) -> list[Observation]:
-        """Return the observed points in the window, or raise SourceError.
+        """Return the observed points of one signal in the window, or raise SourceError.
 
         Adapters report only what the source returned. They never invent a value for
-        a day the source omitted, and never turn a failure into zero activity.
+        a period the source omitted, and never turn a failure into zero activity.
         """
         ...

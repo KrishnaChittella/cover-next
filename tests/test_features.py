@@ -5,7 +5,8 @@ from datetime import timedelta
 
 import pytest
 
-from metaspike.domain.observations import Metric, Observation, ObservationStatus, QualityFlag
+from metaspike.domain.observations import Observation, ObservationStatus, QualityFlag
+from metaspike.domain.timeseries import TimeWindow
 from metaspike.features.attention import (
     MAD_TO_SIGMA,
     AttentionFeatures,
@@ -13,9 +14,8 @@ from metaspike.features.attention import (
     compute_attention_features,
     rolling_mean,
 )
-from metaspike.pipeline.normalize import build_daily_series
-from metaspike.sources.base import FetchWindow
-from metaspike.sources.wikimedia import SOURCE_ID
+from metaspike.pipeline.normalize import build_time_series
+from metaspike.scoring.v0 import V0_INPUT_SIGNAL
 from tests.conftest import GAME_ID, RECORDED_END, RUN_TIME, observation, series_of, spiking, steady
 
 
@@ -219,7 +219,7 @@ def test_extreme_and_random_inputs_never_produce_non_finite_features() -> None:
 def test_features_are_deterministic_and_independent_of_input_order() -> None:
     assert features_of(spiking()) == features_of(spiking())
 
-    window = FetchWindow(start=RECORDED_END - timedelta(days=89), end=RECORDED_END)
+    window = TimeWindow.of_days(RECORDED_END - timedelta(days=89), RECORDED_END)
     observations = [
         observation(window.start + timedelta(days=offset), value)
         for offset, value in enumerate(spiking())
@@ -229,9 +229,7 @@ def test_features_are_deterministic_and_independent_of_input_order() -> None:
     random.Random(1).shuffle(shuffled)
 
     def build(points: list[Observation]) -> AttentionFeatures:
-        series = build_daily_series(
-            GAME_ID, SOURCE_ID, Metric.DAILY_PAGEVIEWS, window, points, RUN_TIME
-        )
+        series = build_time_series(GAME_ID, V0_INPUT_SIGNAL, window, points, RUN_TIME)
         return compute_attention_features(series)
 
     assert build(observations) == build(shuffled)
@@ -257,13 +255,13 @@ def test_normalisation_labels_each_kind_of_gap() -> None:
 
 
 def test_normalisation_rejects_duplicates_and_out_of_window_points() -> None:
-    window = FetchWindow(start=RECORDED_END, end=RECORDED_END)
+    window = TimeWindow.of_days(RECORDED_END, RECORDED_END)
     same_day = [observation(RECORDED_END, 1), observation(RECORDED_END, 2)]
     with pytest.raises(ValueError, match="duplicate"):
-        build_daily_series(GAME_ID, SOURCE_ID, Metric.DAILY_PAGEVIEWS, window, same_day, RUN_TIME)
+        build_time_series(GAME_ID, V0_INPUT_SIGNAL, window, same_day, RUN_TIME)
     outside = [observation(RECORDED_END - timedelta(days=1), 1)]
     with pytest.raises(ValueError, match="outside"):
-        build_daily_series(GAME_ID, SOURCE_ID, Metric.DAILY_PAGEVIEWS, window, outside, RUN_TIME)
+        build_time_series(GAME_ID, V0_INPUT_SIGNAL, window, outside, RUN_TIME)
 
 
 def test_rolling_mean_needs_enough_observed_days() -> None:
