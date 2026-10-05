@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tool caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# MetaSpike local state: generated artifacts and the collection cache are
+# reproducible outputs, never source.
+artifacts/
+.metaspike/
+
+# Secrets and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+service-account*.json
+*-sa.json
+*credentials*.json
+client_secret*.json
+application_default_credentials.json
+.secrets/
+secrets/
+
+# Future infrastructure state (not used yet, never commit)
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp

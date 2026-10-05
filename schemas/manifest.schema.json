@@ -1,0 +1,94 @@
+{
+  "$defs": {
+    "ManifestPaths": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "title": "Current",
+          "type": "string"
+        },
+        "games": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Games",
+          "type": "object"
+        },
+        "methodology": {
+          "title": "Methodology",
+          "type": "string"
+        },
+        "source_health": {
+          "title": "Source Health",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current",
+        "source_health",
+        "methodology",
+        "games"
+      ],
+      "title": "ManifestPaths",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifacts": {
+      "$ref": "#/$defs/ManifestPaths"
+    },
+    "content_hash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Content Hash",
+      "type": "string"
+    },
+    "game_count": {
+      "minimum": 0,
+      "title": "Game Count",
+      "type": "integer"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "ranked_count": {
+      "minimum": 0,
+      "title": "Ranked Count",
+      "type": "integer"
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    },
+    "version_path": {
+      "title": "Version Path",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "content_hash",
+    "version_path",
+    "artifacts",
+    "game_count",
+    "ranked_count"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

@@ -1,0 +1,196 @@
+{
+  "$defs": {
+    "SourceErrorCode": {
+      "enum": [
+        "not_found",
+        "rate_limited",
+        "timeout",
+        "network_error",
+        "http_error",
+        "invalid_response"
+      ],
+      "title": "SourceErrorCode",
+      "type": "string"
+    },
+    "SourceFailure": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "error_code": {
+          "$ref": "#/$defs/SourceErrorCode"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "slug",
+        "error_code"
+      ],
+      "title": "SourceFailure",
+      "type": "object"
+    },
+    "SourceFreshness": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_latest_day": {
+          "format": "date",
+          "title": "Expected Latest Day",
+          "type": "string"
+        },
+        "latest_observed_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Observed Day"
+        },
+        "staleness_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleness Days"
+        }
+      },
+      "required": [
+        "expected_latest_day"
+      ],
+      "title": "SourceFreshness",
+      "type": "object"
+    },
+    "SourceHealthEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "entities_attempted": {
+          "minimum": 0,
+          "title": "Entities Attempted",
+          "type": "integer"
+        },
+        "entities_failed": {
+          "minimum": 0,
+          "title": "Entities Failed",
+          "type": "integer"
+        },
+        "entities_not_mapped": {
+          "minimum": 0,
+          "title": "Entities Not Mapped",
+          "type": "integer"
+        },
+        "entities_succeeded": {
+          "minimum": 0,
+          "title": "Entities Succeeded",
+          "type": "integer"
+        },
+        "failures": {
+          "items": {
+            "$ref": "#/$defs/SourceFailure"
+          },
+          "title": "Failures",
+          "type": "array"
+        },
+        "freshness": {
+          "$ref": "#/$defs/SourceFreshness"
+        },
+        "last_success": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Success"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/SourceStatus"
+        }
+      },
+      "required": [
+        "source",
+        "status",
+        "freshness",
+        "entities_attempted",
+        "entities_succeeded",
+        "entities_failed",
+        "entities_not_mapped",
+        "failures"
+      ],
+      "title": "SourceHealthEntry",
+      "type": "object"
+    },
+    "SourceStatus": {
+      "enum": [
+        "healthy",
+        "degraded",
+        "failed"
+      ],
+      "title": "SourceStatus",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceHealthEntry"
+      },
+      "title": "Sources",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "sources"
+  ],
+  "title": "SourceHealthArtifact",
+  "type": "object"
+}

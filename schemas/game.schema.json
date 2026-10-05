@@ -1,0 +1,1025 @@
+{
+  "$defs": {
+    "AttentionFeatures": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of Day"
+        },
+        "avg_3d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg 3D"
+        },
+        "avg_7d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avg 7D"
+        },
+        "baseline_mad_28d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Mad 28D"
+        },
+        "baseline_mean_28d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Mean 28D"
+        },
+        "baseline_median_28d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Median 28D"
+        },
+        "baseline_samples": {
+          "default": 0,
+          "title": "Baseline Samples",
+          "type": "integer"
+        },
+        "baseline_std_28d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Baseline Std 28D"
+        },
+        "consecutive_rising_days": {
+          "default": 0,
+          "title": "Consecutive Rising Days",
+          "type": "integer"
+        },
+        "flags": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FeatureFlag"
+          },
+          "title": "Flags",
+          "type": "array"
+        },
+        "history_percentile": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "History Percentile"
+        },
+        "history_span_days": {
+          "default": 0,
+          "title": "History Span Days",
+          "type": "integer"
+        },
+        "latest_views": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Views"
+        },
+        "lift_7d_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lift 7D Pct"
+        },
+        "lift_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lift Pct"
+        },
+        "lift_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lift Ratio"
+        },
+        "missing_days": {
+          "default": 0,
+          "title": "Missing Days",
+          "type": "integer"
+        },
+        "observed_days": {
+          "title": "Observed Days",
+          "type": "integer"
+        },
+        "percentile_samples": {
+          "default": 0,
+          "title": "Percentile Samples",
+          "type": "integer"
+        },
+        "prior_avg_3d": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prior Avg 3D"
+        },
+        "recent_7d_samples": {
+          "default": 0,
+          "title": "Recent 7D Samples",
+          "type": "integer"
+        },
+        "robust_scale_method": {
+          "anyOf": [
+            {
+              "enum": [
+                "mad",
+                "mean_ad"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Robust Scale Method"
+        },
+        "robust_z_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Robust Z Score"
+        },
+        "staleness_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleness Days"
+        },
+        "velocity_pct": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Velocity Pct"
+        },
+        "velocity_ratio": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Velocity Ratio"
+        },
+        "window_days": {
+          "title": "Window Days",
+          "type": "integer"
+        },
+        "z_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Z Score"
+        }
+      },
+      "required": [
+        "window_days",
+        "observed_days"
+      ],
+      "title": "AttentionFeatures",
+      "type": "object"
+    },
+    "ConfidenceBand": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ConfidenceBand",
+      "type": "string"
+    },
+    "ConfidenceFactors": {
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Completeness",
+          "type": "number"
+        },
+        "freshness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Freshness",
+          "type": "number"
+        },
+        "history": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "History",
+          "type": "number"
+        },
+        "samples": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Samples",
+          "type": "number"
+        },
+        "source_ceiling": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Source Ceiling",
+          "type": "number"
+        }
+      },
+      "required": [
+        "source_ceiling",
+        "freshness",
+        "history",
+        "completeness",
+        "samples"
+      ],
+      "title": "ConfidenceFactors",
+      "type": "object"
+    },
+    "ConfidenceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "band": {
+          "$ref": "#/$defs/ConfidenceBand"
+        },
+        "ceiling": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Ceiling",
+          "type": "number"
+        },
+        "factors": {
+          "$ref": "#/$defs/ConfidenceFactors"
+        },
+        "independent_sources": {
+          "minimum": 0,
+          "title": "Independent Sources",
+          "type": "integer"
+        },
+        "value": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "band",
+        "ceiling",
+        "independent_sources",
+        "factors"
+      ],
+      "title": "ConfidenceResult",
+      "type": "object"
+    },
+    "CoverageStatus": {
+      "enum": [
+        "covered",
+        "failed",
+        "not_mapped"
+      ],
+      "title": "CoverageStatus",
+      "type": "string"
+    },
+    "EventType": {
+      "enum": [
+        "release",
+        "major_patch",
+        "minor_patch",
+        "season",
+        "wipe",
+        "expansion",
+        "dlc",
+        "expedition",
+        "beta",
+        "playtest",
+        "free_weekend",
+        "trailer",
+        "showcase",
+        "platform_release",
+        "major_in_game_event"
+      ],
+      "title": "EventType",
+      "type": "string"
+    },
+    "Explanation": {
+      "additionalProperties": false,
+      "properties": {
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/Reason"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "top_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Top Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "summary",
+        "reasons",
+        "top_reasons"
+      ],
+      "title": "Explanation",
+      "type": "object"
+    },
+    "FeatureFlag": {
+      "enum": [
+        "no_observations",
+        "insufficient_recent_data",
+        "insufficient_history",
+        "zero_baseline",
+        "zero_dispersion",
+        "velocity_undefined",
+        "stale",
+        "has_missing_days"
+      ],
+      "title": "FeatureFlag",
+      "type": "string"
+    },
+    "GameEvent": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "ends_on": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ends On"
+        },
+        "event_type": {
+          "$ref": "#/$defs/EventType"
+        },
+        "reference": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reference"
+        },
+        "source": {
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "starts_on": {
+          "format": "date",
+          "title": "Starts On",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "event_type",
+        "title",
+        "starts_on",
+        "source"
+      ],
+      "title": "GameEvent",
+      "type": "object"
+    },
+    "HistoryPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "rolling_mean_7d": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rolling Mean 7D"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "day"
+      ],
+      "title": "HistoryPoint",
+      "type": "object"
+    },
+    "HistorySeries": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "granularity": {
+          "title": "Granularity",
+          "type": "string"
+        },
+        "metric": {
+          "$ref": "#/$defs/Metric"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/HistoryPoint"
+          },
+          "title": "Points",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "metric",
+        "granularity",
+        "points"
+      ],
+      "title": "HistorySeries",
+      "type": "object"
+    },
+    "LifecycleState": {
+      "enum": [
+        "PRE_RELEASE",
+        "LAUNCH_WINDOW",
+        "RELEASED",
+        "EVERGREEN",
+        "LIVE_SERVICE",
+        "DORMANT"
+      ],
+      "title": "LifecycleState",
+      "type": "string"
+    },
+    "MethodologyRef": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "scope_note": {
+          "title": "Scope Note",
+          "type": "string"
+        },
+        "score_version": {
+          "title": "Score Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "score_version",
+        "path",
+        "scope_note"
+      ],
+      "title": "MethodologyRef",
+      "type": "object"
+    },
+    "Metric": {
+      "enum": [
+        "daily_pageviews"
+      ],
+      "title": "Metric",
+      "type": "string"
+    },
+    "Reason": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text"
+      ],
+      "title": "Reason",
+      "type": "object"
+    },
+    "RelationshipType": {
+      "enum": [
+        "MOD_ECOSYSTEM",
+        "ONLINE_COMPONENT",
+        "SEQUEL"
+      ],
+      "title": "RelationshipType",
+      "type": "string"
+    },
+    "RelationshipView": {
+      "additionalProperties": false,
+      "properties": {
+        "parent_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Parent Game Id",
+          "type": "string"
+        },
+        "parent_name": {
+          "title": "Parent Name",
+          "type": "string"
+        },
+        "parent_slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Parent Slug",
+          "type": "string"
+        },
+        "relationship_type": {
+          "$ref": "#/$defs/RelationshipType"
+        }
+      },
+      "required": [
+        "relationship_type",
+        "parent_game_id",
+        "parent_slug",
+        "parent_name"
+      ],
+      "title": "RelationshipView",
+      "type": "object"
+    },
+    "ScoreComponents": {
+      "additionalProperties": false,
+      "properties": {
+        "anomaly": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Anomaly",
+          "type": "number"
+        },
+        "magnitude": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Magnitude",
+          "type": "number"
+        },
+        "momentum": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Momentum",
+          "type": "number"
+        },
+        "significance": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Significance",
+          "type": "number"
+        }
+      },
+      "required": [
+        "significance",
+        "magnitude",
+        "anomaly",
+        "momentum"
+      ],
+      "title": "ScoreComponents",
+      "type": "object"
+    },
+    "ScoreResult": {
+      "additionalProperties": false,
+      "properties": {
+        "components": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ScoreComponents"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "score_version": {
+          "title": "Score Version",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ScoreStatus"
+        },
+        "unscored_reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnscoredReason"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "value": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "score_version",
+        "status"
+      ],
+      "title": "ScoreResult",
+      "type": "object"
+    },
+    "ScoreStatus": {
+      "enum": [
+        "scored",
+        "unscored"
+      ],
+      "title": "ScoreStatus",
+      "type": "string"
+    },
+    "SourceCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "latest_observed_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Observed Day"
+        },
+        "missing_days": {
+          "default": 0,
+          "title": "Missing Days",
+          "type": "integer"
+        },
+        "observed_days": {
+          "default": 0,
+          "title": "Observed Days",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "staleness_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleness Days"
+        },
+        "status": {
+          "$ref": "#/$defs/CoverageStatus"
+        }
+      },
+      "required": [
+        "source",
+        "status"
+      ],
+      "title": "SourceCoverage",
+      "type": "object"
+    },
+    "UnscoredReason": {
+      "enum": [
+        "no_observations",
+        "insufficient_history",
+        "insufficient_recent_data",
+        "zero_baseline",
+        "zero_dispersion"
+      ],
+      "title": "UnscoredReason",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Aliases",
+      "type": "array"
+    },
+    "canonical_game_id": {
+      "pattern": "^msg_[0-9]{4}$",
+      "title": "Canonical Game Id",
+      "type": "string"
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ConfidenceResult"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "events": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/GameEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "explanation": {
+      "$ref": "#/$defs/Explanation"
+    },
+    "features": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AttentionFeatures"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/HistorySeries"
+      },
+      "title": "History",
+      "type": "array"
+    },
+    "lifecycle_state": {
+      "$ref": "#/$defs/LifecycleState"
+    },
+    "methodology": {
+      "$ref": "#/$defs/MethodologyRef"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "rank": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rank"
+    },
+    "relationships": {
+      "items": {
+        "$ref": "#/$defs/RelationshipView"
+      },
+      "title": "Relationships",
+      "type": "array"
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "score": {
+      "$ref": "#/$defs/ScoreResult"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    },
+    "slug": {
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Slug",
+      "type": "string"
+    },
+    "source_coverage": {
+      "items": {
+        "$ref": "#/$defs/SourceCoverage"
+      },
+      "title": "Source Coverage",
+      "type": "array"
+    },
+    "updated_at": {
+      "format": "date-time",
+      "title": "Updated At",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "canonical_game_id",
+    "slug",
+    "name",
+    "aliases",
+    "lifecycle_state",
+    "relationships",
+    "score",
+    "explanation",
+    "history",
+    "source_coverage",
+    "methodology",
+    "updated_at"
+  ],
+  "title": "GameArtifact",
+  "type": "object"
+}

@@ -1,0 +1,333 @@
+{
+  "$defs": {
+    "ConfidenceBand": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ConfidenceBand",
+      "type": "string"
+    },
+    "CoverageStatus": {
+      "enum": [
+        "covered",
+        "failed",
+        "not_mapped"
+      ],
+      "title": "CoverageStatus",
+      "type": "string"
+    },
+    "LeaderboardEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_path": {
+          "title": "Artifact Path",
+          "type": "string"
+        },
+        "as_of_day": {
+          "format": "date",
+          "title": "As Of Day",
+          "type": "string"
+        },
+        "canonical_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "confidence": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "confidence_band": {
+          "$ref": "#/$defs/ConfidenceBand"
+        },
+        "lifecycle_state": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rank": {
+          "minimum": 1,
+          "title": "Rank",
+          "type": "integer"
+        },
+        "score": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "source_coverage": {
+          "items": {
+            "$ref": "#/$defs/SourceCoverage"
+          },
+          "title": "Source Coverage",
+          "type": "array"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "top_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Top Reasons",
+          "type": "array"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rank",
+        "canonical_game_id",
+        "slug",
+        "name",
+        "score",
+        "confidence",
+        "confidence_band",
+        "lifecycle_state",
+        "summary",
+        "top_reasons",
+        "source_coverage",
+        "as_of_day",
+        "updated_at",
+        "artifact_path"
+      ],
+      "title": "LeaderboardEntry",
+      "type": "object"
+    },
+    "LifecycleState": {
+      "enum": [
+        "PRE_RELEASE",
+        "LAUNCH_WINDOW",
+        "RELEASED",
+        "EVERGREEN",
+        "LIVE_SERVICE",
+        "DORMANT"
+      ],
+      "title": "LifecycleState",
+      "type": "string"
+    },
+    "SourceCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "attribution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attribution"
+        },
+        "latest_observed_day": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Observed Day"
+        },
+        "missing_days": {
+          "default": 0,
+          "title": "Missing Days",
+          "type": "integer"
+        },
+        "observed_days": {
+          "default": 0,
+          "title": "Observed Days",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "staleness_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Staleness Days"
+        },
+        "status": {
+          "$ref": "#/$defs/CoverageStatus"
+        }
+      },
+      "required": [
+        "source",
+        "status"
+      ],
+      "title": "SourceCoverage",
+      "type": "object"
+    },
+    "UnrankedEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_path": {
+          "title": "Artifact Path",
+          "type": "string"
+        },
+        "canonical_game_id": {
+          "pattern": "^msg_[0-9]{4}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "lifecycle_state": {
+          "$ref": "#/$defs/LifecycleState"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "$ref": "#/$defs/UnscoredReason"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "source_coverage": {
+          "items": {
+            "$ref": "#/$defs/SourceCoverage"
+          },
+          "title": "Source Coverage",
+          "type": "array"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "slug",
+        "name",
+        "lifecycle_state",
+        "reason",
+        "summary",
+        "source_coverage",
+        "updated_at",
+        "artifact_path"
+      ],
+      "title": "UnrankedEntry",
+      "type": "object"
+    },
+    "UnscoredReason": {
+      "enum": [
+        "no_observations",
+        "insufficient_history",
+        "insufficient_recent_data",
+        "zero_baseline",
+        "zero_dispersion"
+      ],
+      "title": "UnscoredReason",
+      "type": "string"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "active_sources": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Active Sources",
+      "type": "array"
+    },
+    "confidence_ceiling": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Confidence Ceiling",
+      "type": "number"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/LeaderboardEntry"
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "expected_latest_day": {
+      "format": "date",
+      "title": "Expected Latest Day",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope_note": {
+      "title": "Scope Note",
+      "type": "string"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    },
+    "unranked": {
+      "items": {
+        "$ref": "#/$defs/UnrankedEntry"
+      },
+      "title": "Unranked",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "scope_note",
+    "expected_latest_day",
+    "confidence_ceiling",
+    "active_sources",
+    "entries",
+    "unranked"
+  ],
+  "title": "CurrentArtifact",
+  "type": "object"
+}
