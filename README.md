@@ -18,20 +18,27 @@ milestone: nothing outside this repository may depend on it.
 Phase 1 of the roadmap (foundation refactor) is complete: the code no longer
 assumes one source or daily data, and v0 output is unchanged.
 
-Phase 2 (canonical entity resolution and lifecycle) is in progress. Part A is
-built: UUIDv4 canonical ids with a frozen legacy mapping, aliases and lineage;
-versioned source bindings; stage-aware source policy; a shared rate limiter;
-source-native catalogue records; and the IGDB and Steam catalogue adapters, both
-verified against the live APIs on 2026-10-05.
+Phase 2 (canonical entity resolution and lifecycle) is built:
 
-A 200-case golden evaluation set for entity resolution exists as a **draft**
-(`tests/fixtures/resolution_golden.json`). It was built from recorded IGDB and
-Steam responses, and every label cites the recorded fields that justify it. It
-must be reviewed and frozen before any resolver is written, so that thresholds
-can never be tuned into it.
+- **Identity:** UUIDv4 canonical ids with a frozen legacy mapping, aliases, merge
+  and split lineage, and versioned point-in-time source bindings.
+- **Resolver:** deterministic evidence and hard gates, no learning and no fuzzy
+  matching. Decisions are `AUTO_MATCH`, `NEW_ENTITY`, `QUARANTINE`,
+  `MANUAL_OVERRIDE`, or "not an entity" for related products.
+- **Quarantine:** an unresolved source record gets no canonical id, is never
+  scored or published, and is re-evaluated automatically when its evidence changes.
+- **Golden set:** 200 cases built from recorded IGDB and Steam responses, frozen
+  (version 2, hash pinned). A label is never changed because the resolver fails it.
+- **Lifecycle:** deterministic, versioned rules that never read a score, with
+  append-only history.
+- **Generated catalogue:** the runtime catalogue is produced by the generator; the
+  15 original entities are bootstrap material and keep their identities.
 
-Not built yet (Part B): the resolver, quarantine store, lifecycle engine and
-generated catalogue.
+Resolver quality on the frozen set (`uv run metaspike evaluate-resolver`):
+0 false automatic merges, precision 51/51, recall 43/62, new-entity accuracy 70/70.
+Every miss is a safe quarantine. All 18 positives whose id link is withheld are
+quarantined, because Steam's catalogue carries no dates or companies to corroborate
+a title with.
 
 ## What is implemented
 
@@ -80,6 +87,10 @@ uv sync
 | `uv run metaspike build` | Score and publish from the cached collection |
 | `uv run metaspike validate-artifacts` | Validate what is published in `artifacts/` |
 | `uv run metaspike export-schemas` | Regenerate `schemas/` from the contract models (`--check` to verify) |
+
+`uv run metaspike evaluate-resolver` evaluates the resolver on the frozen golden
+set and fails if it makes a single false automatic merge. `uv run metaspike
+generate-catalogue` resolves recorded source records into a catalogue state file.
 
 `uv run --env-file .env metaspike probe-sources` makes one small authenticated
 call per catalogue source and reports the field names and vocabularies it sees. It
@@ -137,8 +148,10 @@ src/metaspike/
     scores.py            score, confidence and explanation results
     source_policy.py     permissions, rate limits, quota, lag, field and display rules
   catalogue/
-    seed.py              bootstrap catalogue
+    seed.py              bootstrap entities and migration anchors
     legacy_ids.py        frozen msg_NNNN -> UUIDv4 migration table
+    overrides.py         versioned identity overrides (FiveM only)
+    generate.py          generates the canonical catalogue from source records
   sources/
     base.py              SourceAdapter protocol, SourceError
     registry.py          refuses adapters whose policy does not clear the stage
@@ -165,8 +178,16 @@ src/metaspike/
     local.py             local JSON Lines implementation
     records.py           local store for source-native records
   resolution/
+    normalize.py         deterministic title normalisation
+    models.py            resolver input, evidence, decisions, decision log
+    resolver.py          candidates, evidence, vetoes and gates
+    quarantine.py        unresolved records and re-evaluation triggers
+    evaluate.py          metrics against the frozen golden set
     golden.py            the golden evaluation set's model and integrity rules
     recorded.py          loads recorded IGDB/Steam rows through the real parsers
+  lifecycle/
+    rules.py             lifecycle rules, version 1
+    history.py           append-only lifecycle history, hold period, overrides
   publishing/
     artifacts.py         the artifact contract: view models only, no domain imports
     mapping.py           the only place domain models become contract views
@@ -386,7 +407,8 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 2 of the internal roadmap: canonical entity resolution and lifecycle
-(IGDB and the Steam app list). No cloud resources exist yet; private collection
-infrastructure begins in Phase 4, and nothing is public before the single
-production release.
+Phase 3 of the internal roadmap: Steam demand signals and cross-source
+normalisation. Steam's current-player count is a sample-now source, so the adapter
+contract must gain a sampling mode and history must come from our own store. No
+cloud resources exist yet; private collection begins in Phase 4, and nothing is
+public before the single production release.

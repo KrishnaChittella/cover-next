@@ -68,6 +68,13 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
   were seen, so a past score can be replayed without look-ahead.
 - **Contract views are separate from domain models.** The current `1.x` contract
   is internal and non-binding.
+- **False merges are worse than missed merges.** The resolver merges only on a
+  cross-source id link with a compatible title, or on title plus timing plus a
+  shared company. Anything else plausible is quarantined, with no canonical id.
+- **The catalogue is generated.** Bootstrap entities keep their identities; every
+  other entity is admitted by resolution. Overrides are versioned exceptions.
+- **Lifecycle is versioned and score-free.** Thresholds are initial rules under a
+  rule version, not domain truth.
 - **Canonical ids are opaque.** Slugs and names can change; `canonical_game_id`
   cannot. Related entities (GTA V, GTA Online, FiveM) stay separate and are
   linked by typed relationships.

@@ -25,9 +25,17 @@ class LifecycleState(StrEnum):
 
 
 class RelationshipType(StrEnum):
+    # Between two canonical entities.
     MOD_ECOSYSTEM = "MOD_ECOSYSTEM"
     ONLINE_COMPONENT = "ONLINE_COMPONENT"
     SEQUEL = "SEQUEL"
+    REMAKE = "REMAKE"
+    REMASTER = "REMASTER"
+    STANDALONE_EXPANSION = "STANDALONE_EXPANSION"
+    # From a related product, which is never an entity itself, to the entity or
+    # entities it packages.
+    PACKAGING_VARIANT = "PACKAGING_VARIANT"
+    COLLECTION = "COLLECTION"
 
 
 class SourceIdentifier(FrozenModel):

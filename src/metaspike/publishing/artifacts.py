@@ -40,7 +40,16 @@ SlugView = Annotated[str, StringConstraints(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$
 LifecycleStateView = Literal[
     "PRE_RELEASE", "LAUNCH_WINDOW", "RELEASED", "EVERGREEN", "LIVE_SERVICE", "DORMANT"
 ]
-RelationshipTypeView = Literal["MOD_ECOSYSTEM", "ONLINE_COMPONENT", "SEQUEL"]
+RelationshipTypeView = Literal[
+    "MOD_ECOSYSTEM",
+    "ONLINE_COMPONENT",
+    "SEQUEL",
+    "REMAKE",
+    "REMASTER",
+    "STANDALONE_EXPANSION",
+    "PACKAGING_VARIANT",
+    "COLLECTION",
+]
 ScoreStatusView = Literal["scored", "unscored"]
 UnscoredReasonView = Literal[
     "no_observations",

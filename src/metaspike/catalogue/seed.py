@@ -1,7 +1,10 @@
-"""Seed catalogue: bootstrap configuration, not observations.
+"""Bootstrap entities: migration material, not routine catalogue management.
 
-It holds identity, relationships, lifecycle state and source mappings only. No
-player counts, release dates or statistics belong here.
+These are the 15 entities that existed before canonical resolution. They are kept
+so that their identities survive: each keeps its fixed UUID, slug, relationships
+and Wikimedia mapping. The runtime catalogue is no longer this list; it is GENERATED
+(see `catalogue/generate.py`) from these bootstrap entities plus whatever source
+records resolution admits. New games are never added here by hand.
 
 Wikimedia mappings are exact English Wikipedia article titles, each verified to be
 a real article rather than a redirect, because the Pageviews API counts a redirect
@@ -25,6 +28,7 @@ from metaspike.domain.games import (
     RelationshipType,
     SourceIdentifier,
 )
+from metaspike.domain.identity import SourceRecordKey
 from metaspike.sources.wikimedia import ENGLISH_WIKIPEDIA, SOURCE_ID
 
 
@@ -43,7 +47,7 @@ def _wiki(article: str) -> tuple[SourceIdentifier, ...]:
 
 GTA_V = _id("msg_0001")
 
-_SEED_GAMES: tuple[CanonicalGame, ...] = (
+BOOTSTRAP_GAMES: tuple[CanonicalGame, ...] = (
     CanonicalGame(
         canonical_game_id=GTA_V,
         slug="gta-v",
@@ -172,6 +176,30 @@ _SEED_GAMES: tuple[CanonicalGame, ...] = (
 )
 
 
+# The IGDB record each bootstrap entity corresponds to, as observed on 2026-10-05.
+# These bind existing identities to source records once, at migration; they are not
+# how games are resolved in routine operation. FiveM is bound by its explicit
+# override instead, and Minecraft has no single matching IGDB main-game record.
+BOOTSTRAP_ANCHORS: dict[str, SourceRecordKey] = {
+    slug: SourceRecordKey(source="igdb", source_id=igdb_id)
+    for slug, igdb_id in {
+        "gta-v": "1020",
+        "gta-online": "134710",
+        "gta-vi": "52189",
+        "escape-from-tarkov": "15536",
+        "star-citizen": "1595",
+        "no-mans-sky": "3225",
+        "counter-strike-2": "242408",
+        "dota-2": "2963",
+        "fortnite": "1905",
+        "elden-ring": "119133",
+        "baldurs-gate-3": "119171",
+        "helldivers-2": "250616",
+        "rust": "3277",
+    }.items()
+}
+
+
 def build_catalogue(games: tuple[CanonicalGame, ...]) -> Catalogue:
     try:
         return Catalogue(games=games)
@@ -180,9 +208,20 @@ def build_catalogue(games: tuple[CanonicalGame, ...]) -> Catalogue:
         raise CatalogueError(problems) from None
 
 
-def load_seed_catalogue() -> Catalogue:
+def bootstrap_catalogue() -> Catalogue:
+    """The bootstrap entities on their own, validated. Input to generation."""
     try:
         verify_legacy_mapping()
     except LegacyMappingError as error:
         raise CatalogueError(str(error)) from None
-    return build_catalogue(_SEED_GAMES)
+    return build_catalogue(BOOTSTRAP_GAMES)
+
+
+def load_seed_catalogue() -> Catalogue:
+    """The runtime catalogue when no source records have been resolved yet.
+
+    It is produced by the generator, from the bootstrap entities alone.
+    """
+    from metaspike.catalogue.generate import generate_catalogue
+
+    return generate_catalogue().catalogue

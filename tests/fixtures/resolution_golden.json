@@ -1,13 +1,15 @@
 {
- "version": 1,
- "status": "draft",
+ "version": 2,
+ "status": "frozen",
  "created_on": "2026-10-05",
  "sources_recorded_on": "2026-10-05",
  "notes": [
-  "Every label is justified by citations to recorded source fields, verified on load.",
-  "Group totals match the approved 62 / 85 / 33 / 20. The category distribution inside the groups deviates from the approved plan and awaits approval: see dropped[] and the Part A report.",
-  "Not-an-entity cases for packs, episodes, seasons and updates substitute for the demo and beta categories; IGDB types those products itself.",
-  "Cases marked truth=difficult have an expected decision that reflects the evidence available, not certainty about the underlying fact."
+  "FROZEN. A label is never changed because a resolver fails it. Any correction needs a version bump, a recorded reason, evidence and a separate review.",
+  "Every label is justified by ground_truth_evidence: citations to recorded source fields, verified on load.",
+  "Group totals are 62 positive, 85 negative, 33 quarantine, 20 new entity. The category distribution is the approved, evidence-driven one; see dropped[] for what could not be grounded.",
+  "18 positive cases carry masked_evidence: the Steam app id link proves the label but is withheld from the resolver, wherever it appears, so the resolver must decide from the remaining evidence.",
+  "Cases marked truth=difficult have an expected decision that reflects the evidence available, not certainty about the underlying fact.",
+  "Version 2 (2026-10-05): split evidence into ground-truth and masked; Counter-Strike case reworded as current-state; FiveM expected decision set to manual_override."
  ],
  "cases": [
   {
@@ -35,7 +37,8 @@
     "igdb-2596-the-settlers-ii-veni-vidi-vici"
    ],
    "rationale": "IGDB types this record as a Bundle and names a main game as its version parent. A bundle is a package, not a game, and never becomes a canonical entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -61,7 +64,7 @@
      "value": "The Settlers II: Gold Edition"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-bundles-02",
@@ -88,7 +91,8 @@
     "igdb-280-doom-3"
    ],
    "rationale": "IGDB types this record as a Bundle and names a main game as its version parent. A bundle is a package, not a game, and never becomes a canonical entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -114,7 +118,7 @@
      "value": "Doom 3: BFG Edition"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-bundles-03",
@@ -141,7 +145,8 @@
     "igdb-620-burnout-paradise"
    ],
    "rationale": "IGDB types this record as a Bundle and names a main game as its version parent. A bundle is a package, not a game, and never becomes a canonical entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -167,7 +172,7 @@
      "value": "Burnout Paradise: The Ultimate Box"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-01",
@@ -198,7 +203,8 @@
     "igdb-348220-call-of-duty-black-ops-7"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -240,7 +246,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-02",
@@ -271,7 +277,8 @@
     "igdb-302156-call-of-duty-black-ops-6"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -313,7 +320,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-03",
@@ -344,7 +351,8 @@
     "igdb-260780-call-of-duty-modern-warfare-iii"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -386,7 +394,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-04",
@@ -417,7 +425,8 @@
     "igdb-200165-call-of-duty-modern-warfare-ii"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -459,7 +468,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-05",
@@ -490,7 +499,8 @@
     "igdb-217815-call-of-duty-warzone"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -532,7 +542,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-call_of_duty_family-06",
@@ -563,7 +573,8 @@
     "igdb-165067-call-of-duty-vanguard"
    ],
    "rationale": "Two separate Call of Duty main games in IGDB with different titles and first release dates. A shared series name is not identity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -605,7 +616,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-counter_strike_lineage-01",
@@ -640,8 +651,9 @@
    "must_not_match": [
     "igdb-1372-counter-strike-global-offensive"
    ],
-   "rationale": "IGDB lists Steam app 730 on Counter-Strike 2 and a different Steam app id on Counter-Strike: Global Offensive. App 730 is CS2 and must not be merged into CS:GO.",
-   "evidence": [
+   "rationale": "Current-state resolution. As recorded on 2026-10-05, IGDB lists Steam app 730 on Counter-Strike 2 and a different Steam app id on Counter-Strike: Global Offensive, so today the app resolves to Counter-Strike 2 and not to Global Offensive. This says nothing about which game the app id identified at any earlier time.",
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -667,7 +679,7 @@
      "value": "4465480"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-counter_strike_lineage-02",
@@ -694,7 +706,8 @@
     "igdb-16957-counter-strike-nexon"
    ],
    "rationale": "Two separate Counter-Strike main games in IGDB with different titles and first release dates; the series name alone does not make them one game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -736,7 +749,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-counter_strike_lineage-03",
@@ -763,7 +776,8 @@
     "igdb-76823-counter-strike-online-2"
    ],
    "rationale": "Two separate Counter-Strike main games in IGDB with different titles and first release dates; the series name alone does not make them one game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -805,7 +819,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-counter_strike_lineage-04",
@@ -832,7 +846,8 @@
     "igdb-1372-counter-strike-global-offensive"
    ],
    "rationale": "Two separate Counter-Strike main games in IGDB with different titles and first release dates; the series name alone does not make them one game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -874,7 +889,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-counter_strike_lineage-05",
@@ -901,7 +916,8 @@
     "igdb-77251-counter-strike-online"
    ],
    "rationale": "Two separate Counter-Strike main games in IGDB with different titles and first release dates; the series name alone does not make them one game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -943,7 +959,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-01",
@@ -974,7 +990,8 @@
     "igdb-74-mass-effect-2"
    ],
    "rationale": "IGDB types this record as DLC of its parent game. DLC never becomes a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1000,7 +1017,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-02",
@@ -1031,7 +1048,8 @@
     "igdb-74-mass-effect-2"
    ],
    "rationale": "IGDB types this record as DLC of its parent game. DLC never becomes a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1057,7 +1075,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-03",
@@ -1084,7 +1102,8 @@
     "igdb-472-the-elder-scrolls-v-skyrim"
    ],
    "rationale": "IGDB types this record as DLC of its parent game. DLC never becomes a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1110,7 +1129,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-04",
@@ -1141,7 +1160,8 @@
     "igdb-44-overlord"
    ],
    "rationale": "IGDB types this record as an Expansion of its parent game. It requires the base game and never becomes a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1167,7 +1187,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-05",
@@ -1198,7 +1218,8 @@
     "igdb-2949-killing-floor"
    ],
    "rationale": "Steam returns this app only under its DLC filter, and its title begins with an existing game's title. DLC never becomes a canonical game and is not the base game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -1232,7 +1253,7 @@
      "value": "Killing Floor"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-dlc-06",
@@ -1263,7 +1284,8 @@
     "igdb-15-fallout-3"
    ],
    "rationale": "Steam returns this app only under its DLC filter, and its title begins with an existing game's title. DLC never becomes a canonical game and is not the base game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -1297,7 +1319,7 @@
      "value": "Fallout 3"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-episodes_seasons-01",
@@ -1324,7 +1346,8 @@
     "igdb-71234-commander-keen-invasion-of-the-vorticons"
    ],
    "rationale": "IGDB types this record as an Episode of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1350,7 +1373,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-episodes_seasons-02",
@@ -1377,7 +1400,8 @@
     "igdb-71234-commander-keen-invasion-of-the-vorticons"
    ],
    "rationale": "IGDB types this record as an Episode of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1403,7 +1427,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-episodes_seasons-03",
@@ -1430,7 +1454,8 @@
     "igdb-18870-championship-manager-4"
    ],
    "rationale": "IGDB types this record as a Season of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1456,7 +1481,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-01",
@@ -1487,7 +1512,8 @@
     "igdb-11-vampire-the-masquerade-bloodlines"
    ],
    "rationale": "Both records belong to IGDB's 'World of Darkness' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1529,7 +1555,7 @@
      "value": "2019-12-11"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-02",
@@ -1560,7 +1586,8 @@
     "igdb-114-star-wars-the-old-republic"
    ],
    "rationale": "Both records belong to IGDB's 'Star Wars' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1602,7 +1629,7 @@
      "value": "2003-07-15"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-03",
@@ -1629,7 +1656,8 @@
     "igdb-119-mortal-kombat"
    ],
    "rationale": "Both records belong to IGDB's 'Mortal Kombat' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1671,7 +1699,7 @@
      "value": "2002-11-16"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-04",
@@ -1698,7 +1726,8 @@
     "igdb-121-minecraft-java-edition"
    ],
    "rationale": "Both records belong to IGDB's 'Minecraft' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1740,7 +1769,7 @@
      "value": "2015-10-13"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-05",
@@ -1771,7 +1800,8 @@
     "igdb-202-sam-and-max-hit-the-road"
    ],
    "rationale": "Both records belong to IGDB's 'Sam & Max' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1813,7 +1843,7 @@
      "value": "2008-04-10"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-franchise_collisions-06",
@@ -1840,7 +1870,8 @@
     "igdb-237-simcity-3000"
    ],
    "rationale": "Both records belong to IGDB's 'Sim' franchise and share a title prefix, but are separate main games with different titles and release dates.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1882,7 +1913,7 @@
      "value": "1993-12-01"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-gta_family-01",
@@ -1909,7 +1940,8 @@
     "igdb-1020-grand-theft-auto-v"
    ],
    "rationale": "IGDB records Grand Theft Auto Online as a Standalone Expansion whose parent is Grand Theft Auto V: a separate entity related to GTA V, never merged into it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1935,7 +1967,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-gta_family-02",
@@ -1965,14 +1997,15 @@
     }
    ],
    "context": [],
-   "expected": "not_an_entity",
+   "expected": "manual_override",
    "target": null,
    "must_not_match": [
     "igdb-1020-grand-theft-auto-v",
     "igdb-134710-grand-theft-auto-online"
    ],
-   "rationale": "IGDB records FiveM as a Mod whose parent is Grand Theft Auto V. A mod is never admitted automatically; FiveM becomes an entity only through the approved explicit override, and must not merge into GTA V or GTA Online.",
-   "evidence": [
+   "rationale": "IGDB records FiveM as a Mod whose parent is Grand Theft Auto V, and a mod is never admitted automatically. FiveM is a canonical MetaSpike entity only because of the approved explicit override, which is evaluated before the generic non-entity rule. It stays distinct from Grand Theft Auto V and Grand Theft Auto Online.",
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -1990,7 +2023,7 @@
      "value": "1020"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-gta_family-03",
@@ -2026,7 +2059,8 @@
     "igdb-134710-grand-theft-auto-online"
    ],
    "rationale": "IGDB has a second record titled 'Grand Theft Auto V' that it types as a Bundle with GTA V as version parent. It is packaging of GTA V: never a new entity and never GTA Online.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2044,7 +2078,7 @@
      "value": "1020"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-gta_family-04",
@@ -2071,7 +2105,8 @@
     "igdb-1020-grand-theft-auto-v"
    ],
    "rationale": "A different numbered Grand Theft Auto main game with its own IGDB record and release date; same franchise, not the same game as GTA V.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2105,7 +2140,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-gta_family-05",
@@ -2132,7 +2167,8 @@
     "igdb-1020-grand-theft-auto-v"
    ],
    "rationale": "A different numbered Grand Theft Auto main game with its own IGDB record and release date; same franchise, not the same game as GTA V.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2166,7 +2202,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-01",
@@ -2193,7 +2229,8 @@
     "igdb-5-baldur-s-gate"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2227,7 +2264,7 @@
      "value": "1998-12-21"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-02",
@@ -2258,7 +2295,8 @@
     "igdb-18-max-payne"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2292,7 +2330,7 @@
      "value": "2001-07-23"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-03",
@@ -2323,7 +2361,8 @@
     "igdb-20-bioshock"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2357,7 +2396,7 @@
      "value": "2007-08-21"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-04",
@@ -2384,7 +2423,8 @@
     "igdb-23-system-shock"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2418,7 +2458,7 @@
      "value": "1994-09-22"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-05",
@@ -2445,7 +2485,8 @@
     "igdb-35-dungeon-keeper"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2479,7 +2520,7 @@
      "value": "1997-06-26"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-06",
@@ -2510,7 +2551,8 @@
     "igdb-37-dead-space"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2544,7 +2586,7 @@
      "value": "2008-10-14"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-07",
@@ -2575,7 +2617,8 @@
     "igdb-37-dead-space"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2609,7 +2652,7 @@
      "value": "2008-10-14"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-08",
@@ -2640,7 +2683,8 @@
     "igdb-39-mafia"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2674,7 +2718,7 @@
      "value": "2002-08-29"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-numbered_sequels-09",
@@ -2705,7 +2749,8 @@
     "igdb-39-mafia"
    ],
    "rationale": "Two separate IGDB main-game records whose titles differ by a sequel numeral, first released in different years.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2739,7 +2784,7 @@
      "value": "2002-08-29"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-packs_addons-01",
@@ -2770,7 +2815,8 @@
     "igdb-260-the-sims-3"
    ],
    "rationale": "IGDB types this record as a Pack / Addon of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2796,7 +2842,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-packs_addons-02",
@@ -2827,7 +2873,8 @@
     "igdb-260-the-sims-3"
    ],
    "rationale": "IGDB types this record as a Pack / Addon of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2853,7 +2900,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-packs_addons-03",
@@ -2884,7 +2931,8 @@
     "igdb-260-the-sims-3"
    ],
    "rationale": "IGDB types this record as a Pack / Addon of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2910,7 +2958,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-01",
@@ -2937,7 +2985,8 @@
     "igdb-60-the-secret-of-monkey-island"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -2963,7 +3012,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-02",
@@ -2990,7 +3039,8 @@
     "igdb-61-monkey-island-2-lechuck-s-revenge"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3016,7 +3066,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-03",
@@ -3043,7 +3093,8 @@
     "igdb-86-dune-ii-the-building-of-a-dynasty"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3069,7 +3120,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-04",
@@ -3100,7 +3151,8 @@
     "igdb-241-counter-strike"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3126,7 +3178,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-05",
@@ -3153,7 +3205,8 @@
     "igdb-77234-final-fantasy-iii"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3179,7 +3232,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remakes-06",
@@ -3206,7 +3259,8 @@
     "igdb-16587-final-fantasy-iv"
    ],
    "rationale": "IGDB types this record as a Remake and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3232,7 +3286,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-01",
@@ -3259,7 +3313,8 @@
     "igdb-5-baldur-s-gate"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3285,7 +3340,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-02",
@@ -3312,7 +3367,8 @@
     "igdb-1033-the-legend-of-zelda-the-wind-waker"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3338,7 +3394,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-03",
@@ -3365,7 +3421,8 @@
     "igdb-740-halo-combat-evolved"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3391,7 +3448,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-04",
@@ -3418,7 +3475,8 @@
     "igdb-327-age-of-empires-ii-the-age-of-kings"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3444,7 +3502,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-05",
@@ -3471,7 +3529,8 @@
     "igdb-6-baldur-s-gate-ii-shadows-of-amn"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3497,7 +3556,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-remasters-06",
@@ -3524,7 +3583,8 @@
     "igdb-1009-the-last-of-us"
    ],
    "rationale": "IGDB types this record as a Remaster and names the original as its parent: a distinct work, related to the original.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3550,7 +3610,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-01",
@@ -3581,7 +3641,8 @@
     "igdb-37-dead-space"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 3 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3631,7 +3692,7 @@
      "value": "IronMonkey Studios"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-02",
@@ -3658,7 +3719,8 @@
     "igdb-14546-portal"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 21 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3708,7 +3770,7 @@
      "value": "Valve"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-03",
@@ -3739,7 +3801,8 @@
     "igdb-71-portal"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 10 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3789,7 +3852,7 @@
      "value": "VMW Productions"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-04",
@@ -3816,7 +3879,8 @@
     "igdb-98-need-for-speed-most-wanted"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 7 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3866,7 +3930,7 @@
      "value": "Criterion Games"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-05",
@@ -3893,7 +3957,8 @@
     "igdb-1618-mortal-kombat"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 19 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -3943,7 +4008,7 @@
      "value": "NetherRealm Studios"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-06",
@@ -3974,7 +4039,8 @@
     "igdb-141-star-wars-battlefront"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 11 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4024,7 +4090,7 @@
      "value": "EA Digital Illusions CE"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-07",
@@ -4055,7 +4121,8 @@
     "igdb-142-star-wars-battlefront-ii"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 12 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4105,7 +4172,7 @@
      "value": "EA Digital Illusions CE"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-08",
@@ -4132,7 +4199,8 @@
     "igdb-546-prey"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 11 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4182,7 +4250,7 @@
      "value": "Arkane Studios"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-09",
@@ -4209,7 +4277,8 @@
     "igdb-549-god-of-war"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 13 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4259,7 +4328,7 @@
      "value": "Santa Monica Studio"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-same_name_different_years-10",
@@ -4286,7 +4355,8 @@
     "igdb-1307-medal-of-honor"
    ],
    "rationale": "Two IGDB main-game records share a title but were first released 11 years apart by different developers.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4336,7 +4406,7 @@
      "value": "Danger Close"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-01",
@@ -4392,7 +4462,8 @@
     "igdb-59281-rust-bucket"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Rust'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4434,7 +4505,7 @@
      "value": "Rust Bucket"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-02",
@@ -4490,7 +4561,8 @@
     "igdb-3-thief-deadly-shadows"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Thief'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4532,7 +4604,7 @@
      "value": "Thief: Deadly Shadows"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-03",
@@ -4588,7 +4660,8 @@
     "igdb-70568-katekyou-hitman-reborn-ds-mafia-daishuug"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Mafia'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4630,7 +4703,7 @@
      "value": "Katekyou Hitman Reborn! DS: Mafia Daishuugou Vongola Festival"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-04",
@@ -4686,7 +4759,8 @@
     "igdb-14546-portal"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Portal'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4728,7 +4802,7 @@
      "value": "Portal"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-05",
@@ -4784,7 +4858,8 @@
     "igdb-356-quake-4"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Quake'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4826,7 +4901,7 @@
      "value": "Quake 4"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-06",
@@ -4862,7 +4937,8 @@
     "igdb-6185-syberia-ii"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Syberia'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4888,7 +4964,7 @@
      "value": "Syberia II"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-short_ambiguous_names-07",
@@ -4944,7 +5020,8 @@
     "igdb-1961-dreamfall-the-longest-journey"
    ],
    "rationale": "A one-word title that also appears in other recorded titles. Only the record IGDB links to this Steam app id is the same game; the others merely contain the word 'Journey'.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -4986,7 +5063,7 @@
      "value": "Dreamfall: The Longest Journey"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-soundtracks-01",
@@ -5017,7 +5094,8 @@
     "igdb-2853-braid"
    ],
    "rationale": "Steam returns this app only under its DLC filter, and its title is an existing game's title plus 'soundtrack'. Steam's own typing makes it a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -5051,7 +5129,7 @@
      "value": "Braid"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-soundtracks-02",
@@ -5082,7 +5160,8 @@
     "igdb-1381-payday-the-heist"
    ],
    "rationale": "Steam returns this app only under its DLC filter, and its title is an existing game's title plus 'soundtrack'. Steam's own typing makes it a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -5116,7 +5195,7 @@
      "value": "Payday: The Heist"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-soundtracks-03",
@@ -5147,7 +5226,8 @@
     "igdb-2354-deadlight"
    ],
    "rationale": "Steam returns this app only under its DLC filter, and its title is an existing game's title plus 'soundtrack'. Steam's own typing makes it a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -5181,7 +5261,7 @@
      "value": "Deadlight"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-standalone_expansions-01",
@@ -5212,7 +5292,8 @@
     "igdb-150-star-wars-jedi-knight-dark-forces-ii"
    ],
    "rationale": "IGDB types this record as a Standalone Expansion of its parent: playable alone, so its own entity, related to the parent.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5238,7 +5319,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-standalone_expansions-02",
@@ -5269,7 +5350,8 @@
     "igdb-231-half-life"
    ],
    "rationale": "IGDB types this record as a Standalone Expansion of its parent: playable alone, so its own entity, related to the parent.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5295,7 +5377,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-standalone_expansions-03",
@@ -5326,7 +5408,8 @@
     "igdb-233-half-life-2"
    ],
    "rationale": "IGDB types this record as a Standalone Expansion of its parent: playable alone, so its own entity, related to the parent.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5352,7 +5435,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-standalone_expansions-04",
@@ -5379,7 +5462,8 @@
     "igdb-296-crysis"
    ],
    "rationale": "IGDB types this record as a Standalone Expansion of its parent: playable alone, so its own entity, related to the parent.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5405,7 +5489,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-updates-01",
@@ -5436,7 +5520,8 @@
     "igdb-14147-jotun-valhalla-edition"
    ],
    "rationale": "IGDB types this record as an Update of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5462,7 +5547,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-updates-02",
@@ -5493,7 +5578,8 @@
     "igdb-3075-ftl-faster-than-light"
    ],
    "rationale": "IGDB types this record as an Update of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5519,7 +5605,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "neg-updates-03",
@@ -5550,7 +5636,8 @@
     "igdb-11592-lara-croft-go"
    ],
    "rationale": "IGDB types this record as an Update of its parent game: a related product, never a canonical game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5576,7 +5663,7 @@
      "value": "main_game"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-01",
@@ -5605,7 +5692,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5639,7 +5727,7 @@
      "value": "2012-03-06"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-02",
@@ -5664,7 +5752,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5698,7 +5787,7 @@
      "value": "2019-03-08"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-03",
@@ -5723,7 +5812,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5757,7 +5847,7 @@
      "value": "2023-06-02"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-04",
@@ -5786,7 +5876,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5820,7 +5911,7 @@
      "value": "2012-10-30"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-05",
@@ -5845,7 +5936,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5879,7 +5971,7 @@
      "value": "2014-09-02"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-06",
@@ -5904,7 +5996,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5938,7 +6031,7 @@
      "value": "2004-11-02"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-07",
@@ -5963,7 +6056,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -5997,7 +6091,7 @@
      "value": "2008-10-28"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-candidates_hard_contradicted-08",
@@ -6022,7 +6116,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only similarly titled existing game carries a different sequel numeral and a different first release year, so it cannot be the same game; this record is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6056,7 +6151,7 @@
      "value": "2025-10-10"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-01",
@@ -6094,7 +6189,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6136,7 +6232,7 @@
      "value": "Thief: The Dark Project"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-02",
@@ -6178,7 +6274,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6220,7 +6317,7 @@
      "value": "Thief"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-03",
@@ -6254,7 +6351,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6296,7 +6394,7 @@
      "value": "Baldur's Gate II: Shadows of Amn"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-04",
@@ -6338,7 +6436,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6380,7 +6479,7 @@
      "value": "Vampire: The Masquerade - Bloodlines"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-05",
@@ -6422,7 +6521,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6464,7 +6564,7 @@
      "value": "Fallout 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-06",
@@ -6510,7 +6610,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6552,7 +6653,7 @@
      "value": "Fallout: New Vegas"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-07",
@@ -6594,7 +6695,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6636,7 +6738,7 @@
      "value": "Max Payne"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-08",
@@ -6678,7 +6780,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6720,7 +6823,7 @@
      "value": "BioShock"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-09",
@@ -6758,7 +6861,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6800,7 +6904,7 @@
      "value": "X-COM: UFO Defense"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-10",
@@ -6838,7 +6942,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6880,7 +6985,7 @@
      "value": "Dungeon Keeper 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-11",
@@ -6918,7 +7023,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -6960,7 +7066,7 @@
      "value": "Deus Ex: Invisible War"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "new-no_candidates-12",
@@ -6998,7 +7104,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A main game whose title shares no word with any existing entity, so there is no candidate to match; it is a new entity.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7040,7 +7147,7 @@
      "value": "Deus Ex"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-alternate_names-01",
@@ -7065,7 +7172,8 @@
    "target": "igdb-212-br-tal-legend",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7099,7 +7207,16 @@
      "value": "Brutal Legend"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "212"
+     },
+     "field": "external_ids",
+     "value": "225260"
+    }
+   ]
   },
   {
    "case_id": "pos-alternate_names-02",
@@ -7124,7 +7241,8 @@
    "target": "igdb-441-empire-total-war",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7158,7 +7276,16 @@
      "value": "Total War: EMPIRE - Definitive Edition"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "441"
+     },
+     "field": "external_ids",
+     "value": "10500"
+    }
+   ]
   },
   {
    "case_id": "pos-alternate_names-03",
@@ -7183,7 +7310,8 @@
    "target": "igdb-442-napoleon-total-war",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7217,7 +7345,16 @@
      "value": "Total War: NAPOLEON - Definitive Edition"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "442"
+     },
+     "field": "external_ids",
+     "value": "34030"
+    }
+   ]
   },
   {
    "case_id": "pos-alternate_names-04",
@@ -7242,7 +7379,8 @@
    "target": "igdb-1981-saints-row-iv",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7276,7 +7414,7 @@
      "value": "Saints Row IV: Re-Elected"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-alternate_names-05",
@@ -7301,7 +7439,8 @@
    "target": "igdb-4847-lords-of-the-fallen",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7335,7 +7474,7 @@
      "value": "Lords of the Fallen 2014"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-alternate_names-06",
@@ -7360,7 +7499,8 @@
    "target": "igdb-7115-need-for-speed-shift-2-unleashed",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7394,7 +7534,7 @@
      "value": "Shift 2 Unleashed"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-alternate_names-07",
@@ -7419,7 +7559,8 @@
    "target": "igdb-7360-rainbow-six-siege",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7453,7 +7594,7 @@
      "value": "Tom Clancy's Rainbow Six: Siege"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-alternate_names-08",
@@ -7478,7 +7619,8 @@
    "target": "igdb-15830-saya-no-uta",
    "must_not_match": [],
    "rationale": "The Steam title is one of IGDB's alternative names for the game; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7512,7 +7654,7 @@
      "value": "The Song of Saya"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-early_access-01",
@@ -7537,7 +7679,8 @@
    "target": "igdb-2117-dayz",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on a game it records as Early Access; titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7571,7 +7714,16 @@
      "value": "Early Access"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "2117"
+     },
+     "field": "external_ids",
+     "value": "221100"
+    }
+   ]
   },
   {
    "case_id": "pos-early_access-02",
@@ -7596,7 +7748,8 @@
    "target": "igdb-3189-project-zomboid",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on a game it records as Early Access; titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7630,7 +7783,16 @@
      "value": "early_access"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "3189"
+     },
+     "field": "external_ids",
+     "value": "108600"
+    }
+   ]
   },
   {
    "case_id": "pos-early_access-03",
@@ -7655,7 +7817,8 @@
    "target": "igdb-3772-wreckfest",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on a game it records as Early Access; titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7689,7 +7852,7 @@
      "value": "Early Access"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-early_access-04",
@@ -7714,7 +7877,8 @@
    "target": "igdb-5574-7-days-to-die",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on a game it records as Early Access; titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7748,7 +7912,7 @@
      "value": "Early Access"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-early_access-05",
@@ -7773,7 +7937,8 @@
    "target": "igdb-6748-killing-floor-2",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on a game it records as Early Access; titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7807,7 +7972,7 @@
      "value": "Early Access"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-01",
@@ -7832,7 +7997,8 @@
    "target": "igdb-9-jagged-alliance-2",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7858,7 +8024,16 @@
      "value": "Jagged Alliance 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "9"
+     },
+     "field": "external_ids",
+     "value": "1620"
+    }
+   ]
   },
   {
    "case_id": "pos-editions_with_id_link-02",
@@ -7883,7 +8058,8 @@
    "target": "igdb-56-the-elder-scrolls-iii-morrowind",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7909,7 +8085,7 @@
      "value": "The Elder Scrolls III: Morrowind"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-03",
@@ -7934,7 +8110,8 @@
    "target": "igdb-78-dragon-age-ii",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -7960,7 +8137,7 @@
      "value": "Dragon Age II"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-04",
@@ -7985,7 +8162,8 @@
    "target": "igdb-578-warhammer-40-000-space-marine",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8011,7 +8189,7 @@
      "value": "Warhammer 40,000: Space Marine"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-05",
@@ -8036,7 +8214,8 @@
    "target": "igdb-731-grand-theft-auto-iv",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8062,7 +8241,7 @@
      "value": "Grand Theft Auto IV"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-06",
@@ -8087,7 +8266,8 @@
    "target": "igdb-965-stronghold",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8113,7 +8293,7 @@
      "value": "Stronghold"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-07",
@@ -8138,7 +8318,8 @@
    "target": "igdb-1164-tomb-raider",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8164,7 +8345,7 @@
      "value": "Tomb Raider"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-editions_with_id_link-08",
@@ -8189,7 +8370,8 @@
    "target": "igdb-2045-penumbra-black-plague",
    "must_not_match": [],
    "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8215,7 +8397,7 @@
      "value": "Penumbra: Black Plague"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-01",
@@ -8240,7 +8422,8 @@
    "target": "igdb-1-thief-ii-the-metal-age",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8266,7 +8449,16 @@
      "value": "Thief II: The Metal Age"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "1"
+     },
+     "field": "external_ids",
+     "value": "211740"
+    }
+   ]
   },
   {
    "case_id": "pos-exact_cross_source-02",
@@ -8291,7 +8483,8 @@
    "target": "igdb-3-thief-deadly-shadows",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8317,7 +8510,7 @@
      "value": "Thief: Deadly Shadows"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-03",
@@ -8342,7 +8535,8 @@
    "target": "igdb-11-vampire-the-masquerade-bloodlines",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8368,7 +8562,7 @@
      "value": "Vampire: The Masquerade - Bloodlines"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-04",
@@ -8393,7 +8587,8 @@
    "target": "igdb-16-fallout-new-vegas",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8419,7 +8614,7 @@
      "value": "Fallout: New Vegas"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-05",
@@ -8444,7 +8639,8 @@
    "target": "igdb-17-fallout-tactics-brotherhood-of-steel",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8470,7 +8666,7 @@
      "value": "Fallout Tactics: Brotherhood of Steel"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-06",
@@ -8495,7 +8691,8 @@
    "target": "igdb-42-deus-ex-invisible-war",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8521,7 +8718,7 @@
      "value": "Deus Ex: Invisible War"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-07",
@@ -8546,7 +8743,8 @@
    "target": "igdb-53-the-elder-scrolls-ii-daggerfall",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8572,7 +8770,7 @@
      "value": "The Elder Scrolls II: Daggerfall"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-08",
@@ -8597,7 +8795,8 @@
    "target": "igdb-62-the-curse-of-monkey-island",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8623,7 +8822,7 @@
      "value": "The Curse of Monkey Island"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-09",
@@ -8648,7 +8847,8 @@
    "target": "igdb-83-baldur-s-gate-dark-alliance",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8674,7 +8874,7 @@
      "value": "Baldur's Gate: Dark Alliance"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-10",
@@ -8699,7 +8899,8 @@
    "target": "igdb-109-l-a-noire",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8725,7 +8926,7 @@
      "value": "L.A. Noire"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-11",
@@ -8750,7 +8951,8 @@
    "target": "igdb-111-amnesia-the-dark-descent",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8776,7 +8978,7 @@
      "value": "Amnesia: The Dark Descent"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-12",
@@ -8801,7 +9003,8 @@
    "target": "igdb-122-left-4-dead",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8827,7 +9030,7 @@
      "value": "Left 4 Dead"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-13",
@@ -8852,7 +9055,8 @@
    "target": "igdb-124-left-4-dead-2",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8878,7 +9082,7 @@
      "value": "Left 4 Dead 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-exact_cross_source-14",
@@ -8903,7 +9107,8 @@
    "target": "igdb-192-maniac-mansion",
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id as an external id of the game and the titles are identical.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8929,7 +9134,7 @@
      "value": "Maniac Mansion"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-ports_platform_variants-01",
@@ -8954,7 +9159,8 @@
    "target": "igdb-1877-cyberpunk-2077",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -8988,7 +9194,16 @@
      "value": "2020-12-10"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "1877"
+     },
+     "field": "external_ids",
+     "value": "1091500"
+    }
+   ]
   },
   {
    "case_id": "pos-ports_platform_variants-02",
@@ -9013,7 +9228,8 @@
    "target": "igdb-17000-stardew-valley",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9047,7 +9263,16 @@
      "value": "2016-02-26"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "17000"
+     },
+     "field": "external_ids",
+     "value": "413150"
+    }
+   ]
   },
   {
    "case_id": "pos-ports_platform_variants-03",
@@ -9072,7 +9297,8 @@
    "target": "igdb-13-fallout-a-post-nuclear-role-playing-game",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9106,7 +9332,16 @@
      "value": "1997-10-10"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "13"
+     },
+     "field": "external_ids",
+     "value": "38400"
+    }
+   ]
   },
   {
    "case_id": "pos-ports_platform_variants-04",
@@ -9131,7 +9366,8 @@
    "target": "igdb-15-fallout-3",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9165,7 +9401,7 @@
      "value": "2008-10-28"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-ports_platform_variants-05",
@@ -9190,7 +9426,8 @@
    "target": "igdb-18-max-payne",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9224,7 +9461,7 @@
      "value": "2001-07-23"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-ports_platform_variants-06",
@@ -9249,7 +9486,8 @@
    "target": "igdb-19-max-payne-2-the-fall-of-max-payne",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9283,7 +9521,7 @@
      "value": "2003-10-14"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-ports_platform_variants-07",
@@ -9308,7 +9546,8 @@
    "target": "igdb-24-x-com-ufo-defense",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9342,7 +9581,7 @@
      "value": "1994-03-01"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-ports_platform_variants-08",
@@ -9367,7 +9606,8 @@
    "target": "igdb-72-portal-2",
    "must_not_match": [],
    "rationale": "One game released on several platforms in different years; IGDB lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9401,7 +9641,7 @@
      "value": "2011-04-18"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-punctuation_casing-01",
@@ -9426,7 +9666,8 @@
    "target": "igdb-119133-elden-ring",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9452,7 +9693,16 @@
      "value": "Elden Ring"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "119133"
+     },
+     "field": "external_ids",
+     "value": "1245620"
+    }
+   ]
   },
   {
    "case_id": "pos-punctuation_casing-02",
@@ -9477,7 +9727,8 @@
    "target": "igdb-125174-overwatch",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9503,7 +9754,16 @@
      "value": "Overwatch"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "125174"
+     },
+     "field": "external_ids",
+     "value": "2357570"
+    }
+   ]
   },
   {
    "case_id": "pos-punctuation_casing-03",
@@ -9528,7 +9788,8 @@
    "target": "igdb-250616-helldivers-2",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9554,7 +9815,16 @@
      "value": "Helldivers 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "250616"
+     },
+     "field": "external_ids",
+     "value": "553850"
+    }
+   ]
   },
   {
    "case_id": "pos-punctuation_casing-04",
@@ -9579,7 +9849,8 @@
    "target": "igdb-20-bioshock",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9605,7 +9876,7 @@
      "value": "BioShock"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-punctuation_casing-05",
@@ -9630,7 +9901,8 @@
    "target": "igdb-21-bioshock-2",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9656,7 +9928,7 @@
      "value": "BioShock 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-punctuation_casing-06",
@@ -9681,7 +9953,8 @@
    "target": "igdb-36-dungeon-keeper-2",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9707,7 +9980,7 @@
      "value": "Dungeon Keeper 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-punctuation_casing-07",
@@ -9732,7 +10005,8 @@
    "target": "igdb-38-dead-space-2",
    "must_not_match": [],
    "rationale": "Titles differ only in case, punctuation or trademark symbols; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9758,7 +10032,7 @@
      "value": "Dead Space 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-renamed_games-01",
@@ -9783,7 +10057,8 @@
    "target": "igdb-19011-raiders-of-the-broken-planet",
    "must_not_match": [],
    "rationale": "The Steam title shares no word with IGDB's title but is recorded by IGDB as an alternative name; IGDB also lists this Steam app id on it.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9817,7 +10092,7 @@
      "value": "Spacelords"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-roman_numerals-01",
@@ -9842,7 +10117,8 @@
    "target": "igdb-119171-baldur-s-gate-iii",
    "must_not_match": [],
    "rationale": "Titles differ only in Roman versus Arabic numerals; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9868,7 +10144,16 @@
      "value": "Baldur's Gate III"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "119171"
+     },
+     "field": "external_ids",
+     "value": "1086940"
+    }
+   ]
   },
   {
    "case_id": "pos-roman_numerals-02",
@@ -9893,7 +10178,8 @@
    "target": "igdb-127-assassin-s-creed-ii",
    "must_not_match": [],
    "rationale": "Titles differ only in Roman versus Arabic numerals; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9919,7 +10205,16 @@
      "value": "Assassin's Creed II"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "127"
+     },
+     "field": "external_ids",
+     "value": "33230"
+    }
+   ]
   },
   {
    "case_id": "pos-roman_numerals-03",
@@ -9944,7 +10239,8 @@
    "target": "igdb-951-carmageddon-ii-carpocalypse-now",
    "must_not_match": [],
    "rationale": "Titles differ only in Roman versus Arabic numerals; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -9970,7 +10266,16 @@
      "value": "Carmageddon II: Carpocalypse Now"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "951"
+     },
+     "field": "external_ids",
+     "value": "282030"
+    }
+   ]
   },
   {
    "case_id": "pos-roman_numerals-04",
@@ -9995,7 +10300,8 @@
    "target": "igdb-8366-sniper-elite-iii",
    "must_not_match": [],
    "rationale": "Titles differ only in Roman versus Arabic numerals; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10021,7 +10327,7 @@
      "value": "Sniper Elite III"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-roman_numerals-05",
@@ -10046,7 +10352,8 @@
    "target": "igdb-14390-outlast-ii",
    "must_not_match": [],
    "rationale": "Titles differ only in Roman versus Arabic numerals; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10072,7 +10379,7 @@
      "value": "Outlast II"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-subtitles-01",
@@ -10097,7 +10404,8 @@
    "target": "igdb-14-fallout-2",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10123,7 +10431,16 @@
      "value": "Fallout 2"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "14"
+     },
+     "field": "external_ids",
+     "value": "38410"
+    }
+   ]
   },
   {
    "case_id": "pos-subtitles-02",
@@ -10148,7 +10465,8 @@
    "target": "igdb-163-star-wars-rogue-squadron",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10174,7 +10492,16 @@
      "value": "Star Wars: Rogue Squadron"
     }
    ],
-   "truth": "established"
+   "masked_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "163"
+     },
+     "field": "external_ids",
+     "value": "455910"
+    }
+   ]
   },
   {
    "case_id": "pos-subtitles-03",
@@ -10199,7 +10526,8 @@
    "target": "igdb-6005-kingdom-rush",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10225,7 +10553,7 @@
      "value": "Kingdom Rush"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-subtitles-04",
@@ -10250,7 +10578,8 @@
    "target": "igdb-7327-valiant-hearts-the-great-war",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10276,7 +10605,7 @@
      "value": "Valiant Hearts: The Great War"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-subtitles-05",
@@ -10301,7 +10630,8 @@
    "target": "igdb-7444-shovel-knight",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10327,7 +10657,7 @@
      "value": "Shovel Knight"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "pos-subtitles-06",
@@ -10352,7 +10682,8 @@
    "target": "igdb-9425-skullgirls",
    "must_not_match": [],
    "rationale": "One title is the other plus a subtitle; IGDB lists this Steam app id on the game.",
-   "evidence": [
+   "truth": "established",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10378,7 +10709,7 @@
      "value": "Skullgirls"
     }
    ],
-   "truth": "established"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-01",
@@ -10403,7 +10734,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10453,7 +10785,7 @@
      "value": "Yoko Soft"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-02",
@@ -10478,7 +10810,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10528,7 +10861,7 @@
      "value": "Hummer Team"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-03",
@@ -10553,7 +10886,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10603,7 +10937,7 @@
      "value": "Hummer Team"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-04",
@@ -10628,7 +10962,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10678,7 +11013,7 @@
      "value": "Virgin Games USA"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-05",
@@ -10703,7 +11038,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10753,7 +11089,7 @@
      "value": "Hummer Team"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_companies-06",
@@ -10778,7 +11114,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title and release year within one year of each other, but entirely different developers and publishers. The evidence contradicts itself.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10828,7 +11165,7 @@
      "value": "Killjoy Games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_release_dates-01",
@@ -10853,7 +11190,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title, a shared developer and a shared publisher, but first release years 4 apart. Company evidence says one game; the dates say two.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10903,7 +11241,7 @@
      "value": "Square"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_release_dates-02",
@@ -10928,7 +11266,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title, a shared developer and a shared publisher, but first release years 15 apart. Company evidence says one game; the dates say two.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -10978,7 +11317,7 @@
      "value": "Sega"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_release_dates-03",
@@ -11003,7 +11342,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title, a shared developer and a shared publisher, but first release years 6 apart. Company evidence says one game; the dates say two.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11053,7 +11393,7 @@
      "value": "Blizzard Entertainment"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-conflicting_release_dates-04",
@@ -11078,7 +11418,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Same title, a shared developer and a shared publisher, but first release years 18 apart. Company evidence says one game; the dates say two.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11128,7 +11469,7 @@
      "value": "Capcom"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-early_access_rename_thin_evidence-01",
@@ -11153,7 +11494,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "An Early Access game IGDB gives no Steam id for; the Steam title matches only one of its alternative names.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11179,7 +11521,7 @@
      "value": "Uplink"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-01",
@@ -11209,7 +11551,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The only IGDB record that lists this Steam app id is 'Grand Theft Auto V Enhanced', which IGDB types as a Bundle and does not link to Grand Theft Auto V as parent or version parent. Nothing recorded proves the app is GTA V, so it must not be merged automatically.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11251,7 +11594,7 @@
      "value": "Grand Theft Auto V"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-02",
@@ -11276,7 +11619,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11302,7 +11646,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-03",
@@ -11327,7 +11671,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11353,7 +11698,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-04",
@@ -11378,7 +11723,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11404,7 +11750,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-05",
@@ -11429,7 +11775,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11455,7 +11802,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-edition_without_id_link-06",
@@ -11480,7 +11827,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11506,7 +11854,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-01",
@@ -11531,7 +11879,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11557,7 +11906,7 @@
      "value": "The Portal Dimension"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-02",
@@ -11582,7 +11931,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11608,7 +11958,7 @@
      "value": "Monster Among Us"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-03",
@@ -11633,7 +11983,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11659,7 +12010,7 @@
      "value": "Tiny Civilization"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-04",
@@ -11684,7 +12035,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11710,7 +12062,7 @@
      "value": "Gods Wars: Infinity Epic"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-05",
@@ -11735,7 +12087,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11761,7 +12114,7 @@
      "value": "Stray: Exotic"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-06",
@@ -11786,7 +12139,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11812,7 +12166,7 @@
      "value": "BattleField BattleFront"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-id_link_incompatible_title-07",
@@ -11837,7 +12191,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "IGDB lists this Steam app id on the game, but the two titles share almost nothing and the Steam title is not among IGDB's alternative names. Strong and contradicting evidence together.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "igdb",
@@ -11863,7 +12218,7 @@
      "value": "Stray Memoria"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-01",
@@ -11892,7 +12247,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "Steam lists an app titled exactly like the 2003 game, but no IGDB record lists this Steam app id and the Steam record carries no developer, publisher or date. Title alone cannot say whether it is that game.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11926,7 +12282,7 @@
      "value": "unknown"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-02",
@@ -11951,7 +12307,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -11977,7 +12334,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-03",
@@ -12002,7 +12359,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12028,7 +12386,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-04",
@@ -12053,7 +12411,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12079,7 +12438,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-05",
@@ -12104,7 +12463,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12130,7 +12490,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-06",
@@ -12155,7 +12515,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12181,7 +12542,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-07",
@@ -12206,7 +12567,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12232,7 +12594,7 @@
      "value": "games"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-08",
@@ -12261,7 +12623,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A Steam games-list app titled like an existing game plus 'dedicated server'. Steam's list gives no product type, IGDB has no type for this kind of product, and no IGDB record lists this app id, so nothing recorded establishes what it is.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12287,7 +12650,7 @@
      "value": "Unturned"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   },
   {
    "case_id": "qua-title_only_missing_companies-09",
@@ -12316,7 +12679,8 @@
    "target": null,
    "must_not_match": [],
    "rationale": "A Steam games-list app titled like an existing game plus 'demo'. Steam's list gives no product type, IGDB has no type for this kind of product, and no IGDB record lists this app id, so nothing recorded establishes what it is.",
-   "evidence": [
+   "truth": "difficult",
+   "ground_truth_evidence": [
     {
      "record": {
       "source": "steam_catalogue",
@@ -12342,7 +12706,7 @@
      "value": "Journey's Land"
     }
    ],
-   "truth": "difficult"
+   "masked_evidence": []
   }
  ],
  "dropped": [

@@ -38,6 +38,10 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "PTH", "RUF"]
 # The multiplication sign is used deliberately in user-facing explanation text.
 allowed-confusables = ["×"]
 
+[tool.ruff.lint.per-file-ignores]
+# Look-alike Unicode characters are the subject of these tests.
+"tests/test_normalize.py" = ["RUF001"]
+
 [tool.mypy]
 python_version = "3.12"
 strict = true

@@ -218,7 +218,7 @@ def case(**changes: Any) -> GoldenCase:
         "expected": ExpectedDecision.AUTO_MATCH,
         "target": "synthetic-quest",
         "rationale": "IGDB lists this Steam app id as an external id of the game.",
-        "evidence": (ID_LINK,),
+        "ground_truth_evidence": (ID_LINK,),
     }
     return GoldenCase.model_validate(fields | changes)
 
@@ -233,14 +233,16 @@ def negative(**changes: Any) -> GoldenCase:
             "target": None,
             "must_not_match": ("synthetic-quest",),
             "rationale": "The title carries a sequel numeral the existing game lacks.",
-            "evidence": (EvidenceCitation(record=SEQUEL.key, field="title", value="Quest 2"),),
+            "ground_truth_evidence": (
+                EvidenceCitation(record=SEQUEL.key, field="title", value="Quest 2"),
+            ),
         }
         | changes
     )
 
 
 def test_the_approved_distribution_totals_two_hundred() -> None:
-    assert len(CATEGORY_TARGETS) == 37  # 34 approved plus 3 proposed substitutes at target 0
+    assert len(CATEGORY_TARGETS) == 33
     assert GROUP_TARGETS == {
         GoldenGroup.POSITIVE: 62,
         GoldenGroup.NEGATIVE: 85,
@@ -256,8 +258,8 @@ def test_the_approved_distribution_totals_two_hundred() -> None:
         "remasters",
         "remakes",
         "dlc",
-        "demos",
-        "betas_playtests",
+        "packs_addons",
+        "episodes_seasons",
         "bundles",
         "soundtracks",
         "roman_numerals",
@@ -276,7 +278,9 @@ def test_a_well_formed_case_cites_recorded_evidence() -> None:
         category="dlc",
         incoming=DLC,
         expected=ExpectedDecision.NOT_AN_ENTITY,
-        evidence=(EvidenceCitation(record=DLC.key, field="product_type", value="dlc"),),
+        ground_truth_evidence=(
+            EvidenceCitation(record=DLC.key, field="product_type", value="dlc"),
+        ),
         rationale="IGDB types this record as DLC of the existing game.",
     )
     assert non_entity.expected is ExpectedDecision.NOT_AN_ENTITY
@@ -284,14 +288,26 @@ def test_a_well_formed_case_cites_recorded_evidence() -> None:
 
 def test_evidence_must_exist_in_the_recorded_records_it_cites() -> None:
     with pytest.raises(ValueError, match="does not contain the cited value"):
-        case(evidence=(EvidenceCitation(record=BASE.key, field="external_ids", value="999"),))
+        case(
+            ground_truth_evidence=(
+                EvidenceCitation(record=BASE.key, field="external_ids", value="999"),
+            )
+        )
     with pytest.raises(ValueError, match="unknown field"):
-        case(evidence=(EvidenceCitation(record=BASE.key, field="metacritic", value="90"),))
+        case(
+            ground_truth_evidence=(
+                EvidenceCitation(record=BASE.key, field="metacritic", value="90"),
+            )
+        )
     elsewhere = SourceRecordKey(source="igdb", source_id="555")
     with pytest.raises(ValueError, match="not in the case"):
-        case(evidence=(EvidenceCitation(record=elsewhere, field="title", value="Synthetic"),))
+        case(
+            ground_truth_evidence=(
+                EvidenceCitation(record=elsewhere, field="title", value="Synthetic"),
+            )
+        )
     with pytest.raises(ValueError):
-        case(evidence=())  # a label with no evidence is a guess
+        case(ground_truth_evidence=())  # a label with no evidence is a guess
 
 
 @pytest.mark.parametrize(
@@ -353,7 +369,7 @@ def test_a_set_reports_its_distribution_against_the_approved_targets() -> None:
     }
     gaps = draft.distribution_gaps()
     assert gaps["exact_cross_source"] == (1, 14) and gaps["numbered_sequels"] == (1, 9)
-    assert len(gaps) == 34  # nowhere near complete, and it says so
+    assert len(gaps) == 33  # nowhere near complete, and it says so
 
     same = GoldenSet.model_validate(draft.model_dump())
     edited = GoldenSet.model_validate(draft.model_dump() | {"cases": [negative()]})

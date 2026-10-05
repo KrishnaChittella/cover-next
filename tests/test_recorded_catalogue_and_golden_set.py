@@ -17,6 +17,7 @@ from metaspike.resolution.golden import (
     GROUP_TARGETS,
     ExpectedDecision,
     GoldenCase,
+    GoldenCaseSpec,
     GoldenGroup,
     GoldenSet,
     GoldenSetFile,
@@ -29,26 +30,10 @@ FIXTURES = Path(__file__).parent / "fixtures"
 CATALOGUE = FIXTURES / "catalogue"
 GOLDEN = FIXTURES / "resolution_golden.json"
 
-# How the draft differs from the approved category plan. Group totals are unchanged.
-# These deviations are reported for approval; a frozen set must not carry surprises.
-APPROVED_DEVIATIONS = {
-    "punctuation_casing": (7, 6),
-    "alternate_names": (8, 6),
-    "subtitles": (6, 5),
-    "renamed_games": (1, 5),
-    "demos": (0, 5),
-    "betas_playtests": (0, 4),
-    "packs_addons": (3, 0),
-    "episodes_seasons": (3, 0),
-    "updates": (3, 0),
-    "title_only_missing_companies": (9, 8),
-    "conflicting_companies": (6, 5),
-    "conflicting_release_dates": (4, 5),
-    "id_link_incompatible_title": (7, 5),
-    "edition_without_id_link": (6, 4),
-    "regional_titles": (0, 3),
-    "csgo_cs2_single_app": (0, 2),
-}
+# The frozen set's fingerprint. If this changes, the golden set changed: that needs a
+# version bump, a recorded reason, evidence and a separate review, never a quiet edit.
+FROZEN_VERSION = 2
+FROZEN_SHA256 = "273b4a96fa73f1deca09cdf93e4b334d2425fdfbadd1e1615451187828700d35"
 
 
 def igdb(source_id: int) -> SourceRecordKey:
@@ -172,16 +157,20 @@ def test_golden_set_has_two_hundred_cases_in_the_approved_groups(golden: GoldenS
         GoldenGroup.QUARANTINE: 33,
         GoldenGroup.NEW_ENTITY: 20,
     }
-    assert golden.status == "draft" and golden.version == 1
+    assert golden.status == "frozen" and golden.version == FROZEN_VERSION
 
 
-def test_category_deviations_from_the_approved_plan_are_exactly_the_reported_ones(
-    golden: GoldenSet,
-) -> None:
-    assert golden.distribution_gaps() == APPROVED_DEVIATIONS
+def test_the_frozen_set_matches_the_approved_distribution_exactly(golden: GoldenSet) -> None:
+    assert golden.distribution_gaps() == {}
     counts = golden.count_by_category()
-    on_plan = [c for c in CATEGORY_TARGETS if c not in APPROVED_DEVIATIONS]
-    assert len(on_plan) == 21 and all(counts[c] == CATEGORY_TARGETS[c][1] for c in on_plan)
+    assert counts == {category: target for category, (_, target) in CATEGORY_TARGETS.items()}
+    assert counts["renamed_games"] == 1 and counts["packs_addons"] == 3
+    for absent in ("demos", "betas_playtests", "regional_titles", "csgo_cs2_single_app"):
+        assert absent not in CATEGORY_TARGETS  # could not be grounded in recorded evidence
+
+
+def test_the_frozen_set_is_pinned(golden: GoldenSet) -> None:
+    assert golden.content_hash == FROZEN_SHA256
 
 
 def test_every_case_is_built_only_from_recorded_records_and_all_fixtures_are_used(
@@ -192,7 +181,7 @@ def test_every_case_is_built_only_from_recorded_records_and_all_fixtures_are_use
         used.add(case.incoming.key)
         used.update(record.key for record in case.context)
         used.update(record.key for entity in case.existing for record in entity.records)
-        assert len(case.evidence) >= 2 and case.rationale
+        assert len(case.ground_truth_evidence) >= 2 and case.rationale
     assert used == set(recorded)  # nothing invented, nothing recorded without a purpose
     incoming = [case.incoming.key for case in golden.cases]
     assert len(incoming) == len(set(incoming)) == 200
@@ -210,7 +199,7 @@ def test_every_positive_is_proven_by_an_id_link_the_source_itself_asserts(
             e.value for record in target.records for e in record.external_ids if e.source == "steam"
         }
         assert case.incoming.key.source_id in claimed, case.case_id
-        assert any(c.field == "external_ids" for c in case.evidence)
+        assert any(c.field == "external_ids" for c in case.ground_truth_evidence)
 
 
 def test_expected_decisions_match_what_the_records_can_be(golden: GoldenSet) -> None:
@@ -230,7 +219,7 @@ def test_expected_decisions_match_what_the_records_can_be(golden: GoldenSet) -> 
 def test_non_entity_products_never_become_entities(golden: GoldenSet) -> None:
     non_entities = [c for c in golden.cases if c.expected is ExpectedDecision.NOT_AN_ENTITY]
     kinds = Counter(case.incoming.product_type for case in non_entities)
-    assert len(non_entities) == 23
+    assert len(non_entities) == 22
     assert kinds == {
         ProductType.DLC: 8,
         ProductType.EXPANSION: 1,
@@ -239,7 +228,6 @@ def test_non_entity_products_never_become_entities(golden: GoldenSet) -> None:
         ProductType.EPISODE: 2,
         ProductType.SEASON: 1,
         ProductType.UPDATE: 3,
-        ProductType.MOD: 1,
     }
     for case in non_entities:
         assert case.must_not_match and case.target is None
@@ -252,9 +240,9 @@ def test_gta_v_gta_online_and_fivem_are_never_one_entity(golden: GoldenSet) -> N
     online = cases["Grand Theft Auto Online"]
     assert online.expected is ExpectedDecision.NEW_ENTITY and len(online.must_not_match) == 1
     fivem = cases["FiveM"]
-    assert fivem.expected is ExpectedDecision.NOT_AN_ENTITY  # admitted only by the override
+    assert fivem.expected is ExpectedDecision.MANUAL_OVERRIDE  # admitted only by the override
     assert len(fivem.must_not_match) == 2  # neither GTA V nor GTA Online
-    assert {c.value for c in fivem.evidence} >= {"mod", "1020"}
+    assert {c.value for c in fivem.ground_truth_evidence} >= {"mod", "1020"}
     assert cases["Grand Theft Auto VI"].expected is ExpectedDecision.NEW_ENTITY
     assert cases["Grand Theft Auto V"].incoming.product_type is ProductType.BUNDLE
 
@@ -275,6 +263,8 @@ def test_rust_matches_only_the_record_igdb_links_to_it(golden: GoldenSet) -> Non
 def test_counter_strike_and_call_of_duty_families(golden: GoldenSet) -> None:
     app_730 = next(c for c in golden.cases if c.incoming.key == steam(730))
     assert app_730.expected is ExpectedDecision.AUTO_MATCH
+    assert app_730.rationale.startswith("Current-state resolution")
+    assert "never" not in app_730.rationale  # a claim about today, not about history
     assert app_730.target is not None and "counter-strike-2" in app_730.target
     assert any("global-offensive" in label for label in app_730.must_not_match)
     assert len(by_category(golden, "counter_strike_lineage")) == 5
@@ -307,7 +297,7 @@ def test_dropped_cases_are_recorded_with_reasons() -> None:
     dropped = {d.category for d in stored.dropped}
     assert {"demos", "betas_playtests", "regional_titles", "csgo_cs2_single_app"} <= dropped
     assert all(len(d.reason) > 40 for d in stored.dropped)
-    assert any("awaits approval" in note for note in stored.notes)
+    assert stored.notes[0].startswith("FROZEN")
 
 
 def test_golden_set_fingerprint_is_stable(
@@ -328,7 +318,104 @@ def test_a_case_citing_an_unrecorded_record_cannot_be_loaded(
         load_golden_set(tampered, recorded)
 
     stored = json.loads(GOLDEN.read_text())
-    stored["cases"][0]["evidence"][0]["value"] = "0000000"
+    stored["cases"][0]["ground_truth_evidence"][0]["value"] = "0000000"
     tampered.write_text(json.dumps(stored))
     with pytest.raises(ValueError, match="does not contain the cited value"):
         load_golden_set(tampered, recorded)
+
+
+# --- masked evidence: the label is proven by a link the resolver is not shown -------
+
+
+def masked_cases(golden: GoldenSet) -> list[GoldenCase]:
+    return [case for case in golden.cases if case.masked_evidence]
+
+
+def test_eighteen_positives_across_categories_withhold_the_id_link(golden: GoldenSet) -> None:
+    masked = masked_cases(golden)
+    assert len(masked) == 18
+    assert Counter(case.category for case in masked) == {
+        "punctuation_casing": 3,
+        "alternate_names": 3,
+        "roman_numerals": 3,
+        "subtitles": 2,
+        "ports_platform_variants": 3,
+        "early_access": 2,
+        "editions_with_id_link": 1,
+        "exact_cross_source": 1,
+    }
+    for case in masked:
+        assert case.group is GoldenGroup.POSITIVE and case.expected is ExpectedDecision.AUTO_MATCH
+        (hidden,) = case.masked_evidence
+        assert hidden in case.ground_truth_evidence  # still proves the label
+        assert hidden.value == case.incoming.key.source_id
+
+
+def test_the_resolver_view_contains_no_trace_of_a_masked_link(golden: GoldenSet) -> None:
+    for case in masked_cases(golden):
+        app_id = case.incoming.key.source_id
+        target = next(entity for entity in case.existing if entity.label == case.target)
+        recorded_links = {e.value for record in target.records for e in record.external_ids}
+        assert app_id in recorded_links  # the link really is in the recorded evidence
+
+        view, _ = case.resolver_view()
+        for entity in view.entities:
+            for record in entity.records:
+                assert app_id not in {e.value for e in record.external_ids}, case.case_id
+                assert not any(f"/app/{app_id}" in site for site in record.websites), case.case_id
+        # Everything else the source said is still there for the resolver to use.
+        visible = next(e for e in view.entities if e.records[0].key == target.records[0].key)
+        assert visible.records[0].title == target.records[0].title
+        assert visible.records[0].developers == target.records[0].developers
+        assert visible.records[0].release_dates == target.records[0].release_dates
+
+
+def test_unmasked_cases_show_the_resolver_the_records_unchanged(golden: GoldenSet) -> None:
+    for case in golden.cases:
+        if case.masked_evidence:
+            continue
+        view, _ = case.resolver_view()
+        assert [r for e in view.entities for r in e.records] == [
+            r for e in case.existing for r in e.records
+        ]
+
+
+def test_the_resolver_view_carries_no_label_expectation_or_evidence(golden: GoldenSet) -> None:
+    hidden_fields = {
+        "expected",
+        "target",
+        "must_not_match",
+        "rationale",
+        "ground_truth_evidence",
+        "masked_evidence",
+        "truth",
+        "case_id",
+        "category",
+    }
+    for case in golden.cases:
+        view, labels = case.resolver_view()
+        assert hidden_fields.isdisjoint(type(view).model_fields)
+        serialised = view.model_dump_json()
+        assert case.case_id not in serialised and case.rationale not in serialised
+        for ref, label in labels.items():
+            assert ref.startswith("entity-") and label not in serialised  # labels are anonymised
+        assert [entity.ref for entity in view.entities] == list(labels)
+
+
+def test_masking_rules_are_enforced(recorded: dict[SourceRecordKey, SourceRecord]) -> None:
+    stored = json.loads(GOLDEN.read_text())
+    positive = next(c for c in stored["cases"] if c["masked_evidence"])
+    negative = next(c for c in stored["cases"] if c["case_id"].startswith("neg-numbered"))
+
+    def load(case: dict[str, object]) -> GoldenCase:
+        return GoldenCaseSpec.model_validate(case).resolve(recorded)
+
+    load(positive)
+    with pytest.raises(ValueError, match="only a positive case may mask"):
+        load(negative | {"masked_evidence": negative["ground_truth_evidence"][:1]})
+    title_only = [e for e in positive["ground_truth_evidence"] if e["field"] == "title"][:1]
+    with pytest.raises(ValueError, match="only an external-id link can be masked"):
+        load(positive | {"masked_evidence": title_only})
+    unproven = [positive["masked_evidence"][0] | {"value": "1"}]
+    with pytest.raises(ValueError):
+        load(positive | {"masked_evidence": unproven})

@@ -272,12 +272,13 @@ class MappingHistory(FrozenModel):
 
     @model_validator(mode="after")
     def _one_active_binding_per_record(self) -> Self:
-        for index, binding in enumerate(self.bindings):
-            for other in self.bindings[index + 1 :]:
-                if binding.key == other.key and _bindings_overlap(binding, other):
-                    raise ValueError(
-                        f"{binding.key.source}:{binding.key.source_id} is bound twice at once"
-                    )
+        by_record: dict[tuple[str, str], list[SourceBinding]] = {}
+        for binding in self.bindings:
+            by_record.setdefault((binding.key.source, binding.key.source_id), []).append(binding)
+        for (source, source_id), versions in by_record.items():
+            for index, binding in enumerate(versions):
+                if any(_bindings_overlap(binding, other) for other in versions[index + 1 :]):
+                    raise ValueError(f"{source}:{source_id} is bound twice at once")
         return self
 
     @property

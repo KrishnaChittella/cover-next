@@ -12,6 +12,7 @@ place here: such a case is labelled QUARANTINE or left out.
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from datetime import date
 from enum import StrEnum
@@ -24,6 +25,7 @@ from metaspike.domain.games import NonEmptyStr
 from metaspike.domain.identity import SourceRecordKey
 from metaspike.domain.model import FrozenModel
 from metaspike.domain.source_records import Admissibility, SourceRecord
+from metaspike.resolution.models import EntityView, ResolverInput
 
 
 class GoldenGroup(StrEnum):
@@ -39,16 +41,18 @@ class ExpectedDecision(StrEnum):
     QUARANTINE = "quarantine"
     # Filtered out before resolution: DLC, demos, betas, bundles, soundtracks.
     NOT_AN_ENTITY = "not_an_entity"
+    # Admitted or bound by an explicit, versioned override rather than by evidence.
+    MANUAL_OVERRIDE = "manual_override"
 
 
-# The approved distribution: category -> (group, target number of cases).
+# The approved, evidence-driven distribution: category -> (group, number of cases).
 CATEGORY_TARGETS: dict[str, tuple[GoldenGroup, int]] = {
     "exact_cross_source": (GoldenGroup.POSITIVE, 14),
-    "punctuation_casing": (GoldenGroup.POSITIVE, 6),
-    "alternate_names": (GoldenGroup.POSITIVE, 6),
+    "punctuation_casing": (GoldenGroup.POSITIVE, 7),
+    "alternate_names": (GoldenGroup.POSITIVE, 8),
     "roman_numerals": (GoldenGroup.POSITIVE, 5),
-    "subtitles": (GoldenGroup.POSITIVE, 5),
-    "renamed_games": (GoldenGroup.POSITIVE, 5),
+    "subtitles": (GoldenGroup.POSITIVE, 6),
+    "renamed_games": (GoldenGroup.POSITIVE, 1),
     "ports_platform_variants": (GoldenGroup.POSITIVE, 8),
     "early_access": (GoldenGroup.POSITIVE, 5),
     "editions_with_id_link": (GoldenGroup.POSITIVE, 8),
@@ -63,22 +67,18 @@ CATEGORY_TARGETS: dict[str, tuple[GoldenGroup, int]] = {
     "gta_family": (GoldenGroup.NEGATIVE, 5),
     "standalone_expansions": (GoldenGroup.NEGATIVE, 4),
     "dlc": (GoldenGroup.NEGATIVE, 6),
-    "demos": (GoldenGroup.NEGATIVE, 5),
-    "betas_playtests": (GoldenGroup.NEGATIVE, 4),
     "bundles": (GoldenGroup.NEGATIVE, 3),
     "soundtracks": (GoldenGroup.NEGATIVE, 3),
-    # Proposed substitutes (target 0 until approved): non-entity products that IGDB
-    # types authoritatively. No recorded field identifies a demo, beta or soundtrack.
-    "packs_addons": (GoldenGroup.NEGATIVE, 0),
-    "episodes_seasons": (GoldenGroup.NEGATIVE, 0),
-    "updates": (GoldenGroup.NEGATIVE, 0),
-    "title_only_missing_companies": (GoldenGroup.QUARANTINE, 8),
-    "conflicting_companies": (GoldenGroup.QUARANTINE, 5),
-    "conflicting_release_dates": (GoldenGroup.QUARANTINE, 5),
-    "id_link_incompatible_title": (GoldenGroup.QUARANTINE, 5),
-    "edition_without_id_link": (GoldenGroup.QUARANTINE, 4),
-    "regional_titles": (GoldenGroup.QUARANTINE, 3),
-    "csgo_cs2_single_app": (GoldenGroup.QUARANTINE, 2),
+    # Non-entity products that IGDB types itself. They stand in for demos and betas,
+    # which no recorded field identifies.
+    "packs_addons": (GoldenGroup.NEGATIVE, 3),
+    "episodes_seasons": (GoldenGroup.NEGATIVE, 3),
+    "updates": (GoldenGroup.NEGATIVE, 3),
+    "title_only_missing_companies": (GoldenGroup.QUARANTINE, 9),
+    "conflicting_companies": (GoldenGroup.QUARANTINE, 6),
+    "conflicting_release_dates": (GoldenGroup.QUARANTINE, 4),
+    "id_link_incompatible_title": (GoldenGroup.QUARANTINE, 7),
+    "edition_without_id_link": (GoldenGroup.QUARANTINE, 6),
     "early_access_rename_thin_evidence": (GoldenGroup.QUARANTINE, 1),
     "no_candidates": (GoldenGroup.NEW_ENTITY, 12),
     "candidates_hard_contradicted": (GoldenGroup.NEW_ENTITY, 8),
@@ -119,7 +119,11 @@ class GoldenCase(FrozenModel):
     # Labels the incoming record must never be merged into.
     must_not_match: tuple[str, ...] = ()
     rationale: NonEmptyStr
-    evidence: tuple[EvidenceCitation, ...] = Field(min_length=1)
+    # Proves the label. Never shown to a resolver.
+    ground_truth_evidence: tuple[EvidenceCitation, ...] = Field(min_length=1)
+    # Recorded links that exist but are withheld from the resolver in this scenario,
+    # so that it must decide from the remaining evidence. The label is unchanged.
+    masked_evidence: tuple[EvidenceCitation, ...] = ()
     # 'difficult' marks a label that took judgement and deserves a second look.
     truth: Literal["established", "difficult"] = "established"
 
@@ -144,7 +148,62 @@ class GoldenCase(FrozenModel):
             raise ValueError(f"{self.case_id}: target is also listed in must_not_match")
         self._check_group()
         self._check_evidence()
+        self._check_masking()
         return self
+
+    def _check_masking(self) -> None:
+        if not self.masked_evidence:
+            return
+        if self.group is not GoldenGroup.POSITIVE:
+            raise ValueError(f"{self.case_id}: only a positive case may mask evidence")
+        if any(citation.field != "external_ids" for citation in self.masked_evidence):
+            raise ValueError(f"{self.case_id}: only an external-id link can be masked")
+        if any(citation.record == self.incoming.key for citation in self.masked_evidence):
+            raise ValueError(f"{self.case_id}: masking applies to existing records")
+        proof = {(c.record, c.field, c.value) for c in self.ground_truth_evidence}
+        if any((c.record, c.field, c.value) not in proof for c in self.masked_evidence):
+            raise ValueError(f"{self.case_id}: masked evidence must also be ground-truth evidence")
+
+    def resolver_view(self) -> tuple[ResolverInput, dict[str, str]]:
+        """The case exactly as a resolver may see it, plus the key to read its answer.
+
+        Entities are given anonymous references so a label can carry no hint, and any
+        masked link is removed from every field it appears in. The returned mapping
+        (reference -> label) is for the evaluator only and is never passed on.
+        """
+        hidden: dict[SourceRecordKey, set[str]] = {}
+        for citation in self.masked_evidence:
+            hidden.setdefault(citation.record, set()).add(citation.value)
+
+        def visible(record: SourceRecord) -> SourceRecord:
+            values = hidden.get(record.key)
+            if not values:
+                return record
+            return record.model_copy(
+                update={
+                    "external_ids": tuple(e for e in record.external_ids if e.value not in values),
+                    "websites": tuple(
+                        site for site in record.websites if not _mentions_app(site, values)
+                    ),
+                }
+            )
+
+        labels: dict[str, str] = {}
+        entities = []
+        for number, entity in enumerate(self.existing, start=1):
+            ref = f"entity-{number}"
+            labels[ref] = entity.label
+            entities.append(
+                EntityView(ref=ref, records=tuple(visible(record) for record in entity.records))
+            )
+        return (
+            ResolverInput(
+                incoming=self.incoming,
+                entities=tuple(entities),
+                context=tuple(visible(record) for record in self.context),
+            ),
+            labels,
+        )
 
     def _check_group(self) -> None:
         group, expected = self.group, self.expected
@@ -154,6 +213,8 @@ class GoldenCase(FrozenModel):
             raise ValueError(f"{self.case_id}: a quarantine case expects QUARANTINE")
         if group is GoldenGroup.NEW_ENTITY and expected is not ExpectedDecision.NEW_ENTITY:
             raise ValueError(f"{self.case_id}: a new-entity case expects NEW_ENTITY")
+        if expected is ExpectedDecision.MANUAL_OVERRIDE and group is not GoldenGroup.NEGATIVE:
+            raise ValueError(f"{self.case_id}: an override case belongs to the negative group")
         if group is GoldenGroup.NEGATIVE:
             if expected is ExpectedDecision.QUARANTINE:
                 raise ValueError(f"{self.case_id}: a negative case must name its right outcome")
@@ -171,7 +232,7 @@ class GoldenCase(FrozenModel):
         for entity in self.existing:
             for record in entity.records:
                 recorded[record.key] = record
-        for citation in self.evidence:
+        for citation in (*self.ground_truth_evidence, *self.masked_evidence):
             cited = recorded.get(citation.record)
             if cited is None:
                 raise ValueError(f"{self.case_id}: evidence cites a record that is not in the case")
@@ -203,7 +264,11 @@ class GoldenCaseSpec(FrozenModel):
     target: str | None = None
     must_not_match: tuple[str, ...] = ()
     rationale: NonEmptyStr
-    evidence: tuple[EvidenceCitation, ...] = Field(min_length=1)
+    # Proves the label. Never shown to a resolver.
+    ground_truth_evidence: tuple[EvidenceCitation, ...] = Field(min_length=1)
+    # Recorded links that exist but are withheld from the resolver in this scenario,
+    # so that it must decide from the remaining evidence. The label is unchanged.
+    masked_evidence: tuple[EvidenceCitation, ...] = ()
     truth: Literal["established", "difficult"] = "established"
 
     def resolve(self, recorded: Mapping[SourceRecordKey, SourceRecord]) -> GoldenCase:
@@ -228,9 +293,15 @@ class GoldenCaseSpec(FrozenModel):
             target=self.target,
             must_not_match=self.must_not_match,
             rationale=self.rationale,
-            evidence=self.evidence,
+            ground_truth_evidence=self.ground_truth_evidence,
+            masked_evidence=self.masked_evidence,
             truth=self.truth,
         )
+
+
+def _mentions_app(url: str, app_ids: set[str]) -> bool:
+    """Whether a URL is a store link for one of the given app ids."""
+    return any(re.search(rf"/app/{re.escape(app_id)}(?:\D|$)", url) for app_id in app_ids)
 
 
 class DroppedCase(FrozenModel):

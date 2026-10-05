@@ -634,7 +634,12 @@
           "enum": [
             "MOD_ECOSYSTEM",
             "ONLINE_COMPONENT",
-            "SEQUEL"
+            "SEQUEL",
+            "REMAKE",
+            "REMASTER",
+            "STANDALONE_EXPANSION",
+            "PACKAGING_VARIANT",
+            "COLLECTION"
           ],
           "title": "Relationship Type",
           "type": "string"

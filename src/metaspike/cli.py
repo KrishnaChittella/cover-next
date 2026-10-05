@@ -4,13 +4,14 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import httpx
 from pydantic import ValidationError
 
-from metaspike.catalogue.seed import CatalogueError, load_seed_catalogue
+from metaspike.catalogue.generate import CatalogueState, generate_catalogue
+from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
 from metaspike.domain.signals import CollectionStatus
 from metaspike.pipeline.collection import (
     CollectionReport,
@@ -27,6 +28,9 @@ from metaspike.pipeline.run import (
 from metaspike.publishing.publisher import to_json
 from metaspike.publishing.schemas import export_schemas, stale_schemas
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
+from metaspike.resolution.evaluate import evaluate
+from metaspike.resolution.golden import load_golden_set
+from metaspike.resolution.recorded import load_recorded_catalogue
 from metaspike.scoring.v0 import ScoreInvariantError
 from metaspike.sources.base import SourceError
 from metaspike.sources.catalogue_sources import (
@@ -55,6 +59,9 @@ EXIT_SOURCE_UNAVAILABLE = 6
 DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_CACHE_DIR = Path(".metaspike/cache")
+DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
+DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
+DEFAULT_CATALOGUE_STATE = Path(".metaspike/catalogue/state.json")
 _SNAPSHOT_FILE = "collection.json"
 _SUMMARY_ROWS = 10
 
@@ -119,6 +126,24 @@ def _parser() -> argparse.ArgumentParser:
     )
     probe.add_argument("--source", choices=["steam", "igdb", "all"], default="all")
     probe.set_defaults(handler=_probe_sources)
+
+    evaluate_cmd = commands.add_parser(
+        "evaluate-resolver",
+        help="evaluate the resolver on the frozen golden set (fails on any false merge)",
+    )
+    evaluate_cmd.add_argument("--golden", type=Path, default=DEFAULT_GOLDEN_SET)
+    evaluate_cmd.add_argument("--recorded", type=Path, default=DEFAULT_RECORDED_CATALOGUE)
+    evaluate_cmd.add_argument("--failures", action="store_true", help="list every miss")
+    evaluate_cmd.set_defaults(handler=_evaluate_resolver)
+
+    generate = commands.add_parser(
+        "generate-catalogue",
+        help="resolve recorded source records into a generated catalogue state file",
+    )
+    generate.add_argument("--recorded", type=Path, default=DEFAULT_RECORDED_CATALOGUE)
+    generate.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    generate.add_argument("--as-of", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
+    generate.set_defaults(handler=_generate_catalogue)
 
     schemas = commands.add_parser("export-schemas", help="write JSON Schemas for the artifacts")
     schemas.add_argument("--schemas-dir", type=Path, default=DEFAULT_SCHEMAS_DIR)
@@ -235,6 +260,92 @@ def _export_schemas(args: argparse.Namespace) -> int:
         return EXIT_OK
     for path in export_schemas(args.schemas_dir):
         print(f"Wrote {path}")
+    return EXIT_OK
+
+
+def _percent(value: float | None) -> str:
+    return "   n/a" if value is None else f"{100 * value:5.1f}%"
+
+
+def _evaluate_resolver(args: argparse.Namespace) -> int:
+    golden = load_golden_set(args.golden, load_recorded_catalogue(args.recorded))
+    report = evaluate(golden)
+    overall = report.overall
+    print(
+        f"Golden set v{report.golden_version} ({golden.status}, {overall.cases} cases, "
+        f"hash {report.golden_hash[:12]})  resolver {report.resolver_version}"
+    )
+    print(f"FALSE AUTO_MATCH MERGES    {overall.false_auto_merges}")
+    print(
+        f"AUTO_MATCH PRECISION       {_percent(overall.precision)}  "
+        f"({overall.correct_auto_matches}/{overall.auto_matches})"
+    )
+    print(
+        f"AUTO_MATCH RECALL          {_percent(overall.recall)}  "
+        f"({overall.correct_auto_matches_on_positives}/{overall.positives})"
+    )
+    print(
+        f"QUARANTINE RATE            {_percent(overall.quarantine_rate)}  "
+        f"({overall.quarantined}/{overall.cases})"
+    )
+    print(
+        f"AVOIDABLE QUARANTINE RATE  {_percent(overall.avoidable_quarantine_rate)}  "
+        f"({overall.avoidable_quarantines}/{overall.not_expecting_quarantine})"
+    )
+    print(
+        f"NEW_ENTITY ACCURACY        {_percent(overall.new_entity_accuracy)}  "
+        f"({overall.correct_new_entity_decisions}/{overall.new_entity_decisions})"
+    )
+    plain, masked = report.unmasked_positives, report.masked
+    print(
+        f"  positives with the id link visible: {plain.correct_auto_matches_on_positives}/"
+        f"{plain.positives} matched;  with it masked: "
+        f"{masked.correct_auto_matches_on_positives}/{masked.positives} matched, "
+        f"{masked.quarantined} quarantined"
+    )
+    print()
+    print(f"{'category':<34}{'cases':>6}{'right':>6}{'auto':>6}{'false':>6}{'quar':>6}{'new':>5}")
+    for category, metrics in report.by_category.items():
+        print(
+            f"{category:<34}{metrics.cases:>6}{metrics.correct:>6}{metrics.auto_matches:>6}"
+            f"{metrics.false_auto_merges:>6}{metrics.quarantined:>6}"
+            f"{metrics.new_entity_decisions:>5}"
+        )
+    if args.failures:
+        print()
+        for miss in report.failures():
+            print(
+                f"{miss.case_id}: expected {miss.expected.value}, got {miss.decided.value}"
+                f"{' [masked]' if miss.masked else ''} - {miss.explanation}"
+            )
+    if not report.passes_safety_gate:
+        return _fail(EXIT_INVALID_OUTPUT, "the resolver made a false automatic merge")
+    return EXIT_OK
+
+
+def _generate_catalogue(args: argparse.Namespace) -> int:
+    records = load_recorded_catalogue(args.recorded).values()
+    previous = (
+        CatalogueState.model_validate_json(args.state.read_bytes())
+        if args.state.is_file()
+        else None
+    )
+    as_of = _now() if args.as_of is None else datetime.combine(args.as_of, time.min, tzinfo=UTC)
+    state = generate_catalogue(records, as_of=as_of, previous=previous)
+    args.state.parent.mkdir(parents=True, exist_ok=True)
+    args.state.write_text(to_json(state), encoding="utf-8")
+    metrics = state.quarantine.metrics(as_of)
+    created = len(state.catalogue.games) - (
+        len(bootstrap_catalogue().games) if previous is None else len(previous.catalogue.games)
+    )
+    print(
+        f"Catalogue: {len(state.catalogue.games)} entities ({created} new this run), "
+        f"{len(state.mapping.bindings)} source bindings, "
+        f"{len(state.related_products)} related products"
+    )
+    print(f"Quarantine: {metrics.total} records  by reason {metrics.by_reason}")
+    print(f"Decisions logged: {len(state.decisions.decisions)}  resolver {state.resolver_version}")
+    print(f"State: {args.state}")
     return EXIT_OK
 
 
