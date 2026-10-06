@@ -70,6 +70,14 @@ locals {
     }
   }
 
+  # Which version of each source secret the jobs are given. Null means "none yet", and
+  # then no job carries a reference to that secret.
+  secret_version = {
+    "steam-web-api-key"  = var.steam_web_api_key_version
+    "igdb-client-id"     = var.igdb_client_id_version
+    "igdb-client-secret" = var.igdb_client_secret_version
+  }
+
   # The only jobs the dispatcher may start. It may start them; it cannot read what
   # they read.
   dispatched_jobs = [for name in keys(local.jobs) : name if name != "ms-dispatch"]
@@ -121,15 +129,20 @@ resource "google_cloud_run_v2_job" "this" {
         }
 
         # A reference to a secret, resolved by Cloud Run when the task starts. The value
-        # is never in this configuration, the state, or the image.
+        # is never in this configuration, the state, or the image. A reference exists
+        # only for a secret whose exact version number has been supplied; until then the
+        # job simply does not have it, and it never follows "latest".
         dynamic "env" {
-          for_each = each.value.secrets
+          for_each = {
+            for name, secret in each.value.secrets : name => secret
+            if local.secret_version[secret] != null
+          }
           content {
             name = env.key
             value_source {
               secret_key_ref {
                 secret  = google_secret_manager_secret.this[env.value].secret_id
-                version = "latest"
+                version = local.secret_version[env.value]
               }
             }
           }

@@ -17,6 +17,8 @@ BOOTSTRAP = REPO / "infra" / "bootstrap"
 PROD = REPO / "infra" / "prod"
 WORKFLOWS = REPO / ".github" / "workflows"
 
+KEY_SHAPED = "0123456789ABCDEF0123456789ABCDEF"
+
 IDENTITIES = {
     "ms-scheduler",
     "ms-dispatch",
@@ -189,6 +191,94 @@ def test_the_dispatcher_cannot_read_any_source_secret() -> None:
     assert with_secrets == {"ms-steam-players", "ms-catalogue"}
     dispatch = re.search(r'"ms-dispatch" = \{(.*?)\n    \}', jobs, re.S)
     assert dispatch and re.search(r"secrets\s*=\s*\{\}", dispatch.group(1))
+
+
+def test_source_secrets_reach_a_job_only_by_explicit_numeric_version() -> None:
+    variables = read(PROD / "variables.tf")
+    names = ("steam_web_api_key_version", "igdb_client_id_version", "igdb_client_secret_version")
+    for name in names:
+        declaration = re.search(rf'variable "{name}" \{{(.*?)\n\}}', variables, re.S)
+        assert declaration, name
+        body = declaration.group(1)
+        assert re.search(r"default\s*=\s*null", body), name  # unset unless deliberately given
+        assert 'can(regex("^[1-9][0-9]*$"' in body, name  # a positive integer, nothing else
+        assert "sensitive" not in body  # a version number is metadata, not a secret
+    # The pattern itself: numbers pass; "latest", aliases, zero, signs and values do not.
+    accepted = re.compile(r"^[1-9][0-9]*$")
+    assert all(accepted.match(v) for v in ("1", "7", "42", "1000"))
+    for refused in ("latest", "LATEST", "0", "01", "-1", "1.0", " 1", "v1", "", KEY_SHAPED):
+        assert not accepted.match(refused), refused
+    jobs = code(read(PROD / "jobs.tf"))
+    # "latest" is never a version anywhere; the word survives only in the messages that
+    # explain why it is refused.
+    everything = code(terraform(PROD))
+    assert not re.search(r'version\s*=\s*"latest"', everything)
+    mentions = [line for line in everything.splitlines() if "latest" in line]
+    assert len(mentions) == 3 and all("error_message" in line for line in mentions)
+    assert "if local.secret_version[secret] != null" in jobs
+    assert "version = local.secret_version[env.value]" in jobs
+    mapping = re.search(r"secret_version = \{(.*?)\}", jobs, re.S)
+    assert mapping
+    assert dict(re.findall(r'"([a-z-]+)"\s*=\s*var\.(\w+)', mapping.group(1))) == {
+        "steam-web-api-key": "steam_web_api_key_version",
+        "igdb-client-id": "igdb_client_id_version",
+        "igdb-client-secret": "igdb_client_secret_version",
+    }
+    # No path for a secret VALUE: no version resource, no data field, and the deploy
+    # workflow passes none of these variables.
+    for root in (BOOTSTRAP, PROD):
+        text = code(terraform(root))
+        assert "google_secret_manager_secret_version" not in text and "secret_data" not in text
+    assert "_version=" not in workflow("deploy.yml")
+    example = read(PROD / "prod.tfvars.example")
+    assert not re.search(r"^\w+_version\s*=", example, re.M)  # shown only as comments
+    # The behaviour itself is proven by `terraform test` with a mocked provider.
+    tests = read(PROD / "tests" / "source_secrets.tftest.hcl")
+    assert 'mock_provider "google" {}' in tests and tests.count("command = plan") == 7
+    assert "command = apply" not in tests
+    for run in (
+        "default_has_no_source_secret_reference_anywhere",
+        "steam_version_reaches_only_the_jobs_that_use_steam",
+        "catalogue_gets_only_the_individually_configured_references",
+        "all_three_versions_configured",
+        "latest_is_refused_for_steam",
+        "latest_is_refused_for_igdb_client_id",
+        "a_value_or_a_non_positive_number_is_refused",
+    ):
+        assert f'run "{run}"' in tests, run
+    assert "terraform test" in workflow("ci.yml")
+
+
+def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
+    monitoring = read(PROD / "monitoring.tf")
+    policies = dict(
+        re.findall(
+            r'resource "google_monitoring_alert_policy" "(\w+)" \{(.*?)\n\}\n', monitoring, re.S
+        )
+    )
+    assert set(policies) == {
+        "dispatcher_silent",
+        "job_failures",
+        "steam_refused",
+        "parity_mismatch",
+    }
+    # These two read a counter created in this root. Each names the resource itself in
+    # its filter, so Terraform orders the metric before the alert without a depends_on.
+    for policy, metric in (
+        ("steam_refused", "ms_steam_refused_403"),
+        ("parity_mismatch", "ms_baseline_parity_mismatch"),
+    ):
+        assert f'google_logging_metric.counter["{metric}"].name' in policies[policy], policy
+        assert "logging.googleapis.com/user/${google_logging_metric.counter" in policies[policy]
+    # No alert reaches a log-based metric through a hard-coded name Terraform cannot see.
+    for body in policies.values():
+        for user_metric in re.findall(r"logging\.googleapis\.com/user/(\S+?)\\\"", body):
+            assert user_metric.startswith("${google_logging_metric.counter["), user_metric
+    # The other two read Cloud Run's own built-in metric and depend on nothing here.
+    for policy in ("dispatcher_silent", "job_failures"):
+        assert "run.googleapis.com/job/completed_execution_count" in policies[policy]
+        assert "google_logging_metric" not in policies[policy]
+    assert "time_sleep" not in monitoring and "hashicorp/time" not in terraform(PROD)
 
 
 def test_the_deploy_identity_may_act_only_as_the_named_runtime_identities() -> None:

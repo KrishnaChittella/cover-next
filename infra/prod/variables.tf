@@ -34,3 +34,46 @@ variable "scheduler_paused" {
   type        = bool
   default     = true
 }
+
+# --- Source secret versions ---------------------------------------------------------
+# A job is given a reference to a source secret only when the EXACT version to use is
+# named here. Unset (the default) means the job has no reference to that secret at
+# all, which is the only valid state while the secret container has no version: Cloud
+# Run will not create a job that points at a version that does not exist.
+#
+# What goes here is a Secret Manager version NUMBER. It is metadata, not the secret;
+# no secret value is ever a Terraform input. "latest" is refused, so a deployment
+# always states which version it runs with and never moves silently.
+
+variable "steam_web_api_key_version" {
+  description = "Numeric version of steam-web-api-key to give the Steam jobs. Unset: no reference."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.steam_web_api_key_version == null || can(regex("^[1-9][0-9]*$", var.steam_web_api_key_version))
+    error_message = "Use an explicit positive version number such as \"1\". \"latest\" and aliases are not accepted."
+  }
+}
+
+variable "igdb_client_id_version" {
+  description = "Numeric version of igdb-client-id to give the catalogue job. Unset: no reference."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.igdb_client_id_version == null || can(regex("^[1-9][0-9]*$", var.igdb_client_id_version))
+    error_message = "Use an explicit positive version number such as \"1\". \"latest\" and aliases are not accepted."
+  }
+}
+
+variable "igdb_client_secret_version" {
+  description = "Numeric version of igdb-client-secret to give the catalogue job. Unset: no reference."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.igdb_client_secret_version == null || can(regex("^[1-9][0-9]*$", var.igdb_client_secret_version))
+    error_message = "Use an explicit positive version number such as \"1\". \"latest\" and aliases are not accepted."
+  }
+}

@@ -6,5 +6,11 @@ project_id           = "REPLACE-with-the-globally-unique-project-id"
 image                = "us-central1-docker.pkg.dev/REPLACE-project-id/metaspike/metaspike@sha256:REPLACE-with-64-hex-digest"
 notification_channel = "REPLACE-with-the-bootstrap-output-notification_channel"
 
+# Source secret versions: leave these OUT until the secret really has that version.
+# When the time comes, give the explicit version NUMBER, never "latest" and never a value.
+# steam_web_api_key_version  = "1"
+# igdb_client_id_version     = "1"
+# igdb_client_secret_version = "1"
+
 # Leave true until every Part C policy gate has cleared.
 scheduler_paused = true

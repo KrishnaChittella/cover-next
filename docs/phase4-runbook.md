@@ -133,6 +133,14 @@ gcloud secrets versions add steam-web-api-key --project=<PROJECT_ID> --data-file
 Type or paste the value, then end input. Repeat for the other two. Do not put a secret
 in a `.tfvars` file, a workflow, a test, or a message.
 
+Adding a version does not give it to a job. Each job is handed a source secret only
+when the exact version NUMBER is supplied to the production root
+(`steam_web_api_key_version`, `igdb_client_id_version`, `igdb_client_secret_version`).
+They are unset by default, and while unset the jobs carry no reference to the secret
+at all: Cloud Run will not create a job that points at a version that does not exist.
+`latest` is refused, so a deployment always states which version it runs with. A
+version number is metadata, not the secret, and may appear in Terraform.
+
 The short-lived IGDB OAuth access token is not a managed secret. The catalogue job
 mints it from the client id and secret and caches it in the private tokens bucket,
 which only that job's identity can read.
