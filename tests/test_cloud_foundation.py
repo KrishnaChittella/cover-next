@@ -392,6 +392,27 @@ def test_pull_request_ci_has_no_cloud_credentials() -> None:
         assert step in ci, step
 
 
+def test_verification_runs_once_per_commit_and_gates_every_cloud_step() -> None:
+    ci, deploy = workflow("ci.yml"), workflow("deploy.yml")
+    triggers = ci[ci.index("\non:\n") : ci.index("\npermissions:")]
+    assert "pull_request:" in triggers and "workflow_call:" in triggers
+    assert "push:" not in triggers  # a push to main is verified by deploy, not twice
+    # Deploy reuses the whole CI workflow as its first job; it has no weaker copy of it.
+    verify = deploy[deploy.index("  verify:\n") : deploy.index("  build-and-plan:\n")]
+    assert "uses: ./.github/workflows/ci.yml" in code(verify)
+    assert "uv run pytest" not in code(deploy)  # no second, divergent test list
+    # Nothing that authenticates can start unless verification passed.
+    build = deploy[deploy.index("  build-and-plan:\n") : deploy.index("  apply:\n")]
+    apply = deploy[deploy.index("  apply:\n") :]
+    assert "needs: verify" in code(build) and "needs: build-and-plan" in code(apply)
+    assert "google-github-actions/auth" not in verify
+    assert code(deploy).index("needs: verify") < code(deploy).index("google-github-actions/auth")
+    assert "if: always()" not in deploy and "continue-on-error" not in deploy
+    # And nothing authenticates at all before the bootstrap has provided identifiers.
+    assert "if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''" in code(build)
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in ci
+
+
 def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = code(read(path))

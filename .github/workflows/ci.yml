@@ -1,18 +1,27 @@
-# Pull-request checks. This workflow has NO cloud credentials and requests none: it
-# cannot reach GCP, and it calls no MetaSpike data source. Everything runs offline.
+# Verification. This workflow has NO cloud credentials and requests none: it cannot
+# reach GCP, and it calls no MetaSpike data source. Everything runs offline.
+#
+# It runs in two ways, and never twice for the same commit:
+#   - on every pull request;
+#   - as the first job of the deploy workflow on main (`workflow_call`), where nothing
+#     that touches the cloud can start until every job here has passed.
+# It deliberately does NOT also trigger on a push to main: that push already runs it
+# through the deploy workflow, and running the same checks twice proved nothing more.
 name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
+  workflow_call:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # A newer push to a pull request supersedes the older run. A run on main is never
+  # cancelled, because a deployment may be waiting on it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   application:

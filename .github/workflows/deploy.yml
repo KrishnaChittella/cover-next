@@ -24,22 +24,24 @@ env:
   TERRAFORM_VERSION: "1.16.5"
 
 jobs:
+  # The same verification pull requests get, run once for this commit. Every job in it
+  # must pass: tests (including the baseline_rules_v1 reproduction gate), the resolver
+  # safety gate, Terraform validation and the image build and scan.
   verify:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
-      - run: uv sync --locked
-      - run: uv run ruff format --check && uv run ruff check && uv run mypy
-      - run: uv run pytest
-      - run: uv run metaspike export-schemas --check
-      - run: uv run metaspike evaluate-resolver
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   # First approval: lets the run obtain a short-lived credential to push the image and
   # read state for the plan. It changes no infrastructure.
   build-and-plan:
+    # `needs` means a failed or cancelled verification skips this job and everything
+    # after it: no approval is requested and no credential is ever issued.
     needs: verify
+    # Until the one-time bootstrap has stored the project's identifiers as environment
+    # variables there is nothing to authenticate against, so the run ends here, cleanly,
+    # after verification.
+    if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
