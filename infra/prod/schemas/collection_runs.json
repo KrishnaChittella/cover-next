@@ -1,0 +1,81 @@
+[
+  {
+    "name": "run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "job",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "phase",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "started | finished. A missing 'finished' row is itself the failure signal."
+  },
+  {
+    "name": "started_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "finished_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "outcome",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "requests_sent",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "halted_by",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "policy_version",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "image_digest",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "detail",
+    "type": "JSON",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

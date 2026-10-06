@@ -101,11 +101,19 @@ def test_igdb_and_steam_can_be_built_against_but_nothing_more_yet(policy: Source
     assert development.entries() == ()  # catalogue sources are not demand sources
     assert development.policy(policy.source) is policy
 
-    for stage in (
-        DeploymentStage.PRIVATE_COLLECTION,
-        DeploymentStage.PUBLIC_LAUNCH,
-        DeploymentStage.COMMERCIAL_PRODUCTION,
-    ):
+    blocked = [DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION]
+    if policy is IGDB_POLICY:
+        # Private storage of catalogue metadata is conditionally allowed: IGDB's own
+        # documentation authorises it, under the Twitch agreement's general caveat.
+        clearance = policy.clearance(DeploymentStage.PRIVATE_COLLECTION)
+        assert clearance.cleared and "Conditionally allowed" in clearance.reason
+        assert "Schedule 1" in clearance.reason and "nothing beyond it" in clearance.reason
+        SourceRegistry(stage=DeploymentStage.PRIVATE_COLLECTION).register_catalogue(
+            _CatalogueStub(policy.source), policy
+        )
+    else:
+        blocked.insert(0, DeploymentStage.PRIVATE_COLLECTION)
+    for stage in blocked:
         assert not policy.cleared_for(stage)
         with pytest.raises(SourcePolicyError, match=f"not cleared for {stage.value}"):
             SourceRegistry(stage=stage).register_catalogue(_CatalogueStub(policy.source), policy)
@@ -129,8 +137,9 @@ def test_reviewed_policy_values_are_recorded_exactly() -> None:
     assert quota is not None and (quota.limit, quota.period) == (100_000, QuotaPeriod.DAY)
     assert STEAM_CATALOGUE_POLICY.operations.budget_group == STEAM_BUDGET_GROUP == "steam_web_api"
 
+    assert IGDB_POLICY.reviewed_at == date(2026, 10, 6)
+    assert STEAM_CATALOGUE_POLICY.reviewed_at == date(2026, 10, 6)
     for policy in (IGDB_POLICY, STEAM_CATALOGUE_POLICY):
-        assert policy.reviewed_at == date(2026, 10, 4)
         assert all(reference.startswith("https://") for reference in policy.references)
 
 
@@ -203,7 +212,7 @@ def test_new_policy_fields_are_published_through_the_contract_view() -> None:
     assert view["operations"]["budget_group"] == "igdb"
     assert {c["stage"]: c["cleared"] for c in view["stage_clearance"]} == {
         "private_development": True,
-        "private_collection": False,
+        "private_collection": True,  # conditionally, for catalogue metadata only
         "public_launch": False,
         "commercial_production": False,
     }

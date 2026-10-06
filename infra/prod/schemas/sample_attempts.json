@@ -1,0 +1,121 @@
+[
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "metric",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_native_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "value",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "Present only when status is 'observed'. NULL never means zero."
+  },
+  {
+    "name": "granularity",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "scheduled_for",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "slot_start",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "The slot that contains observed_at. With source, metric and source_native_id: the logical slot key."
+  },
+  {
+    "name": "observed_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "received_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Controls point-in-time knowledge."
+  },
+  {
+    "name": "canonical_game_id",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Binding believed at collection. Audit only; mapping history is the authority."
+  },
+  {
+    "name": "mapping_version",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "binding_ref",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "collection_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "attempt_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "One row per attempt. Several attempts may share a slot."
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "observed | failed | refused | unavailable. 'not_sampled' is never stored."
+  },
+  {
+    "name": "quality_flags",
+    "type": "STRING",
+    "mode": "REPEATED"
+  },
+  {
+    "name": "error_code",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "cache_age_seconds",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "cache_ttl_seconds",
+    "type": "INT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

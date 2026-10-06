@@ -1,0 +1,23 @@
+# Start from nothing: only what the image needs is allowed into the build context.
+*
+
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+
+# Never, even if a rule above is loosened later.
+.env
+.env.*
+.metaspike/
+artifacts/
+tests/
+infra/
+.git/
+**/__pycache__/
+**/*.pyc
+*.pem
+*.key
+*credentials*.json
+*.tfstate
+*.tfvars

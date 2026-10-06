@@ -174,16 +174,24 @@ def test_record_store_keeps_a_version_only_when_a_record_changes(tmp_path: Path)
 
 
 def test_record_store_is_refused_at_a_stage_the_policy_has_not_cleared(tmp_path: Path) -> None:
-    production = LocalSourceRecordStore(tmp_path, policy_for, DeploymentStage.PRIVATE_COLLECTION)
+    production = LocalSourceRecordStore(
+        tmp_path / "private", policy_for, DeploymentStage.PRIVATE_COLLECTION
+    )
     with pytest.raises(StoragePolicyError, match="not cleared for private_collection"):
-        production.write([record()])
+        production.write([record("steam_catalogue", "9", product_type=ProductType.UNKNOWN)])
+    assert production.write([record()]) == 1  # IGDB metadata is conditionally cleared
+    public = LocalSourceRecordStore(tmp_path / "public", policy_for, DeploymentStage.PUBLIC_LAUNCH)
+    with pytest.raises(StoragePolicyError, match="not cleared for public_launch"):
+        public.write([record()])
     prohibited = IGDB_POLICY.model_copy(
         update={"historical_storage_allowed": Permission.PROHIBITED}
     )
-    refusing = LocalSourceRecordStore(tmp_path, lambda source: prohibited)
+    refusing = LocalSourceRecordStore(tmp_path / "refused", lambda source: prohibited)
     with pytest.raises(StoragePolicyError, match="does not permit storing"):
         refusing.write([record()])
-    assert not (tmp_path / "records").exists()
+    assert not (tmp_path / "refused" / "records").exists()
+    assert not (tmp_path / "public" / "records").exists()
+    assert [p.name for p in (tmp_path / "private" / "records").iterdir()] == ["igdb.jsonl"]
 
 
 def test_record_store_reports_corruption_and_unsafe_names(tmp_path: Path) -> None:

@@ -119,6 +119,32 @@ from every artifact and schema. Maturity states, reason codes and the constants
 that were introduced in this part without separate approval are listed in
 `src/metaspike/domain/baseline_rules.py`.
 
+Phase 4 Part A (signal semantics v2 and private cloud foundation code) is written
+and validated locally. **No cloud resource exists**: nothing has been applied.
+
+- **`signal_semantics_v2`** changes how a signal is read, not what the engine
+  computes. Raw freshness (a sampled source is stale when its latest valid observation
+  is older than two sampling slots, 30 minutes for Steam) is separate from aggregate
+  freshness (bucket age and `valid_through`). Availability has six states:
+  available, missing, stale, inapplicable, unknown and unresolved. An entity with
+  several Steam apps is unresolved and adds nothing to observed evidence breadth.
+  `signal_semantics_v1` remains callable.
+- **`baseline_rules_v1` is pinned.** A fixed synthetic history, its complete
+  evaluations and its `BaselineState` are stored with content hashes; any drift fails
+  the tests. v1 is internal, reproducible and uncalibrated, and is never edited.
+- **Shadow-only guard.** Change-point output is computed and stored but may not be
+  used by a score, Event Heat, monitoring tiers, notifications or public artifacts.
+  Consumers read features through `metaspike.features.access`, which enforces it.
+- **Infrastructure as code** in `infra/`: one production project in `us-central1`,
+  private buckets and regional BigQuery datasets, secret containers with no values,
+  one identity per job, a dispatcher that cannot read source secrets, one scheduler
+  trigger that starts paused, GitHub trust by OIDC with no service-account key.
+- **One image** (`Dockerfile`) and two workflows: pull-request CI with no cloud
+  credentials, and a deploy workflow that waits for the owner's approval.
+
+See `docs/phase4-runbook.md` for the bootstrap steps, secret loading, the one-action
+stop and the policy gates that must clear before unattended collection.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:
@@ -265,7 +291,9 @@ src/metaspike/
     robust.py            median/MAD, robust scale, mid-rank percentile, Theil-Sen
     aggregate.py         15-minute slots to hourly and daily aggregates
     engine.py            the one feature engine and the BaselineState contract
-    normalise.py         normalised signals, signal quality and evidence breadth
+    normalise.py         normalised signals, signal quality and evidence breadth (semantics v1)
+    semantics.py         signal_semantics_v2: raw vs aggregate freshness, availability
+    access.py            rule status and the shadow-only feature guard
   scoring/
     v0.py                metaspike_score_v0, confidence v0, and the one signal v0 reads
     explanations.py      deterministic explanation templates
@@ -513,8 +541,8 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 4 design gate: private scheduled collection. It owns the storage-country and
-disclosure decision for Steam Data, the warehouse that produces the same
-`BaselineState` the Python engine consumes, and the scheduler. No cloud resources
-exist yet, the feature constants need recalibrating on real history, and nothing is
-public before the single production release.
+Phase 4 Part A2: the owner's one-time bootstrap (project, billing, state bucket,
+private GitHub repository) and the first reviewed apply, with job durations measured
+so that cost can be recalculated. Then Part B (warehouse and production catalogue),
+Part C (policy-gated collectors) and Part D (baseline state, parity and soak). No
+cloud resource exists yet, and nothing is public before the single production release.

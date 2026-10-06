@@ -100,7 +100,9 @@ STEAM_CATALOGUE_POLICY = SourcePolicy(
             cleared=False,
             reason=(
                 "The Steam Web API Terms of Use (July 2010) do not address commercial "
-                "use, and incorporate the Steam Subscriber Agreement, which is unreviewed."
+                "use. They incorporate the Steam Subscriber Agreement, whose section 2 "
+                "restricts commercial exploitation of Content and Services and whose "
+                "section 4.C restricts automation broadly; see steam_current_players."
             ),
         ),
     ),
@@ -133,7 +135,7 @@ STEAM_CATALOGUE_POLICY = SourcePolicy(
             "available from a third party. Data is provided 'as is'."
         ),
     ),
-    reviewed_at=date(2026, 10, 4),
+    reviewed_at=date(2026, 10, 6),
     references=(
         "https://steamcommunity.com/dev/apiterms",
         "https://partner.steamgames.com/doc/webapi/IStoreService",

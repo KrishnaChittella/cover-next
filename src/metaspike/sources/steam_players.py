@@ -118,9 +118,12 @@ STEAM_CURRENT_PLAYERS_POLICY = SourcePolicy(
             stage=DeploymentStage.PRIVATE_COLLECTION,
             cleared=False,
             reason=(
-                "Unattended scheduled collection is not cleared in this phase. It needs "
-                "the storage country chosen and named in a privacy policy, decided at "
-                "the Phase 4 gate."
+                "Not cleared until ALL of these hold: a privacy/data notice with a Steam "
+                "Data section is public at https://krishnachittella.dev/privacy; persistent "
+                "Steam Data is stored only in the United States (us-central1); the API key "
+                "registration identifies the MetaSpike / krishnachittella.dev application; "
+                "calls stay far below 100,000 a day; nothing Steam-derived is published; "
+                "and no Steam-derived commercial feature exists."
             ),
         ),
         StageClearance(
@@ -163,7 +166,7 @@ STEAM_CURRENT_PLAYERS_POLICY = SourcePolicy(
             "players sampled over time, never a count of daily players."
         ),
     ),
-    reviewed_at=date(2026, 10, 5),
+    reviewed_at=date(2026, 10, 6),
     references=(
         "https://partner.steamgames.com/doc/webapi/ISteamUserStats",
         "https://partner.steamgames.com/doc/webapi_overview",
@@ -172,14 +175,25 @@ STEAM_CURRENT_PLAYERS_POLICY = SourcePolicy(
         "https://store.steampowered.com/subscriber_agreement/",
     ),
     notes=(
-        "Licence: access the Steam Web API, implement it in an application you own and "
-        "operate, and distribute Steam Data to end users for their personal use, as is. "
-        "Limit: 100,000 calls per day across the Web API. The key is confidential. "
-        "Stored Steam Data must be disclosed to end users and kept in a country named "
-        "in a privacy policy. The Subscriber Agreement's automation wording concerns "
-        "Subscription Marketplace processes and account creation; it is not recorded "
-        "here as a restriction on licensed Web API access. Commercial use and derived "
-        "metrics are not addressed anywhere reviewed and remain unknown."
+        "Licence (Steam Web API Terms of Use, July 2010): you may access the Steam Web "
+        "API, implement it in an Application you own and operate, and distribute Steam "
+        "Data to end users for their personal use, as is. Limit: 100,000 calls per day "
+        "across the Web API. The key is confidential and the licence is specific to the "
+        "Application named when the key was registered. Stored Steam Data must be "
+        "disclosed to end users and kept in a country named in a privacy policy. Two "
+        "facts are recorded together and neither cancels the other. First, the API Terms "
+        "expressly license implementing the Web API in an Application, which is "
+        "necessarily automated. Second, the Steam Subscriber Agreement (revised "
+        "2026-09-10), section 4.C, says: 'You may not use any form of scripts, bots, "
+        'macros, or other non-human-controlled systems ("Automation") to interact with '
+        "Content and Services on Steam in any manner', followed by examples; it is not "
+        "limited to those examples, and the API Terms forbid using the API in any way "
+        "that violates the Subscriber Agreement. Operational interpretation (owner "
+        "decision, 2026-10-06): low-volume, private, licensed API collection is permitted "
+        "under the API-specific terms once the private-collection conditions are met. "
+        "This is a residual policy ambiguity, not a settled permission; a clarification "
+        "request to Valve is to be sent before any public use. Commercial use and "
+        "derived metrics are not addressed anywhere reviewed and remain unknown."
     ),
 )
 

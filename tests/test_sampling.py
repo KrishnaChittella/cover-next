@@ -263,8 +263,11 @@ def test_the_steam_player_policy_is_recorded_exactly() -> None:
     for requirement in ("100,000", "confidential", "disclosed", "country", "as is", "logo"):
         assert requirement in text
     assert "affiliated with Valve" in policy.display.note
-    # The Subscriber Agreement is not recorded as banning licensed Web API access.
-    assert "not recorded here as a restriction on licensed Web API access" in policy.notes
+    # Both facts are recorded: the API Terms license the access, and the Subscriber
+    # Agreement's automation section is broad. Neither is written off.
+    assert "expressly license implementing the Web API in an Application" in policy.notes
+    assert "section 4.C" in policy.notes and "in any manner" in policy.notes
+    assert "residual policy ambiguity" in policy.notes
     assert all(reference.startswith("https://") for reference in policy.references)
 
 

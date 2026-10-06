@@ -1,0 +1,9 @@
+# Copy to a file that is NOT committed (*.tfvars is git-ignored). Placeholders only.
+# None of these is a secret; they are simply specific to the owner's accounts.
+
+project_id           = "REPLACE-with-the-globally-unique-project-id"
+billing_account_id   = "REPLACE-000000-000000-000000"
+state_bucket_name    = "REPLACE-project-id-tfstate"
+github_owner_id      = "REPLACE-numeric-owner-id"
+github_repository_id = "REPLACE-numeric-repository-id"
+alert_email          = "REPLACE-owner-email"

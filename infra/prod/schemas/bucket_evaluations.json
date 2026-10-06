@@ -1,0 +1,107 @@
+[
+  {
+    "name": "rule_version",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "config_fingerprint",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "semantics_version",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "metric",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "granularity",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "subject",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "bucket_start",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "level",
+    "type": "FLOAT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "log_lift",
+    "type": "FLOAT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "robust_z",
+    "type": "FLOAT64",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "seasonality_basis",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "maturity",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "change_point_shadow",
+    "type": "JSON",
+    "mode": "NULLABLE",
+    "description": "SHADOW ONLY under an uncalibrated rule version. Never an operational input."
+  },
+  {
+    "name": "evaluation",
+    "type": "JSON",
+    "mode": "REQUIRED",
+    "description": "The complete engine evaluation."
+  },
+  {
+    "name": "image_digest",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "computed_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

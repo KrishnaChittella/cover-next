@@ -30,6 +30,14 @@ from metaspike.features.normalise import (
     normalise,
     unavailable_signal,
 )
+from metaspike.features.semantics import (
+    Applicability,
+    FamilyReadingV2,
+    SignalV2,
+    family_reading_v2,
+    raw_freshness_from_slots,
+    signal_v2,
+)
 from metaspike.pipeline.history import read_entity_history
 from metaspike.storage.samples import SampleStore
 
@@ -193,3 +201,87 @@ def wikimedia_family(series: TimeSeries | None, as_of: datetime) -> FamilyReadin
         )
     signal, _ = wikimedia_features(series, as_of)
     return family_reading(family, FamilyApplicability.APPLICABLE_AND_AVAILABLE, (signal,))
+
+
+# --- signal_semantics_v2 ----------------------------------------------------------------
+# The engine path above is untouched. These read the same history and add the v2
+# reading: raw freshness from the raw slots, aggregate freshness from the state, and
+# the six availability states.
+
+
+def _steam_reading_window(config: SignalFeatureConfig, as_of: datetime) -> TimeWindow:
+    window = steam_slot_window(config, as_of)
+    return TimeWindow(start=window.start, end=Granularity.FIFTEEN_MINUTES.floor(as_of))
+
+
+def _steam_signal_v2(
+    config: SignalFeatureConfig, subject: str, slots: Iterable[SlotResolution], as_of: datetime
+) -> SignalV2:
+    resolved = list(slots)
+    signal, state = features_from_slots(config, subject, resolved, as_of)
+    return signal_v2(config, signal, state, raw_freshness_from_slots(resolved, as_of))
+
+
+def steam_app_signal_v2(
+    store: SampleStore,
+    source_native_id: str,
+    as_of: datetime,
+    rule_version: str = rules.BASELINE_RULES_VERSION,
+) -> SignalV2:
+    config = steam_config(rule_version)
+    slots = store.read(STEAM_SLOTS, source_native_id, _steam_reading_window(config, as_of), as_of)
+    return _steam_signal_v2(config, source_native_id, slots, as_of)
+
+
+def steam_family_v2(
+    store: SampleStore,
+    mapping: MappingHistory,
+    eligibility: SteamEligibility,
+    as_of: datetime,
+    rule_version: str = rules.BASELINE_RULES_VERSION,
+) -> FamilyReadingV2:
+    family = SourceFamily.STEAM_PLAYERS
+    if eligibility.state is SourceEligibility.INELIGIBLE:
+        return family_reading_v2(family, Applicability.INAPPLICABLE, reason=eligibility.reason)
+    if eligibility.state is SourceEligibility.UNKNOWN:
+        return family_reading_v2(family, Applicability.UNKNOWN, reason=eligibility.reason)
+    config = steam_config(rule_version)
+    history = read_entity_history(
+        store,
+        mapping,
+        eligibility.canonical_game_id,
+        STEAM_SLOTS,
+        STEAM_RECORD_SOURCE,
+        _steam_reading_window(config, as_of),
+        as_of,
+    )
+    if len(history.by_native_id) > 1:
+        # Several apps: each keeps its own history, and the entity gets no single value.
+        return family_reading_v2(
+            family,
+            Applicability.UNRESOLVED,
+            per_native=tuple(
+                _steam_signal_v2(config, native.source_native_id, native.slots, as_of)
+                for native in history.by_native_id
+            ),
+            reason=rules.MULTI_APP_UNRESOLVED_REASON,
+        )
+    slots = history.combined or ()
+    return family_reading_v2(
+        family,
+        Applicability.APPLICABLE,
+        (_steam_signal_v2(config, eligibility.canonical_game_id, slots, as_of),),
+        reason=history.unavailable_reason,
+    )
+
+
+def wikimedia_family_v2(series: TimeSeries | None, as_of: datetime) -> FamilyReadingV2:
+    family = SourceFamily.WIKIMEDIA_READERSHIP
+    if series is None:
+        return family_reading_v2(
+            family, Applicability.UNKNOWN, reason="no source identifier is mapped"
+        )
+    signal, state = wikimedia_features(series, as_of)
+    return family_reading_v2(
+        family, Applicability.APPLICABLE, (signal_v2(wikimedia_config(), signal, state),)
+    )

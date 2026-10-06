@@ -111,11 +111,15 @@ IGDB_POLICY = SourcePolicy(
         ),
         StageClearance(
             stage=DeploymentStage.PRIVATE_COLLECTION,
-            cleared=False,
+            cleared=True,
             reason=(
-                "Confirm with IGDB whether its own 'store and serve the data' statement or "
-                "the Twitch Developer Services Agreement's 24-hour storage limit governs "
-                "unattended long-term storage."
+                "Conditionally allowed (owner decision, 2026-10-06) for the identity and "
+                "catalogue metadata MetaSpike uses, and nothing beyond it. The Twitch "
+                "Developer Services Agreement, Schedule 1, by default forbids storing "
+                "Program Materials beyond a short cache unless specifically authorised. "
+                "IGDB's own documentation gives that authorisation for its metadata: local "
+                "storage is allowed and preferred, and retrieved data may be kept after a "
+                "partnership ends. The Twitch agreement remains the governing caveat."
             ),
         ),
         StageClearance(
@@ -163,17 +167,26 @@ IGDB_POLICY = SourcePolicy(
             note="Not collected. Removed images persist for 30 days; nothing else is stated.",
         ),
     ),
-    reviewed_at=date(2026, 10, 4),
+    reviewed_at=date(2026, 10, 6),
     references=(
         "https://api-docs.igdb.com/",
         "https://legal.twitch.com/legal/developer-agreement/",
     ),
     notes=(
         "Derived metrics are not addressed by IGDB; MetaSpike derives identity and "
-        "lifecycle from this metadata, not metrics. Commercial use is offered only through "
-        "a partnership. Serving data to one's own users is endorsed; redistributing it as a "
-        "dataset is not addressed. The Twitch agreement restricts monetizing and storing "
-        "'Twitch Data'; whether IGDB data is covered is unresolved."
+        "lifecycle from this metadata, not metrics. Storage: the Twitch Developer Services "
+        "Agreement (Schedule 1) is the general rule and limits storing Program Materials "
+        "to a short cache unless specifically authorised; IGDB's documentation is the "
+        "source-specific authorisation ('Am I allowed to store/cache the data locally? "
+        "Yes. In fact, we prefer if you store and serve the data to your end users', and "
+        "data may be kept after a partnership ends). Private collection is therefore "
+        "conditionally allowed for identity and catalogue metadata only; collection must "
+        "not grow beyond the fields MetaSpike needs. Commercial use: the documentation "
+        "says both 'free for non-commercial usage' and 'free for both non-commercial and "
+        "commercial projects'; the stricter reading is recorded, and a monetised product "
+        "needs the partnership (partner@igdb.com) with visible attribution. Redistributing "
+        "the data as a dataset is not addressed. The Schedule 1 text was supplied by the "
+        "owner's review; it could not be retrieved programmatically on 2026-10-05."
     ),
 )
 

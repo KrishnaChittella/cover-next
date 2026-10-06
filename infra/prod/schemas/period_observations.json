@@ -1,0 +1,72 @@
+[
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "metric",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_identifier",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "canonical_game_id",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "granularity",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "period_start",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "value",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "NULL is a missing period, never zero."
+  },
+  {
+    "name": "status",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "observed_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When this version of the period became known."
+  },
+  {
+    "name": "collection_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

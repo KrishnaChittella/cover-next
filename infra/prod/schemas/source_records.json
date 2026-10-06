@@ -1,0 +1,67 @@
+[
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "content_hash",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "A new version is appended only when this changes."
+  },
+  {
+    "name": "title",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "product_type",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "fetched_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_updated_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "record",
+    "type": "JSON",
+    "mode": "REQUIRED",
+    "description": "The normalised source-native record."
+  },
+  {
+    "name": "collection_run_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

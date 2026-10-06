@@ -1,0 +1,10 @@
+# Copy to a file that is NOT committed (*.tfvars is git-ignored), or pass with -var.
+# Every value below is a placeholder. None of them is a secret, and no secret value
+# ever belongs in a tfvars file.
+
+project_id           = "REPLACE-with-the-globally-unique-project-id"
+image                = "us-central1-docker.pkg.dev/REPLACE-project-id/metaspike/metaspike@sha256:REPLACE-with-64-hex-digest"
+notification_channel = "REPLACE-with-the-bootstrap-output-notification_channel"
+
+# Leave true until every Part C policy gate has cleared.
+scheduler_paused = true

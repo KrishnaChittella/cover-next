@@ -120,3 +120,27 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
 - **Features are a number or a reason.** No zero-filling, no interpolation, no
   backfill; a feature without an approved definition for a granularity is
   unsupported, not approximated.
+- **Rules and semantics are versioned separately.** A rule version fixes what the
+  engine computes; a semantics version fixes how the result is read. Presentation
+  can be corrected (`signal_semantics_v2`) without moving one engine output, and
+  the old reading stays callable.
+- **Raw freshness is not aggregate freshness.** A source is fresh or stale by the
+  age of its latest valid raw observation. A bucket has its own age. They are
+  reported side by side and never merged.
+- **Never sampled, stale and unresolved are different.** So are unknown and
+  inapplicable. An unresolved family (several apps, no combination rule) keeps its
+  per-app histories and contributes nothing to observed evidence breadth.
+- **Uncalibrated output is shadow-only, by construction.** Operational consumers
+  read features through one guard that refuses shadow-only features of an
+  uncalibrated rule version. `baseline_rules_v1` is pinned by a reproduction test
+  and is never edited; a recalibration is a new rule version.
+- **One identity per job, and the dispatcher holds no source secret.** A single
+  scheduler trigger starts a dispatcher that decides what is due and starts
+  approved jobs. It can start them; it cannot read what they read.
+- **Private infrastructure only.** Phase 4 has no public bucket, endpoint or
+  deployment. Data is stored in `us-central1` only. No bucket holding Steam Data
+  carries a retention lock, because that data may have to be deleted.
+- **No long-lived cloud credential exists.** Deployment authenticates with GitHub
+  OIDC through workload identity federation, restricted by numeric repository id,
+  branch and an approval-gated environment. Secret values are added by the owner
+  from standard input and never pass through Terraform.

@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable
 
 from metaspike.domain.source_policy import SourcePolicy
 from metaspike.features.normalise import EntityEvidence, NormalisedSignal
+from metaspike.features.semantics import EntityEvidenceV2
 from metaspike.sources.registry import SourcePolicyError
 
 
@@ -20,6 +21,16 @@ def refuse_unpublishable(
         refusal = policy_for(signal.source).publication_refusal()
         if refusal is not None:
             raise SourcePolicyError(f"{signal.source}: {refusal}")
+
+
+def refuse_unpublishable_v2(
+    evidence: EntityEvidenceV2, policy_for: Callable[[str], SourcePolicy]
+) -> None:
+    """The same line for signal_semantics_v2 records, including per-app histories."""
+    for reading in evidence.families:
+        refuse_unpublishable(
+            (item.signal for item in (*reading.signals, *reading.per_native)), policy_for
+        )
 
 
 def refuse_unpublishable_evidence(

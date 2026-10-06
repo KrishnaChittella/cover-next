@@ -1,0 +1,61 @@
+[
+  {
+    "name": "source",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "source_id",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "action",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "bind | unbind. Intervals are derived; nothing is updated in place."
+  },
+  {
+    "name": "canonical_game_id",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "mapping_version",
+    "type": "INT64",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "occurred_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "decision_ref",
+    "type": "STRING",
+    "mode": "NULLABLE"
+  },
+  {
+    "name": "catalogue_generation",
+    "type": "STRING",
+    "mode": "REQUIRED"
+  },
+  {
+    "name": "landed_object",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
+  },
+  {
+    "name": "content_sha256",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
+  },
+  {
+    "name": "loaded_at",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
+  }
+]

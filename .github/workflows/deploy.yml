@@ -1,0 +1,154 @@
+# Production deployment. Runs on main only, authenticates with short-lived GitHub OIDC
+# tokens through Workload Identity Federation, and waits for the owner's approval in
+# the `production` environment before anything is applied.
+#
+# There is no service-account key anywhere: not in this file, not in repository
+# secrets. The values below are identifiers, not credentials, and are stored as
+# environment VARIABLES so that nothing specific to the owner's accounts is committed.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGION: us-central1
+  TERRAFORM_VERSION: "1.16.5"
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff format --check && uv run ruff check && uv run mypy
+      - run: uv run pytest
+      - run: uv run metaspike export-schemas --check
+      - run: uv run metaspike evaluate-resolver
+
+  # First approval: lets the run obtain a short-lived credential to push the image and
+  # read state for the plan. It changes no infrastructure.
+  build-and-plan:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      image: ${{ steps.push.outputs.image }}
+      destructive: ${{ steps.inspect.outputs.destructive }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: docker build --tag candidate .
+      - name: Smoke
+        run: docker run --rm candidate --help
+      - name: Scan before anything is pushed
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: candidate
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          ignore-unfixed: true
+      - name: Authenticate (OIDC, no key)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Push and record the digest
+        id: push
+        run: |
+          repository="${REGION}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/metaspike/metaspike"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker tag candidate "${repository}:${GITHUB_SHA}"
+          docker push "${repository}:${GITHUB_SHA}"
+          digest="$(docker inspect --format '{{index .RepoDigests 0}}' "${repository}:${GITHUB_SHA}")"
+          echo "image=${digest}" >> "$GITHUB_OUTPUT"
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - name: Plan
+        working-directory: infra/prod
+        run: |
+          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform plan -input=false -out=tfplan \
+            -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
+            -var "image=${{ steps.push.outputs.image }}" \
+            -var "notification_channel=${{ vars.GCP_NOTIFICATION_CHANNEL }}" \
+            -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}"
+          terraform show -no-color tfplan > plan.txt
+          terraform show -json tfplan > plan.json
+      - name: Show the plan, and say loudly if it destroys or replaces anything
+        id: inspect
+        working-directory: infra/prod
+        run: |
+          destructive="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' plan.json)"
+          echo "destructive=${destructive}" >> "$GITHUB_OUTPUT"
+          {
+            if [ "${destructive}" != "0" ]; then
+              echo "## DESTRUCTIVE PLAN: ${destructive} resource(s) would be DESTROYED or REPLACED"
+              jq -r '.resource_changes[] | select(.change.actions | index("delete")) | "- `\(.address)` (\(.change.actions | join(" then ")))"' plan.json
+              echo
+              echo "This will not be applied unless the run was started by hand with the destructive approval."
+            else
+              echo "## Plan: nothing is destroyed or replaced"
+            fi
+            echo
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: infra/prod/tfplan
+          retention-days: 3
+
+  apply:
+    needs: build-and-plan
+    # A destroy or replace is never applied by a push. It needs a manual run of this
+    # workflow as well as the environment approval below.
+    if: needs.build-and-plan.outputs.destructive == '0' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # Second approval, given AFTER the plan above has been read. Nothing below runs,
+    # and no credential is issued for it, until that approval is given.
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: infra/prod
+      - name: Apply exactly the plan that was reviewed
+        working-directory: infra/prod
+        run: |
+          terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          terraform apply -input=false tfplan
+      - name: Record what was deployed
+        run: echo "Deployed \`${{ needs.build-and-plan.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
