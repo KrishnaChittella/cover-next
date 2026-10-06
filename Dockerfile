@@ -11,7 +11,9 @@
 
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS build
 
-COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /usr/local/bin/uv
+# The uv installer, taken from its official image and pinned the same way as the base:
+# tag for people, multi-architecture index digest for the build.
+COPY --from=ghcr.io/astral-sh/uv:0.5@sha256:7bff3c3776ec467fc1437960f2c469d8beb30f536a6465a3350c647ccd260ec2 /uv /usr/local/bin/uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \

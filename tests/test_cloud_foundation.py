@@ -497,6 +497,14 @@ def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> N
     )
     assert len(bases) == 2 and len(set(bases)) == 1
     assert not re.search(r"^FROM (?!.*@sha256:)", dockerfile, re.M)  # no mutable base
+    # Every other image the build pulls from is pinned by digest as well.
+    helpers = re.findall(r"--from=(\S+)", dockerfile)
+    external = [helper for helper in helpers if "/" in helper]
+    assert external == [
+        "ghcr.io/astral-sh/uv:0.5@sha256:"
+        "7bff3c3776ec467fc1437960f2c469d8beb30f536a6465a3350c647ccd260ec2"
+    ]
+    assert [helper for helper in helpers if "/" not in helper] == ["build"]  # our own stage
     # The security fix is targeted: two named packages, upgrade only, no blanket upgrade,
     # no pinned Debian revision, and it runs as root before the user is dropped.
     patch = re.search(r"RUN apt-get update \\\n(.*?)rm -rf /var/lib/apt/lists/\*", dockerfile, re.S)
