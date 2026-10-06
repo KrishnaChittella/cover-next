@@ -71,6 +71,8 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
 - **False merges are worse than missed merges.** The resolver merges only on a
   cross-source id link with a compatible title, or on title plus timing plus a
   shared company. Anything else plausible is quarantined, with no canonical id.
+  A store URL is an assertion, not a link: it counts only when a structured id on
+  an edition of the same game confirms it, and it never overrides a veto.
 - **The catalogue is generated.** Bootstrap entities keep their identities; every
   other entity is admitted by resolution. Overrides are versioned exceptions.
 - **Lifecycle is versioned and score-free.** Thresholds are initial rules under a

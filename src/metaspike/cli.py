@@ -1,6 +1,7 @@
 """Command-line interface. `metaspike run` performs the complete local vertical slice."""
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
@@ -10,9 +11,11 @@ from pathlib import Path
 import httpx
 from pydantic import ValidationError
 
+from metaspike.catalogue.bindings import audit_bootstrap_bindings
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
 from metaspike.domain.signals import CollectionStatus
+from metaspike.domain.source_records import SourceRecord
 from metaspike.pipeline.collection import (
     CollectionReport,
     collect,
@@ -61,6 +64,10 @@ DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_CACHE_DIR = Path(".metaspike/cache")
 DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
 DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
+DEFAULT_RECORDED_DIRECTORIES = (
+    DEFAULT_RECORDED_CATALOGUE,
+    Path("tests/fixtures/bootstrap_catalogue"),
+)
 DEFAULT_CATALOGUE_STATE = Path(".metaspike/catalogue/state.json")
 _SNAPSHOT_FILE = "collection.json"
 _SUMMARY_ROWS = 10
@@ -140,10 +147,22 @@ def _parser() -> argparse.ArgumentParser:
         "generate-catalogue",
         help="resolve recorded source records into a generated catalogue state file",
     )
-    generate.add_argument("--recorded", type=Path, default=DEFAULT_RECORDED_CATALOGUE)
+    generate.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
     generate.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
     generate.add_argument("--as-of", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
     generate.set_defaults(handler=_generate_catalogue)
+
+    audit = commands.add_parser(
+        "audit-bootstrap-bindings",
+        help="show which source records and Steam apps are proven for the 15 bootstrap entities",
+    )
+    audit.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    audit.add_argument("--json", action="store_true", help="print the audit as JSON")
+    audit.set_defaults(handler=_audit_bootstrap_bindings)
 
     schemas = commands.add_parser("export-schemas", help="write JSON Schemas for the artifacts")
     schemas.add_argument("--schemas-dir", type=Path, default=DEFAULT_SCHEMAS_DIR)
@@ -280,9 +299,18 @@ def _evaluate_resolver(args: argparse.Namespace) -> int:
         f"AUTO_MATCH PRECISION       {_percent(overall.precision)}  "
         f"({overall.correct_auto_matches}/{overall.auto_matches})"
     )
+    plain, masked = report.unmasked_positives, report.masked
     print(
-        f"AUTO_MATCH RECALL          {_percent(overall.recall)}  "
-        f"({overall.correct_auto_matches_on_positives}/{overall.positives})"
+        f"REAL-EVIDENCE RECALL       {_percent(plain.recall)}  "
+        f"({plain.correct_auto_matches_on_positives}/{plain.positives})  id link visible"
+    )
+    print(
+        f"MASKED STRESS-TEST RECALL  {_percent(masked.recall)}  "
+        f"({masked.correct_auto_matches_on_positives}/{masked.positives})  id link withheld"
+    )
+    print(
+        f"ALL-POSITIVES RECALL       {_percent(overall.recall)}  "
+        f"({overall.correct_auto_matches_on_positives}/{overall.positives})  both combined"
     )
     print(
         f"QUARANTINE RATE            {_percent(overall.quarantine_rate)}  "
@@ -295,13 +323,6 @@ def _evaluate_resolver(args: argparse.Namespace) -> int:
     print(
         f"NEW_ENTITY ACCURACY        {_percent(overall.new_entity_accuracy)}  "
         f"({overall.correct_new_entity_decisions}/{overall.new_entity_decisions})"
-    )
-    plain, masked = report.unmasked_positives, report.masked
-    print(
-        f"  positives with the id link visible: {plain.correct_auto_matches_on_positives}/"
-        f"{plain.positives} matched;  with it masked: "
-        f"{masked.correct_auto_matches_on_positives}/{masked.positives} matched, "
-        f"{masked.quarantined} quarantined"
     )
     print()
     print(f"{'category':<34}{'cases':>6}{'right':>6}{'auto':>6}{'false':>6}{'quar':>6}{'new':>5}")
@@ -323,8 +344,27 @@ def _evaluate_resolver(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _recorded(directories: Sequence[Path]) -> list[SourceRecord]:
+    return [r for directory in directories for r in load_recorded_catalogue(directory).values()]
+
+
+def _audit_bootstrap_bindings(args: argparse.Namespace) -> int:
+    records = _recorded(args.recorded)
+    audit = audit_bootstrap_bindings(generate_catalogue(records, as_of=_now()), records)
+    if args.json:
+        print(json.dumps([row.model_dump(mode="json") for row in audit], indent=1))
+        return EXIT_OK
+    print(f"{'entity':<22}{'legacy':<10}{'igdb':<8}{'steam app':<11}{'telemetry':<10}reason")
+    for row in audit:
+        print(
+            f"{row.slug:<22}{row.legacy_id:<10}{','.join(row.igdb_ids) or '-':<8}"
+            f"{','.join(row.steam_app_ids) or '-':<11}{row.steam_telemetry.value:<10}{row.reason}"
+        )
+    return EXIT_OK
+
+
 def _generate_catalogue(args: argparse.Namespace) -> int:
-    records = load_recorded_catalogue(args.recorded).values()
+    records = _recorded(args.recorded)
     previous = (
         CatalogueState.model_validate_json(args.state.read_bytes())
         if args.state.is_file()

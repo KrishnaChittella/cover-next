@@ -74,12 +74,14 @@ CATEGORY_TARGETS: dict[str, tuple[GoldenGroup, int]] = {
     "packs_addons": (GoldenGroup.NEGATIVE, 3),
     "episodes_seasons": (GoldenGroup.NEGATIVE, 3),
     "updates": (GoldenGroup.NEGATIVE, 3),
-    "title_only_missing_companies": (GoldenGroup.QUARANTINE, 9),
+    "title_only_missing_companies": (GoldenGroup.QUARANTINE, 8),
     "conflicting_companies": (GoldenGroup.QUARANTINE, 6),
     "conflicting_release_dates": (GoldenGroup.QUARANTINE, 4),
-    "id_link_incompatible_title": (GoldenGroup.QUARANTINE, 7),
-    "edition_without_id_link": (GoldenGroup.QUARANTINE, 6),
+    "id_link_incompatible_title": (GoldenGroup.QUARANTINE, 8),
+    "edition_without_id_link": (GoldenGroup.QUARANTINE, 5),
     "early_access_rename_thin_evidence": (GoldenGroup.QUARANTINE, 1),
+    # Two recorded records assert the same source id for different works.
+    "conflicting_id_assertions": (GoldenGroup.QUARANTINE, 1),
     "no_candidates": (GoldenGroup.NEW_ENTITY, 12),
     "candidates_hard_contradicted": (GoldenGroup.NEW_ENTITY, 8),
 }
@@ -356,6 +358,24 @@ class GoldenSet(FrozenModel):
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+class CaseChange(FrozenModel):
+    """One label correction between versions, with the evidence that required it."""
+
+    in_version: int = Field(ge=2)
+    case_id_was: NonEmptyStr
+    case_id_now: NonEmptyStr
+    was: NonEmptyStr
+    now: NonEmptyStr
+    reason: NonEmptyStr
+
+
+class FrozenVersion(FrozenModel):
+    version: int = Field(ge=1)
+    frozen_on: date
+    content_hash: NonEmptyStr
+    summary: NonEmptyStr
+
+
 class GoldenSetFile(FrozenModel):
     """The on-disk form of the golden set."""
 
@@ -364,6 +384,9 @@ class GoldenSetFile(FrozenModel):
     created_on: date
     sources_recorded_on: date
     notes: tuple[str, ...] = ()
+    # Earlier frozen versions and their fingerprints. The current one is pinned by a test.
+    history: tuple[FrozenVersion, ...] = ()
+    changelog: tuple[CaseChange, ...] = ()
     cases: tuple[GoldenCaseSpec, ...]
     dropped: tuple[DroppedCase, ...] = ()
 

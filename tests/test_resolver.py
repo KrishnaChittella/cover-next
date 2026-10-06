@@ -170,21 +170,6 @@ def test_a_same_titled_entity_without_a_link_does_not_compete_with_the_linked_on
     assert decision.kind is DecisionKind.AUTO_MATCH and decision.target_ref == "a"
 
 
-def test_a_store_url_is_observed_but_is_not_accepted_as_an_identity_link() -> None:
-    by_url = igdb(1, "Synthetic Quest", websites=("https://store.steampowered.com/app/100/SQ/",))
-    decision = decide(steam(100, "Synthetic Quest"), entity("quest", by_url))
-    assert decision.kind is DecisionKind.QUARANTINE
-    assert decision.quarantine_reason is QuarantineReason.TITLE_ONLY
-    evidence = decision.candidates[0].evidence
-    assert evidence.store_url_link and not evidence.id_link and not evidence.strong_link
-    longer_id = igdb(1, "Synthetic Quest", websites=("https://store.steampowered.com/app/1000/",))
-    assert (
-        not decide(steam(100, "Synthetic Quest"), entity("q", longer_id))
-        .candidates[0]
-        .evidence.store_url_link
-    )
-
-
 # --- path B: no link, but title + timing + a shared company ---------------------------
 
 

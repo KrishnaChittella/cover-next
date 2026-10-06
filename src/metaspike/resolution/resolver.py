@@ -14,7 +14,10 @@ ORDER OF EVALUATION
 
 GATES
   AUTO_MATCH needs no hard veto, a unique best candidate, and one of:
-    Path A  a cross-source id link, plus a compatible title
+    Path A  a cross-source id link, plus a compatible title. A recognised source
+            URL counts as such a link only when a structured id on an edition of
+            the same game confirms it; a URL alone merges nothing, and a competing
+            URL claim on another entity blocks the match
     Path B  no id link, but an exact or alternative title, compatible release
             timing, and a shared developer or publisher
   NEW_ENTITY needs an entity-eligible product type and no surviving candidate.
@@ -24,11 +27,9 @@ The numeric score exists only to order candidates in reports. No decision reads 
 False merges are far worse than missed merges, so every doubt resolves to QUARANTINE.
 """
 
-import re
-
 from metaspike.catalogue.overrides import NO_OVERRIDES, IdentityOverride, OverrideSet
 from metaspike.domain.games import RelationshipType
-from metaspike.domain.source_records import Admissibility, ProductType, SourceRecord
+from metaspike.domain.source_records import Admissibility, ExternalId, ProductType, SourceRecord
 from metaspike.resolution.models import (
     CandidateAssessment,
     CandidateReason,
@@ -50,15 +51,15 @@ from metaspike.resolution.normalize import (
     NormalizedTitle,
     normalize_title,
 )
+from metaspike.resolution.source_urls import url_asserted_ids
 
-RESOLVER_VERSION = "resolver_v1"
+RESOLVER_VERSION = "resolver_v2"
 # First release years this far apart or closer are the same release, allowing for
 # regional and platform staggering. Further apart is a different release.
 MAX_COMPATIBLE_YEAR_GAP = 1
 
 # How each source names the others in its external-id fields.
 _EXTERNAL_NAME = {"steam_catalogue": "steam", "igdb": "igdb"}
-_STORE_URL = {"steam_catalogue": r"store\.steampowered\.com/app/{id}(?:\D|$)"}
 
 _TITLES_COMPATIBLE_WITH_A_LINK = (
     TitleRelation.EXACT,
@@ -164,7 +165,7 @@ def _assess(view: ResolverInput, entity: EntityView) -> CandidateAssessment | No
     """Assess one entity, or None if nothing makes it a candidate."""
     record = view.incoming
     id_link = _has_id_link(record, entity)
-    store_link = _has_store_link(record, entity)
+    url_link = _has_url_link(record, entity)
     parent_link = _points_at(record.parent, entity)
     version_link = _points_at(record.version_parent, entity)
     title, rework_mismatch = _title_relation(record, entity)
@@ -172,6 +173,8 @@ def _assess(view: ResolverInput, entity: EntityView) -> CandidateAssessment | No
     reasons: list[CandidateReason] = []
     if id_link:
         reasons.append(CandidateReason.ID_LINK)
+    if url_link:
+        reasons.append(CandidateReason.SOURCE_URL)
     if parent_link or version_link:
         reasons.append(CandidateReason.UPSTREAM_LINK)
     if title in _TITLES_THAT_MAKE_A_CANDIDATE:
@@ -181,7 +184,8 @@ def _assess(view: ResolverInput, entity: EntityView) -> CandidateAssessment | No
 
     evidence = MatchEvidence(
         id_link=id_link,
-        store_url_link=store_link,
+        source_url_link=url_link,
+        url_claim_corroborated=url_link and _url_claim_is_corroborated(view, entity),
         title=title,
         release_timing=_release_timing(record, entity),
         developer_overlap=_overlap(record.developers, _all(entity, "developers")),
@@ -224,21 +228,34 @@ def _has_id_link(record: SourceRecord, entity: EntityView) -> bool:
     return False
 
 
-def _has_store_link(record: SourceRecord, entity: EntityView) -> bool:
-    """A recorded store URL that addresses the other record by its id.
+def _names(carrier: SourceRecord, target: SourceRecord, links: tuple[ExternalId, ...]) -> bool:
+    name = _EXTERNAL_NAME.get(target.key.source)
+    return name is not None and any(
+        link.source == name and link.value == target.key.source_id for link in links
+    )
 
-    Recorded as an observation only. It is not approved strong evidence, so it makes
-    no entity a candidate and satisfies no gate.
+
+def _has_url_link(record: SourceRecord, entity: EntityView) -> bool:
+    """A recognised source URL on either side addresses the other record by its id."""
+    return any(
+        _names(other, record, url_asserted_ids(other.websites))
+        or _names(record, other, url_asserted_ids(record.websites))
+        for other in entity.records
+    )
+
+
+def _url_claim_is_corroborated(view: ResolverInput, entity: EntityView) -> bool:
+    """Whether a structured id confirms that the incoming record belongs with this entity.
+
+    A URL can be stale, so it is confirmed only when an unresolved record carries the
+    structured external id for the incoming record AND names one of this entity's
+    records as its version parent: the edition's own claim, agreeing with the URL.
     """
-
-    def links(page_owner: SourceRecord, target: SourceRecord) -> bool:
-        pattern = _STORE_URL.get(target.key.source)
-        if pattern is None:
-            return False
-        compiled = re.compile(pattern.format(id=re.escape(target.key.source_id)))
-        return any(compiled.search(url) for url in page_owner.websites)
-
-    return any(links(other, record) or links(record, other) for other in entity.records)
+    return any(
+        _names(claimant, view.incoming, claimant.external_ids)
+        and _points_at(claimant.version_parent, entity)
+        for claimant in view.context
+    )
 
 
 def _points_at(reference: object, entity: EntityView) -> bool:
@@ -374,7 +391,7 @@ def _verdict(evidence: MatchEvidence, vetoes: tuple[Veto, ...]) -> tuple[Candida
         names = ", ".join(veto.value for veto in vetoes)
         if _DECISIVE_VETOES & set(vetoes):
             return CandidateVerdict.REJECTED, f"rejected: {names}"
-        if evidence.strong_link or evidence.company_corroboration:
+        if evidence.strong_link or evidence.source_url_link or evidence.company_corroboration:
             return (
                 CandidateVerdict.AMBIGUOUS,
                 f"conflicting: evidence of identity alongside {names}",
@@ -382,8 +399,14 @@ def _verdict(evidence: MatchEvidence, vetoes: tuple[Veto, ...]) -> tuple[Candida
         return CandidateVerdict.REJECTED, f"rejected: {names}, with nothing supporting identity"
     if evidence.strong_link:
         if evidence.title in _TITLES_COMPATIBLE_WITH_A_LINK:
-            return CandidateVerdict.MATCH_STRONG, f"id link with {evidence.title.value} title"
+            basis = "id link" if evidence.id_link else "source URL confirmed by an edition's id"
+            return CandidateVerdict.MATCH_STRONG, f"{basis} with {evidence.title.value} title"
         return CandidateVerdict.AMBIGUOUS, "id link, but the titles are not compatible"
+    if evidence.unconfirmed_url_claim:
+        return (
+            CandidateVerdict.AMBIGUOUS,
+            "a source URL names this record, but no structured id confirms the claim",
+        )
     if evidence.version_parent_link:
         return CandidateVerdict.AMBIGUOUS, "named as version parent by the source"
     if (
@@ -423,7 +446,11 @@ def _decide(
     strong = [a for a in assessments if a.verdict is CandidateVerdict.MATCH_STRONG]
     corroborated = [a for a in assessments if a.verdict is CandidateVerdict.MATCH_CORROBORATED]
     ambiguous = [a for a in assessments if a.verdict is CandidateVerdict.AMBIGUOUS]
-    linked_but_unclear = [a for a in ambiguous if a.evidence.strong_link]
+    # Any other entity that also claims this record, by id or by URL, is a competing
+    # assertion: with one in play, no match is unique.
+    linked_but_unclear = [
+        a for a in ambiguous if a.evidence.strong_link or a.evidence.source_url_link
+    ]
 
     if len(strong) == 1 and not linked_but_unclear:
         # Path A. Other candidates that share only a title do not compete with a link
@@ -438,7 +465,7 @@ def _decide(
     if len(strong) > 1 or (strong and linked_but_unclear):
         return _quarantine(
             QuarantineReason.MULTIPLE_CANDIDATES,
-            "more than one entity is linked to this record by id",
+            "more than one entity claims this record by id or source URL",
             assessments,
         )
     if len(corroborated) == 1 and not ambiguous:
@@ -485,6 +512,11 @@ def _why_ambiguous(
         return (
             QuarantineReason.ID_LINK_TITLE_MISMATCH,
             "an id link to an entity whose title is not compatible",
+        )
+    if any(a.evidence.unconfirmed_url_claim for a in ambiguous):
+        return (
+            QuarantineReason.UNCONFIRMED_URL_CLAIM,
+            "a source URL names this record, but no structured id confirms the claim",
         )
     if corroborated:
         return (

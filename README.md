@@ -28,17 +28,31 @@ Phase 2 (canonical entity resolution and lifecycle) is built:
 - **Quarantine:** an unresolved source record gets no canonical id, is never
   scored or published, and is re-evaluated automatically when its evidence changes.
 - **Golden set:** 200 cases built from recorded IGDB and Steam responses, frozen
-  (version 2, hash pinned). A label is never changed because the resolver fails it.
+  (version 3, hash pinned, with a changelog of every corrected label and the hash
+  of the version it replaced). A label is never changed because the resolver fails it.
 - **Lifecycle:** deterministic, versioned rules that never read a score, with
   append-only history.
 - **Generated catalogue:** the runtime catalogue is produced by the generator; the
   15 original entities are bootstrap material and keep their identities.
 
 Resolver quality on the frozen set (`uv run metaspike evaluate-resolver`):
-0 false automatic merges, precision 51/51, recall 43/62, new-entity accuracy 70/70.
-Every miss is a safe quarantine. All 18 positives whose id link is withheld are
-quarantined, because Steam's catalogue carries no dates or companies to corroborate
-a title with.
+0 false automatic merges, precision 52/52, new-entity accuracy 70/70. Recall is
+reported in three parts and never blended: 44/44 on positives judged with their real
+evidence, 0/18 on the masked stress test (positives whose id link is deliberately
+withheld), 44/62 overall. Every miss is a safe quarantine. The masked positives are
+all quarantined because Steam's catalogue carries no dates or companies to
+corroborate a title with.
+
+A store URL is identity evidence only in one strict form: `store.steampowered.com`
+exactly, path `/app/<id>` with an optional single name segment. It is an assertion,
+not a link. It can satisfy the id-link path only when a structured id on an edition
+of the same game confirms it; unconfirmed, it quarantines, and it blocks an
+otherwise clean match that it contradicts. It never overrides a veto.
+
+`uv run metaspike audit-bootstrap-bindings` lists, for each of the 15 original
+entities, the source ids that recorded evidence proves and whether the entity is
+eligible for Steam telemetry (`yes`, `no` or `unknown`). No Steam id is inferred
+from a title.
 
 ## What is implemented
 
@@ -149,6 +163,7 @@ src/metaspike/
     source_policy.py     permissions, rate limits, quota, lag, field and display rules
   catalogue/
     seed.py              bootstrap entities and migration anchors
+    bindings.py          audit of the bootstrap entities' proven source bindings
     legacy_ids.py        frozen msg_NNNN -> UUIDv4 migration table
     overrides.py         versioned identity overrides (FiveM only)
     generate.py          generates the canonical catalogue from source records
@@ -179,6 +194,7 @@ src/metaspike/
     records.py           local store for source-native records
   resolution/
     normalize.py         deterministic title normalisation
+    source_urls.py       strict extraction of a source id from a store URL
     models.py            resolver input, evidence, decisions, decision log
     resolver.py          candidates, evidence, vetoes and gates
     quarantine.py        unresolved records and re-evaluation triggers

@@ -56,6 +56,7 @@ from metaspike.resolution.quarantine import Quarantine, evaluation_fingerprint
 from metaspike.resolution.resolver import RESOLVER_VERSION, resolve
 
 BOOTSTRAP_SOURCE = "metaspike_bootstrap"
+MAX_SETTLING_PASSES = 6
 # Relationship types that link two canonical entities (the others describe products).
 _ENTITY_RELATIONSHIPS = frozenset(
     {
@@ -180,37 +181,45 @@ def generate_catalogue(
             entities[bound].records.append(record)
 
     linked = _linked_records(available)
-    for record in sorted(available.values(), key=_processing_order):
-        if mapping.canonical_for(record.key) is not None or record.key in related:
-            continue
-        view = ResolverInput(
-            incoming=record,
-            entities=tuple(entity.view() for entity in entities.values() if entity.records),
-            context=tuple(
-                entry.record for entry in quarantine.entries if entry.record.key != record.key
-            ),
-        )
-        # The fingerprint looks at every record that links to this one, whatever order
-        # the records happen to be processed in, so it is the same on every run.
-        fingerprint_view = view.model_copy(update={"context": linked.get(record.key, ())})
-        if quarantine.get(record.key) is not None and not quarantine.is_due(
-            record.key, evaluation_fingerprint(fingerprint_view, overrides)
-        ):
-            continue  # still quarantined, and nothing that bears on it has changed
+    ordered = sorted(available.values(), key=_processing_order)
+    # A record resolved late in a pass can be exactly the evidence an earlier, quarantined
+    # record was waiting for, so passes repeat until one changes nothing.
+    for _ in range(MAX_SETTLING_PASSES):
+        progressed = False
+        for record in ordered:
+            if mapping.canonical_for(record.key) is not None or record.key in related:
+                continue
+            view = ResolverInput(
+                incoming=record,
+                entities=tuple(entity.view() for entity in entities.values() if entity.records),
+                context=tuple(
+                    entry.record for entry in quarantine.entries if entry.record.key != record.key
+                ),
+            )
+            # The fingerprint looks at every record that links to this one, whatever order
+            # the records happen to be processed in, so it is the same on every run.
+            fingerprint_view = view.model_copy(update={"context": linked.get(record.key, ())})
+            if quarantine.get(record.key) is not None and not quarantine.is_due(
+                record.key, evaluation_fingerprint(fingerprint_view, overrides)
+            ):
+                continue  # still quarantined, and nothing that bears on it has changed
 
-        decision = resolve(view, overrides)
-        resulting = _apply(decision, record, entities, overrides, id_factory)
-        decisions, logged = decisions.append(record, decision, as_of, resulting)
-        if decision.kind is DecisionKind.QUARANTINE:
-            fingerprint = evaluation_fingerprint(fingerprint_view, overrides)
-            quarantine = quarantine.put(record, decision, as_of, fingerprint, logged.ref)
-            continue
-        quarantine = quarantine.release(record.key)
-        if decision.kind is DecisionKind.NOT_AN_ENTITY:
-            related[record.key] = _related_product(record, decision)
-        elif resulting is not None:
-            mapping = mapping.bind(record.key, resulting, as_of, logged.ref)
-            entities[resulting].records.append(record)
+            decision = resolve(view, overrides)
+            resulting = _apply(decision, record, entities, overrides, id_factory)
+            decisions, logged = decisions.append(record, decision, as_of, resulting)
+            progressed = True
+            if decision.kind is DecisionKind.QUARANTINE:
+                fingerprint = evaluation_fingerprint(fingerprint_view, overrides)
+                quarantine = quarantine.put(record, decision, as_of, fingerprint, logged.ref)
+                continue
+            quarantine = quarantine.release(record.key)
+            if decision.kind is DecisionKind.NOT_AN_ENTITY:
+                related[record.key] = _related_product(record, decision)
+            elif resulting is not None:
+                mapping = mapping.bind(record.key, resulting, as_of, logged.ref)
+                entities[resulting].records.append(record)
+        if not progressed:
+            break
 
     lifecycle = _lifecycle(entities, bootstrap, previous, as_of)
     states = {history.canonical_game_id: history for history in lifecycle}

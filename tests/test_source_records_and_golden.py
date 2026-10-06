@@ -242,7 +242,7 @@ def negative(**changes: Any) -> GoldenCase:
 
 
 def test_the_approved_distribution_totals_two_hundred() -> None:
-    assert len(CATEGORY_TARGETS) == 33
+    assert len(CATEGORY_TARGETS) == 34
     assert GROUP_TARGETS == {
         GoldenGroup.POSITIVE: 62,
         GoldenGroup.NEGATIVE: 85,
@@ -369,7 +369,7 @@ def test_a_set_reports_its_distribution_against_the_approved_targets() -> None:
     }
     gaps = draft.distribution_gaps()
     assert gaps["exact_cross_source"] == (1, 14) and gaps["numbered_sequels"] == (1, 9)
-    assert len(gaps) == 33  # nowhere near complete, and it says so
+    assert len(gaps) == 34  # nowhere near complete, and it says so
 
     same = GoldenSet.model_validate(draft.model_dump())
     edited = GoldenSet.model_validate(draft.model_dump() | {"cases": [negative()]})

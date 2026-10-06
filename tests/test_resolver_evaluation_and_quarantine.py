@@ -64,14 +64,16 @@ def test_observed_resolver_quality_on_the_frozen_set(golden: GoldenSet) -> None:
     """A record of where resolver_v1 stands. A change here is a change in behaviour."""
     report = evaluate(golden)
     overall = report.overall
-    assert report.golden_version == 2 and report.resolver_version == RESOLVER_VERSION
-    assert (overall.cases, overall.correct) == (200, 177)
-    assert (overall.correct_auto_matches, overall.auto_matches) == (51, 51)
-    assert (overall.correct_auto_matches_on_positives, overall.positives) == (43, 62)
-    assert overall.recall == pytest.approx(43 / 62)
-    assert (overall.quarantined, overall.avoidable_quarantines) == (56, 23)
-    assert overall.quarantine_rate == pytest.approx(0.28)
-    assert overall.avoidable_quarantine_rate == pytest.approx(23 / 167)
+    assert (
+        report.golden_version == 3 and report.resolver_version == RESOLVER_VERSION == "resolver_v2"
+    )
+    assert (overall.cases, overall.correct) == (200, 178)
+    assert (overall.correct_auto_matches, overall.auto_matches) == (52, 52)
+    assert (overall.correct_auto_matches_on_positives, overall.positives) == (44, 62)
+    assert overall.recall == pytest.approx(44 / 62)
+    assert (overall.quarantined, overall.avoidable_quarantines) == (55, 22)
+    assert overall.quarantine_rate == pytest.approx(0.275)
+    assert overall.avoidable_quarantine_rate == pytest.approx(22 / 167)
     assert (overall.correct_new_entity_decisions, overall.new_entity_decisions) == (70, 70)
     assert overall.new_entity_accuracy == 1.0
 
@@ -89,14 +91,17 @@ def test_a_quarantined_positive_is_a_recall_miss_not_a_false_merge(golden: Golde
     assert {r.quarantine_reason for r in misses} == {"title_only"}
 
     plain = report.unmasked_positives
-    assert (plain.correct_auto_matches_on_positives, plain.positives) == (43, 44)
+    # Every positive decided on real, visible evidence is matched.
+    assert (plain.correct_auto_matches_on_positives, plain.positives) == (44, 44)
+    assert plain.recall == 1.0
 
 
 def test_every_miss_is_on_the_safe_side(golden: GoldenSet) -> None:
     failures = evaluate(golden).failures()
-    assert len(failures) == 23
+    assert len(failures) == 22
     assert {failure.decided for failure in failures} == {DecisionKind.QUARANTINE}
-    assert sum(f.group is GoldenGroup.POSITIVE for f in failures) == 19
+    assert sum(f.group is GoldenGroup.POSITIVE for f in failures) == 18
+    assert all(f.masked for f in failures if f.group is GoldenGroup.POSITIVE)
     assert sum(f.category == "same_name_different_years" for f in failures) == 4
 
 
@@ -168,10 +173,12 @@ def test_cli_evaluation_prints_the_metrics_and_fails_on_a_false_merge(
     output = capsys.readouterr().out
     for line in (
         "FALSE AUTO_MATCH MERGES    0",
-        "AUTO_MATCH PRECISION       100.0%  (51/51)",
-        "AUTO_MATCH RECALL           69.4%  (43/62)",
-        "QUARANTINE RATE             28.0%  (56/200)",
-        "AVOIDABLE QUARANTINE RATE   13.8%  (23/167)",
+        "AUTO_MATCH PRECISION       100.0%  (52/52)",
+        "REAL-EVIDENCE RECALL       100.0%  (44/44)",
+        "MASKED STRESS-TEST RECALL    0.0%  (0/18)",
+        "ALL-POSITIVES RECALL        71.0%  (44/62)",
+        "QUARANTINE RATE             27.5%  (55/200)",
+        "AVOIDABLE QUARANTINE RATE   13.2%  (22/167)",
         "NEW_ENTITY ACCURACY        100.0%  (70/70)",
     ):
         assert line in output

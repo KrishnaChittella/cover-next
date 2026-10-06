@@ -1,15 +1,15 @@
 {
- "version": 2,
+ "version": 3,
  "status": "frozen",
  "created_on": "2026-10-05",
  "sources_recorded_on": "2026-10-05",
  "notes": [
   "FROZEN. A label is never changed because a resolver fails it. Any correction needs a version bump, a recorded reason, evidence and a separate review.",
   "Every label is justified by ground_truth_evidence: citations to recorded source fields, verified on load.",
-  "Group totals are 62 positive, 85 negative, 33 quarantine, 20 new entity. The category distribution is the approved, evidence-driven one; see dropped[] for what could not be grounded.",
-  "18 positive cases carry masked_evidence: the Steam app id link proves the label but is withheld from the resolver, wherever it appears, so the resolver must decide from the remaining evidence.",
-  "Cases marked truth=difficult have an expected decision that reflects the evidence available, not certainty about the underlying fact.",
-  "Version 2 (2026-10-05): split evidence into ground-truth and masked; Counter-Strike case reworded as current-state; FiveM expected decision set to manual_override."
+  "Group totals are 62 positive, 85 negative, 33 quarantine, 20 new entity.",
+  "18 positive cases carry masked_evidence: the Steam app id link proves the label but is withheld from the resolver wherever it appears. They are stress tests and are reported separately from positives decided on real evidence.",
+  "A cross-source id link is strong evidence, not unquestionable truth. Version 3 followed a contradiction audit of all 62 positives; see changelog.",
+  "Cases marked truth=difficult have an expected decision that reflects the evidence available, not certainty about the underlying fact."
  ],
  "cases": [
   {
@@ -8244,58 +8244,6 @@
    "masked_evidence": []
   },
   {
-   "case_id": "pos-editions_with_id_link-06",
-   "category": "editions_with_id_link",
-   "incoming": {
-    "source": "steam_catalogue",
-    "source_id": "40960"
-   },
-   "existing": [
-    {
-     "label": "igdb-965-stronghold",
-     "records": [
-      {
-       "source": "igdb",
-       "source_id": "965"
-      }
-     ]
-    }
-   ],
-   "context": [],
-   "expected": "auto_match",
-   "target": "igdb-965-stronghold",
-   "must_not_match": [],
-   "rationale": "The Steam title is the game's title plus an edition marker, and IGDB lists this Steam app id on the base game itself.",
-   "truth": "established",
-   "ground_truth_evidence": [
-    {
-     "record": {
-      "source": "igdb",
-      "source_id": "965"
-     },
-     "field": "external_ids",
-     "value": "40960"
-    },
-    {
-     "record": {
-      "source": "steam_catalogue",
-      "source_id": "40960"
-     },
-     "field": "title",
-     "value": "Stronghold 2: Steam Edition"
-    },
-    {
-     "record": {
-      "source": "igdb",
-      "source_id": "965"
-     },
-     "field": "title",
-     "value": "Stronghold"
-    }
-   ],
-   "masked_evidence": []
-  },
-  {
    "case_id": "pos-editions_with_id_link-07",
    "category": "editions_with_id_link",
    "incoming": {
@@ -8395,6 +8343,79 @@
      },
      "field": "title",
      "value": "Penumbra: Black Plague"
+    }
+   ],
+   "masked_evidence": []
+  },
+  {
+   "case_id": "pos-editions_with_id_link-09",
+   "category": "editions_with_id_link",
+   "incoming": {
+    "source": "steam_catalogue",
+    "source_id": "3590"
+   },
+   "existing": [
+    {
+     "label": "igdb-1277-plants-vs-zombies",
+     "records": [
+      {
+       "source": "igdb",
+       "source_id": "1277"
+      }
+     ]
+    }
+   ],
+   "context": [
+    {
+     "source": "igdb",
+     "source_id": "20546"
+    }
+   ],
+   "expected": "auto_match",
+   "target": "igdb-1277-plants-vs-zombies",
+   "must_not_match": [],
+   "rationale": "IGDB lists this Steam app id on its 'Plants vs. Zombies: GOTY Edition' record, which names Plants vs. Zombies as its version parent, and the Plants vs. Zombies record's own store URL names the same app. Two recorded assertions agree that the app is an edition of this game; an edition is packaging, not a different game.",
+   "truth": "established",
+   "ground_truth_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "20546"
+     },
+     "field": "external_ids",
+     "value": "3590"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "20546"
+     },
+     "field": "version_parent",
+     "value": "1277"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "1277"
+     },
+     "field": "websites",
+     "value": "store.steampowered.com/app/3590"
+    },
+    {
+     "record": {
+      "source": "steam_catalogue",
+      "source_id": "3590"
+     },
+     "field": "title",
+     "value": "Plants vs. Zombies GOTY Edition"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "1277"
+     },
+     "field": "title",
+     "value": "Plants vs. Zombies"
     }
    ],
    "masked_evidence": []
@@ -11168,6 +11189,83 @@
    "masked_evidence": []
   },
   {
+   "case_id": "qua-conflicting_id_assertions-01",
+   "category": "conflicting_id_assertions",
+   "incoming": {
+    "source": "steam_catalogue",
+    "source_id": "2320"
+   },
+   "existing": [
+    {
+     "label": "igdb-286-quake-ii",
+     "records": [
+      {
+       "source": "igdb",
+       "source_id": "286"
+      }
+     ]
+    },
+    {
+     "label": "igdb-261085-quake-ii-remaster",
+     "records": [
+      {
+       "source": "igdb",
+       "source_id": "261085"
+      }
+     ]
+    }
+   ],
+   "context": [],
+   "expected": "quarantine",
+   "target": null,
+   "must_not_match": [],
+   "rationale": "Two IGDB records assert this Steam app id for different works. The 2023 'Quake II' remaster record lists it as an external id and names the 1997 game as its parent; the 1997 'Quake II' record carries a store URL for the same app. The records share a title, so nothing recorded says which work the app is. It must not be merged into either automatically.",
+   "truth": "difficult",
+   "ground_truth_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "261085"
+     },
+     "field": "external_ids",
+     "value": "2320"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "261085"
+     },
+     "field": "product_type",
+     "value": "remaster"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "261085"
+     },
+     "field": "parent",
+     "value": "286"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "286"
+     },
+     "field": "websites",
+     "value": "store.steampowered.com/app/2320"
+    },
+    {
+     "record": {
+      "source": "steam_catalogue",
+      "source_id": "2320"
+     },
+     "field": "title",
+     "value": "Quake II"
+    }
+   ],
+   "masked_evidence": []
+  },
+  {
    "case_id": "qua-conflicting_release_dates-01",
    "category": "conflicting_release_dates",
    "incoming": {
@@ -11641,58 +11739,6 @@
      "record": {
       "source": "steam_catalogue",
       "source_id": "3480"
-     },
-     "field": "product_type",
-     "value": "unknown"
-    }
-   ],
-   "masked_evidence": []
-  },
-  {
-   "case_id": "qua-edition_without_id_link-03",
-   "category": "edition_without_id_link",
-   "incoming": {
-    "source": "steam_catalogue",
-    "source_id": "3590"
-   },
-   "existing": [
-    {
-     "label": "igdb-1277-plants-vs-zombies",
-     "records": [
-      {
-       "source": "igdb",
-       "source_id": "1277"
-      }
-     ]
-    }
-   ],
-   "context": [],
-   "expected": "quarantine",
-   "target": null,
-   "must_not_match": [],
-   "rationale": "The Steam title is an existing game's title plus an edition marker, but no IGDB record lists this Steam app id, so the base game cannot be proven.",
-   "truth": "difficult",
-   "ground_truth_evidence": [
-    {
-     "record": {
-      "source": "steam_catalogue",
-      "source_id": "3590"
-     },
-     "field": "title",
-     "value": "Plants vs. Zombies GOTY Edition"
-    },
-    {
-     "record": {
-      "source": "igdb",
-      "source_id": "1277"
-     },
-     "field": "title",
-     "value": "Plants vs. Zombies"
-    },
-    {
-     "record": {
-      "source": "steam_catalogue",
-      "source_id": "3590"
      },
      "field": "product_type",
      "value": "unknown"
@@ -12221,6 +12267,79 @@
    "masked_evidence": []
   },
   {
+   "case_id": "qua-id_link_incompatible_title-08",
+   "category": "id_link_incompatible_title",
+   "incoming": {
+    "source": "steam_catalogue",
+    "source_id": "40960"
+   },
+   "existing": [
+    {
+     "label": "igdb-965-stronghold",
+     "records": [
+      {
+       "source": "igdb",
+       "source_id": "965"
+      }
+     ]
+    }
+   ],
+   "context": [
+    {
+     "source": "igdb",
+     "source_id": "74251"
+    }
+   ],
+   "expected": "quarantine",
+   "target": null,
+   "must_not_match": [],
+   "rationale": "IGDB's 'Stronghold' record lists this Steam app id, but the app is titled 'Stronghold 2: Steam Edition': the sequel numeral contradicts the link. The same IGDB record's own store URL names a different app (40950), and IGDB holds a separate 'Stronghold 2: Steam Edition' record that carries no Steam id. The upstream link is not trustworthy, so nothing may be merged automatically.",
+   "truth": "difficult",
+   "ground_truth_evidence": [
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "965"
+     },
+     "field": "external_ids",
+     "value": "40960"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "965"
+     },
+     "field": "title",
+     "value": "Stronghold"
+    },
+    {
+     "record": {
+      "source": "steam_catalogue",
+      "source_id": "40960"
+     },
+     "field": "title",
+     "value": "Stronghold 2"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "965"
+     },
+     "field": "websites",
+     "value": "store.steampowered.com/app/40950"
+    },
+    {
+     "record": {
+      "source": "igdb",
+      "source_id": "74251"
+     },
+     "field": "title",
+     "value": "Stronghold 2: Steam Edition"
+    }
+   ],
+   "masked_evidence": []
+  },
+  {
    "case_id": "qua-title_only_missing_companies-01",
    "category": "title_only_missing_companies",
    "incoming": {
@@ -12280,58 +12399,6 @@
      },
      "field": "product_type",
      "value": "unknown"
-    }
-   ],
-   "masked_evidence": []
-  },
-  {
-   "case_id": "qua-title_only_missing_companies-02",
-   "category": "title_only_missing_companies",
-   "incoming": {
-    "source": "steam_catalogue",
-    "source_id": "2320"
-   },
-   "existing": [
-    {
-     "label": "igdb-286-quake-ii",
-     "records": [
-      {
-       "source": "igdb",
-       "source_id": "286"
-      }
-     ]
-    }
-   ],
-   "context": [],
-   "expected": "quarantine",
-   "target": null,
-   "must_not_match": [],
-   "rationale": "The Steam record has a title and nothing else: no developer, publisher or date, and no IGDB record lists this Steam app id. A matching title alone cannot prove identity.",
-   "truth": "difficult",
-   "ground_truth_evidence": [
-    {
-     "record": {
-      "source": "steam_catalogue",
-      "source_id": "2320"
-     },
-     "field": "title",
-     "value": "Quake II"
-    },
-    {
-     "record": {
-      "source": "igdb",
-      "source_id": "286"
-     },
-     "field": "title",
-     "value": "Quake II"
-    },
-    {
-     "record": {
-      "source": "steam_catalogue",
-      "source_id": "2320"
-     },
-     "field": "source_category",
-     "value": "games"
     }
    ],
    "masked_evidence": []
@@ -12749,6 +12816,46 @@
    "description": "Doom (1993) versus Doom (2016)",
    "category": "conflicting_release_dates",
    "reason": "The two share a developer but not a publisher, so the recorded fields neither clearly separate them nor clearly contradict; the case fit neither same_name_different_years nor conflicting_release_dates."
+  }
+ ],
+ "history": [
+  {
+   "version": 1,
+   "frozen_on": "2026-10-05",
+   "content_hash": "(draft, never frozen)",
+   "summary": "Draft reviewed at commit 411191d."
+  },
+  {
+   "version": 2,
+   "frozen_on": "2026-10-05",
+   "content_hash": "273b4a96fa73f1deca09cdf93e4b334d2425fdfbadd1e1615451187828700d35",
+   "summary": "First frozen set: masked evidence added, Counter-Strike case made current-state, FiveM expects the override."
+  }
+ ],
+ "changelog": [
+  {
+   "in_version": 3,
+   "case_id_was": "pos-editions_with_id_link-06",
+   "case_id_now": "qua-id_link_incompatible_title-08",
+   "was": "auto_match to Stronghold (positive)",
+   "now": "quarantine",
+   "reason": "Contradiction audit of all positives: the Steam title carries the sequel numeral 2, the IGDB record's own store URL names a different app, and IGDB has a separate Stronghold 2 record. The upstream id link is wrong, so the positive label was invalid."
+  },
+  {
+   "in_version": 3,
+   "case_id_was": "qua-edition_without_id_link-03",
+   "case_id_now": "pos-editions_with_id_link-09",
+   "was": "quarantine (edition without id link)",
+   "now": "auto_match to Plants vs. Zombies (positive)",
+   "reason": "Evidence not considered when labelling: the base record's store URL names this app, and a newly recorded IGDB edition record lists the app id and names the base game as its version parent."
+  },
+  {
+   "in_version": 3,
+   "case_id_was": "qua-title_only_missing_companies-02",
+   "case_id_now": "qua-conflicting_id_assertions-01",
+   "was": "quarantine (title only)",
+   "now": "quarantine (conflicting id assertions)",
+   "reason": "Label unchanged, grounds corrected. The case was not title-only: a store URL on the 1997 record and an external id on a newly recorded 2023 remaster record both assert this app. The remaster record was added to the case."
   }
  ]
 }

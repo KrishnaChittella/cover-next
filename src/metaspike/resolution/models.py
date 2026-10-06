@@ -62,6 +62,7 @@ class CandidateReason(StrEnum):
     SUBTITLE_VARIANT = "subtitle_variant"
     SERIES_SIBLING = "series_sibling"
     UPSTREAM_LINK = "upstream_link"
+    SOURCE_URL = "source_url"
 
 
 class TitleRelation(StrEnum):
@@ -91,11 +92,15 @@ class Veto(StrEnum):
 class MatchEvidence(FrozenModel):
     """Everything observed about one candidate. Recorded whether or not it mattered."""
 
+    # A structured cross-source id (an external id) links the two records.
     id_link: bool = False
-    # A recorded store URL that addresses the other record by its id. Observed and
-    # logged, but NOT accepted as an identity link: it is not on the approved list of
-    # strong evidence, so no gate reads it.
-    store_url_link: bool = False
+    # A recognised source URL on one record addresses the other by its id. This is an
+    # assertion by the record that carries the URL, and URLs go stale: on its own it
+    # merges nothing.
+    source_url_link: bool = False
+    # The URL assertion is confirmed by a structured id on a record that is itself a
+    # version of this candidate.
+    url_claim_corroborated: bool = False
     title: TitleRelation = TitleRelation.NONE
     release_timing: Tri = Tri.UNKNOWN
     developer_overlap: Tri = Tri.UNKNOWN
@@ -109,7 +114,13 @@ class MatchEvidence(FrozenModel):
 
     @property
     def strong_link(self) -> bool:
-        return self.id_link
+        """An identity link that may satisfy path A, given a compatible title."""
+        return self.id_link or (self.source_url_link and self.url_claim_corroborated)
+
+    @property
+    def unconfirmed_url_claim(self) -> bool:
+        """A URL names this candidate, but nothing structured confirms it."""
+        return self.source_url_link and not self.strong_link
 
     @property
     def company_corroboration(self) -> bool:
@@ -141,6 +152,7 @@ class QuarantineReason(StrEnum):
     MULTIPLE_CANDIDATES = "multiple_candidates"
     UNDETERMINED_PRODUCT_TYPE = "undetermined_product_type"
     VARIANT_WITHOUT_PARENT = "variant_without_parent"
+    UNCONFIRMED_URL_CLAIM = "unconfirmed_url_claim"
 
 
 class ProposedRelationship(FrozenModel):

@@ -23,7 +23,9 @@ from metaspike.resolution.golden import (
     GoldenSetFile,
     load_golden_set,
 )
+from metaspike.resolution.normalize import normalize_title
 from metaspike.resolution.recorded import IGDB_FIXTURE, STEAM_FIXTURE, load_recorded_catalogue
+from metaspike.resolution.source_urls import url_asserted_ids
 from metaspike.sources.igdb import GAME_FIELDS
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -32,8 +34,9 @@ GOLDEN = FIXTURES / "resolution_golden.json"
 
 # The frozen set's fingerprint. If this changes, the golden set changed: that needs a
 # version bump, a recorded reason, evidence and a separate review, never a quiet edit.
-FROZEN_VERSION = 2
-FROZEN_SHA256 = "273b4a96fa73f1deca09cdf93e4b334d2425fdfbadd1e1615451187828700d35"
+FROZEN_VERSION = 3
+FROZEN_SHA256 = "c2b3aef7b3728828ea63a16f1a445bc24d7db53ce1150450252fc4154af189bb"
+VERSION_2_SHA256 = "273b4a96fa73f1deca09cdf93e4b334d2425fdfbadd1e1615451187828700d35"
 
 
 def igdb(source_id: int) -> SourceRecordKey:
@@ -65,7 +68,7 @@ def test_recorded_igdb_rows_carry_only_the_requested_identity_fields() -> None:
     fixture = json.loads((CATALOGUE / IGDB_FIXTURE).read_text())
     assert fixture["fields"] == list(GAME_FIELDS)
     allowed = {field.split(".")[0] for field in GAME_FIELDS} | {"id"}
-    assert len(fixture["rows"]) == 263
+    assert len(fixture["rows"]) == 266
     for row in fixture["rows"]:
         assert set(row) <= allowed
 
@@ -187,19 +190,100 @@ def test_every_case_is_built_only_from_recorded_records_and_all_fixtures_are_use
     assert len(incoming) == len(set(incoming)) == 200
 
 
-def test_every_positive_is_proven_by_an_id_link_the_source_itself_asserts(
+def test_every_positive_is_proven_by_an_id_assertion_the_source_itself_makes(
     golden: GoldenSet,
 ) -> None:
     positives = [case for case in golden.cases if case.group is GoldenGroup.POSITIVE]
     assert len(positives) == 62
+    by_edition = []
     for case in positives:
         assert case.incoming.key.source == "steam_catalogue"
+        app_id = case.incoming.key.source_id
         target = next(entity for entity in case.existing if entity.label == case.target)
-        claimed = {
+        keys = {record.key for record in target.records}
+        direct = {
             e.value for record in target.records for e in record.external_ids if e.source == "steam"
         }
-        assert case.incoming.key.source_id in claimed, case.case_id
-        assert any(c.field == "external_ids" for c in case.ground_truth_evidence)
+        # Either the target's own record lists the app, or an edition of the target does
+        # and the target's store URL names the same app.
+        editions = [
+            record
+            for record in case.context
+            if record.version_parent in keys
+            and app_id in {e.value for e in record.external_ids if e.source == "steam"}
+        ]
+        urls = {
+            link.value for record in target.records for link in url_asserted_ids(record.websites)
+        }
+        assert app_id in direct or (editions and app_id in urls), case.case_id
+        if app_id not in direct:
+            by_edition.append(case.case_id)
+    assert by_edition == ["pos-editions_with_id_link-09"]  # Plants vs. Zombies GOTY
+
+
+def test_no_positive_label_carries_a_hard_identity_contradiction(golden: GoldenSet) -> None:
+    """The audit that found the invalid Stronghold label, kept as a permanent check."""
+    for case in golden.cases:
+        if case.group is not GoldenGroup.POSITIVE:
+            continue
+        target = next(entity for entity in case.existing if entity.label == case.target)
+        record = target.records[0]
+        alternatives = {normalize_title(title).key for title in record.alternative_titles}
+        mine, theirs = normalize_title(case.incoming.title), normalize_title(record.title)
+        if mine.key not in alternatives:
+            assert mine.numerals == theirs.numerals, case.case_id  # no sequel mismatch
+        assert mine.rework_markers == theirs.rework_markers, case.case_id
+        assert record.product_type is ProductType.MAIN_GAME, case.case_id
+        assert record.parent is None and record.version_parent is None, case.case_id
+
+
+def test_version_three_records_its_corrections_and_the_previous_hash() -> None:
+    stored = GoldenSetFile.model_validate_json(GOLDEN.read_bytes())
+    assert [(v.version, v.content_hash) for v in stored.history][-1] == (2, VERSION_2_SHA256)
+    changes = {change.case_id_was: change for change in stored.changelog}
+    assert set(changes) == {
+        "pos-editions_with_id_link-06",
+        "qua-edition_without_id_link-03",
+        "qua-title_only_missing_companies-02",
+    }
+    assert all(change.in_version == 3 and len(change.reason) > 60 for change in changes.values())
+    stronghold = changes["pos-editions_with_id_link-06"]
+    assert stronghold.case_id_now == "qua-id_link_incompatible_title-08"
+    assert stronghold.now == "quarantine" and "sequel numeral" in stronghold.reason
+    assert changes["qua-edition_without_id_link-03"].now.startswith("auto_match")
+    assert changes["qua-title_only_missing_companies-02"].now.startswith("quarantine")
+
+
+def test_the_three_reviewed_cases_carry_the_evidence_that_decided_them(golden: GoldenSet) -> None:
+    cases = {case.case_id: case for case in golden.cases}
+
+    stronghold = cases["qua-id_link_incompatible_title-08"]
+    assert stronghold.expected is ExpectedDecision.QUARANTINE
+    assert stronghold.incoming.title == "Stronghold 2: Steam Edition"
+    assert stronghold.existing[0].records[0].title == "Stronghold"
+    assert stronghold.context[0].title == "Stronghold 2: Steam Edition"
+    cited = {(c.field, c.value) for c in stronghold.ground_truth_evidence}
+    assert ("external_ids", "40960") in cited
+    assert ("websites", "store.steampowered.com/app/40950") in cited
+
+    quake = cases["qua-conflicting_id_assertions-01"]
+    assert quake.expected is ExpectedDecision.QUARANTINE and len(quake.existing) == 2
+    original, remaster = (entity.records[0] for entity in quake.existing)
+    assert (original.product_type, remaster.product_type) == (
+        ProductType.MAIN_GAME,
+        ProductType.REMASTER,
+    )
+    assert remaster.parent == original.key
+    assert "2320" in {e.value for e in remaster.external_ids}
+    assert "2320" not in {e.value for e in original.external_ids}
+    assert [link.value for link in url_asserted_ids(original.websites)] == ["2320"]
+
+    plants = cases["pos-editions_with_id_link-09"]
+    assert plants.expected is ExpectedDecision.AUTO_MATCH and not plants.masked_evidence
+    base, edition = plants.existing[0].records[0], plants.context[0]
+    assert edition.version_parent == base.key
+    assert "3590" in {e.value for e in edition.external_ids}
+    assert [link.value for link in url_asserted_ids(base.websites)] == ["3590"]
 
 
 def test_expected_decisions_match_what_the_records_can_be(golden: GoldenSet) -> None:

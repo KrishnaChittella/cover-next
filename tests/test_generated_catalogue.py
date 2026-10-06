@@ -163,12 +163,12 @@ def test_without_the_override_fivem_is_a_related_product_and_no_other_mod_is_adm
 
 def test_new_entities_get_fresh_uuid4_ids_and_unique_slugs(state: CatalogueState) -> None:
     created = [g for g in state.catalogue.games if g.canonical_game_id not in SEED_IDS]
-    assert len(created) == 217
+    assert len(created) == 219
     for game in created:
         assert re.fullmatch(CANONICAL_ID_PATTERN, game.canonical_game_id)
         assert game.slug and game.source_identifiers == ()
-    assert len({g.canonical_game_id for g in state.catalogue.games}) == 232
-    assert len({g.slug for g in state.catalogue.games}) == 232
+    assert len({g.canonical_game_id for g in state.catalogue.games}) == 234
+    assert len({g.slug for g in state.catalogue.games}) == 234
     portals = [g for g in state.catalogue.games if g.name == "Portal"]
     assert len(portals) == 3  # three different games called Portal, three entities
     assert len({g.slug for g in portals}) == 3 and all(g.slug.startswith("portal") for g in portals)
@@ -185,7 +185,7 @@ def test_a_canonical_id_is_never_derived_from_a_title_or_a_source_id(
         if g.canonical_game_id not in SEED_IDS
     }
     assert created == {str(value) for value in issued}  # every id came from the factory
-    assert len(issued) == 217  # one per new entity, none for matches or quarantine
+    assert len(issued) == 219  # one per new entity, none for matches or quarantine
     titles = {g.canonical_game_id: g.slug for g in generated.catalogue.games}
     assert all(slug not in identifier for identifier, slug in titles.items())
 
@@ -199,7 +199,7 @@ def test_derived_works_are_separate_entities_related_to_their_originals(
         if g.canonical_game_id not in SEED_IDS
         for r in g.relationships
     )
-    assert kinds[RelationshipType.REMASTER] == 6
+    assert kinds[RelationshipType.REMASTER] == 7  # includes the 2023 Quake II remaster
     assert kinds[RelationshipType.STANDALONE_EXPANSION] == 4
     assert kinds[RelationshipType.REMAKE] >= 3
     ids = {g.canonical_game_id for g in state.catalogue.games}
@@ -236,7 +236,7 @@ def test_bundles_and_dlc_are_related_products_and_never_entities(state: Catalogu
 def test_quarantined_records_have_no_canonical_id_and_are_not_in_the_catalogue(
     state: CatalogueState,
 ) -> None:
-    assert len(state.quarantine.entries) == 45
+    assert len(state.quarantine.entries) == 44
     names = {game.name for game in state.catalogue.games}
     for entry in state.quarantine.entries:
         assert state.mapping.canonical_for(entry.record.key) is None
@@ -244,7 +244,7 @@ def test_quarantined_records_have_no_canonical_id_and_are_not_in_the_catalogue(
         if entry.record.key.source == "steam_catalogue":
             assert entry.record.title not in names or entry.candidates
     metrics = state.quarantine.metrics(AS_OF + timedelta(days=10))
-    assert metrics.total == 45 and metrics.oldest_age_days == 10.0
+    assert metrics.total == 44 and metrics.oldest_age_days == 10.0
     assert set(metrics.by_source) == {"igdb", "steam_catalogue"}
     assert metrics.by_reason["title_only"] > 0
     enhanced_app = SourceRecordKey(source="steam_catalogue", source_id="3240220")
@@ -254,9 +254,14 @@ def test_quarantined_records_have_no_canonical_id_and_are_not_in_the_catalogue(
 def test_every_decision_is_logged_and_explains_itself(
     state: CatalogueState, recorded: list[SourceRecord]
 ) -> None:
-    kinds = Counter(d.decision.kind for d in state.decisions.decisions)
-    assert sum(kinds.values()) == len(recorded) == 391
-    assert kinds[DecisionKind.NEW_ENTITY] == 217 and kinds[DecisionKind.NOT_AN_ENTITY] == 23
+    assert len(recorded) == 394
+    latest = [state.decisions.latest(record.key) for record in recorded]
+    assert all(decision is not None for decision in latest)  # every record was judged
+    kinds = Counter(decision.decision.kind for decision in latest if decision is not None)
+    assert kinds[DecisionKind.NEW_ENTITY] == 219 and kinds[DecisionKind.NOT_AN_ENTITY] == 23
+    assert kinds[DecisionKind.QUARANTINE] == len(state.quarantine.entries) == 44
+    # Six records were judged twice within the run, once their evidence had been resolved.
+    assert len(state.decisions.decisions) == 400
     assert {d.decision.path for d in state.decisions.decisions if d.decision.path} == {"A"}
     for logged in state.decisions.decisions:
         assert logged.decision.explanation and logged.decision.resolver_version == RESOLVER_VERSION
@@ -268,22 +273,20 @@ def test_every_decision_is_logged_and_explains_itself(
 # --- stability --------------------------------------------------------------------------
 
 
-def test_generation_is_stable_once_settled(recorded: list[SourceRecord]) -> None:
+def test_one_run_reaches_a_fixed_point_and_later_runs_change_nothing(
+    recorded: list[SourceRecord],
+) -> None:
     first = generate_catalogue(recorded, as_of=AS_OF)
     second = generate_catalogue(recorded, as_of=AS_OF + timedelta(days=1), previous=first)
     third = generate_catalogue(recorded, as_of=AS_OF + timedelta(days=2), previous=second)
 
-    # Ids, entities and bindings never move after the first run.
-    assert second.catalogue == first.catalogue == third.catalogue
-    assert second.mapping == first.mapping == third.mapping
-    assert second.related_products == first.related_products
-    assert {e.record.key for e in second.quarantine.entries} == {
-        e.record.key for e in first.quarantine.entries
-    }
-    # A second pass re-checks records whose candidates were created later in the first
-    # pass; after that nothing is re-evaluated and nothing is logged.
-    assert len(second.decisions.decisions) - len(first.decisions.decisions) == 5
-    assert third.decisions == second.decisions and third.quarantine == second.quarantine
+    for later in (second, third):
+        assert later.catalogue == first.catalogue
+        assert later.mapping == first.mapping
+        assert later.decisions == first.decisions  # nothing was re-judged
+        assert later.quarantine == first.quarantine
+        assert later.related_products == first.related_products
+        assert later.identity == first.identity
 
 
 def test_generation_is_deterministic_given_the_same_id_factory(
@@ -304,24 +307,27 @@ def test_a_quarantined_record_resolves_itself_when_linking_evidence_arrives(
     recorded: list[SourceRecord],
 ) -> None:
     first = generate_catalogue(recorded, as_of=AS_OF)
-    quake_app = SourceRecordKey(source="steam_catalogue", source_id="2320")
-    assert first.quarantine.get(quake_app) is not None
+    app = SourceRecordKey(source="steam_catalogue", source_id="38480")  # 'Earthworm Jim'
+    waiting = first.quarantine.get(app)
+    assert waiting is not None and waiting.reason.value == "title_only"
+    entity = waiting.candidates[0].entity_ref
+    game_record = next(k for k in first.mapping.records_for(entity) if k.source == "igdb")
 
     updated = []
     for record in recorded:
-        if record.key == igdb(286):  # IGDB starts listing the Steam app id on Quake II
-            link = ExternalId(source="steam", value="2320")
+        if record.key == game_record:  # IGDB starts listing the Steam app id on the game
+            link = ExternalId(source="steam", value="38480")
             record = record.model_copy(update={"external_ids": (*record.external_ids, link)})
         updated.append(record)
     later = AS_OF + timedelta(days=20)
     second = generate_catalogue(updated, as_of=later, previous=first)
 
-    assert second.quarantine.get(quake_app) is None
-    quake = second.mapping.canonical_for(igdb(286))
-    assert quake is not None and second.mapping.canonical_for(quake_app) == quake
-    history = second.decisions.for_record(quake_app)
+    assert second.quarantine.get(app) is None
+    assert second.mapping.canonical_for(app) == entity
+    history = second.decisions.for_record(app)
     assert [d.decision.kind for d in history] == [DecisionKind.QUARANTINE, DecisionKind.AUTO_MATCH]
     assert second.catalogue == first.catalogue  # no new entity was needed
+    assert len(second.quarantine.entries) == len(first.quarantine.entries) - 1
 
 
 # --- lifecycle in the generated catalogue ------------------------------------------------
@@ -422,10 +428,10 @@ def test_cli_generates_a_catalogue_state_and_reuses_it(
         str(state_file),
     ]
     assert cli.main([*arguments, "--as-of", "2026-10-05"]) == cli.EXIT_OK
-    assert "232 entities (217 new this run)" in capsys.readouterr().out
+    assert "234 entities (219 new this run)" in capsys.readouterr().out
     assert cli.main([*arguments, "--as-of", "2026-10-06"]) == cli.EXIT_OK
-    assert "232 entities (0 new this run)" in capsys.readouterr().out
+    assert "234 entities (0 new this run)" in capsys.readouterr().out
 
     saved = CatalogueState.model_validate_json(state_file.read_bytes())
-    assert len(saved.catalogue.games) == 232 and saved.overrides_version == 1
+    assert len(saved.catalogue.games) == 234 and saved.overrides_version == 1
     assert saved.identity.resolve("msg_0003") == FIVEM
