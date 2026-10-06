@@ -413,6 +413,34 @@ def test_verification_runs_once_per_commit_and_gates_every_cloud_step() -> None:
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in ci
 
 
+def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
+    """A tag can be moved or, as happened once, simply not exist. A commit cannot."""
+    pinned = re.compile(r"^[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\d+\.\d+\.\d+$")
+    seen = set()
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for reference in re.findall(r"^\s*(?:- )?uses:\s*(.+?)\s*$", read(path), re.M):
+            if reference.startswith("./"):
+                continue  # this repository's own reusable workflow
+            assert pinned.match(reference), f"{path.name}: {reference}"
+            seen.add(reference.split("@")[0])
+    assert seen == {
+        "actions/checkout",
+        "astral-sh/setup-uv",
+        "hashicorp/setup-terraform",
+        "aquasecurity/trivy-action",
+        "google-github-actions/auth",
+        "google-github-actions/setup-gcloud",
+        "actions/upload-artifact",
+        "actions/download-artifact",
+    }
+    # One version of each action across both workflows.
+    versions: dict[str, set[str]] = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        for name, sha in re.findall(r"uses:\s*([\w./-]+)@([0-9a-f]{40})", read(path)):
+            versions.setdefault(name, set()).add(sha)
+    assert all(len(shas) == 1 for shas in versions.values()), versions
+
+
 def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = code(read(path))
