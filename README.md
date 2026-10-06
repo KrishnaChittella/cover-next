@@ -80,6 +80,45 @@ Phase 3 Part A (sample-now sources and Steam concurrent-player history) is built
 Sampling is one-shot. No scheduler, cron entry or background process is installed,
 and no history is being accumulated; unattended collection belongs to Phase 4.
 
+Phase 3 Part B (sampled-signal baselines and cross-source normalisation) is built,
+as INTERNAL development features validated on synthetic and replayed histories:
+
+- **One feature engine.** It folds contiguous buckets of any signal through a state.
+  What differs between hourly concurrent players and daily pageviews is a
+  per-signal configuration under a rule version (`baseline_rules_v1`). A feature
+  with no approved definition at a granularity is null with the reason
+  `unsupported_for_granularity`; daily pageviews get no hourly constants.
+- **Aggregation.** Resolved 15-minute slots become hourly means and maxima (an hour
+  needs 3 of 4 samples) and daily peak, typical and mean of the valid hourly means
+  (a day needs 18 valid hours and 72 of 96 samples). Concurrent players are a level
+  sampled over time and are never summed.
+- **Order of evaluation.** A bucket is compared with baselines built only from
+  buckets before it, then used to update the running state. It never influences the
+  baseline it is judged against, and appending later data never changes an earlier
+  result.
+- **Baselines and seasonality** in `log1p` space: trailing median, MAD and a floored
+  robust scale over 24h, 7d and 28d; the expected value from the same hour of week,
+  else hour of day, else the trailing level (daily signals: same weekday), with the
+  basis recorded.
+- **Lift, velocity, acceleration, trend.** Log lift against the expected level;
+  velocity is the rate of change of smoothed lift per day and acceleration the rate
+  of change of velocity; trend is a Theil-Sen slope of daily typical levels.
+- **Change points.** Incremental two-sided CUSUM on clipped, standardised,
+  deseasonalised residuals, with a 3-of-4 confirmation rule. A confirmed surge is
+  kept out of later baselines for at most seven days.
+- **Normalised signals, families and applicability.** Each signal is described
+  against its own history only. A family that cannot observe an entity is
+  inapplicable, never missing. Signal quality and evidence breadth are separate
+  outputs; no public Confidence formula is defined.
+- **State contract.** A serialisable `BaselineState` carries the bounded window that
+  medians and percentiles need, plus EWMA and change-point state. Resuming from a
+  serialised state gives bit-identical results to folding the full history.
+
+Steam-derived features are unpublishable under the current policy and are absent
+from every artifact and schema. Maturity states, reason codes and the constants
+that were introduced in this part without separate approval are listed in
+`src/metaspike/domain/baseline_rules.py`.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:
@@ -196,8 +235,9 @@ src/metaspike/
     signals.py           SignalKey, Signal and EntitySignals (many signals, any missing)
     scores.py            score, confidence and explanation results
     source_policy.py     permissions, stage-aware gates, rate limits, quota, display rules
+    families.py          source families and applicability
     samples.py           sample attempts, logical slots and slot resolution
-    baseline_rules.py    baseline_rules_v1: recorded constants (not yet computed)
+    baseline_rules.py    baseline_rules_v1: constants and reason codes
   catalogue/
     seed.py              bootstrap entities and migration anchors
     bindings.py          audit of the bootstrap entities' proven source bindings
@@ -219,7 +259,13 @@ src/metaspike/
     catalogue_sources.py wiring for the catalogue sources
     sampling_sources.py  wiring and offline replay for sample-now sources
     replay.py            offline client that replays recorded responses
-  features/attention.py  daily feature maths and machine-readable definitions
+  features/
+    attention.py         daily feature maths for score v0 (unchanged)
+    config.py            per-signal feature configuration, by rule version
+    robust.py            median/MAD, robust scale, mid-rank percentile, Theil-Sen
+    aggregate.py         15-minute slots to hourly and daily aggregates
+    engine.py            the one feature engine and the BaselineState contract
+    normalise.py         normalised signals, signal quality and evidence breadth
   scoring/
     v0.py                metaspike_score_v0, confidence v0, and the one signal v0 reads
     explanations.py      deterministic explanation templates
@@ -230,6 +276,7 @@ src/metaspike/
     run.py               orchestration
     sampling.py          one sampling run for one slot; health summary
     history.py           entity history resolved from bindings at observation time
+    signal_features.py   reference path from stored history to normalised signals
   storage/
     base.py              ObservationStore contract (append-only, point-in-time)
     local.py             local JSON Lines implementation
@@ -466,9 +513,8 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 3 Part B: aggregation, history maturity, baselines and seasonality, velocity
-and acceleration, change points and cross-source normalisation, under
-`baseline_rules_v1`. It is validated on deterministic synthetic and replayed
-histories, because Phase 3 does not accumulate real history. No cloud resources
-exist yet; scheduled private collection begins in Phase 4 after its policy and
-storage-country gate, and nothing is public before the single production release.
+Phase 4 design gate: private scheduled collection. It owns the storage-country and
+disclosure decision for Steam Data, the warehouse that produces the same
+`BaselineState` the Python engine consumes, and the scheduler. No cloud resources
+exist yet, the feature constants need recalibrating on real history, and nothing is
+public before the single production release.

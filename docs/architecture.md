@@ -106,3 +106,17 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
   values. The 50-player low-base floor only nulls a percentage lift (`low_base`);
   it never disables log lift, robust anomaly, absolute movement, change-point
   detection, eligibility or opportunity consideration.
+- **One feature implementation.** The feature engine is generic and configured per
+  signal. A fast path resumes it from a serialised `BaselineState`; a warehouse
+  path will build that same state from full history. Neither is a second
+  implementation, and no feature is computed in SQL.
+- **A bucket never judges itself.** For each bucket the baseline is built from
+  earlier buckets, the bucket is evaluated, and only then is the running state
+  updated. A confirmed surge changes what later buckets are compared with and
+  never revises an earlier result.
+- **Rule versions are immutable.** A configuration registered under a rule version
+  cannot be redefined. A change is a new version, and a state built under one
+  version cannot be continued under another.
+- **Features are a number or a reason.** No zero-filling, no interpolation, no
+  backfill; a feature without an approved definition for a granularity is
+  unsupported, not approximated.
