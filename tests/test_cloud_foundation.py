@@ -191,6 +191,45 @@ def test_the_dispatcher_cannot_read_any_source_secret() -> None:
     assert dispatch and re.search(r"secrets\s*=\s*\{\}", dispatch.group(1))
 
 
+def test_the_deploy_identity_may_act_only_as_the_named_runtime_identities() -> None:
+    bootstrap = code(read(BOOTSTRAP / "main.tf"))
+    deploy_roles = re.search(r"deploy_roles = \[(.*?)\]", bootstrap, re.S)
+    assert deploy_roles
+    project_roles = set(re.findall(r'"(roles/[A-Za-z.]+)"', deploy_roles.group(1)))
+    assert project_roles == {
+        "roles/bigquery.admin",
+        "roles/cloudscheduler.admin",
+        "roles/logging.configWriter",
+        "roles/monitoring.editor",
+        "roles/run.admin",
+        "roles/storage.admin",
+    }
+    # No project-level "act as any service account", for ms-deploy or anyone.
+    assert "roles/iam.serviceAccountUser" not in deploy_roles.group(1)
+    for resource in re.findall(
+        r'resource "google_project_iam_member" "\w+" \{(.*?)\n\}', bootstrap, re.S
+    ):
+        assert "serviceAccountUser" not in resource
+    # It is granted once, on the runtime service accounts themselves, and only those.
+    assert bootstrap.count("roles/iam.serviceAccountUser") == 1
+    grant = re.search(
+        r'resource "google_service_account_iam_member" "deploy_acts_as_runtime" \{(.*?)\n\}',
+        bootstrap,
+        re.S,
+    )
+    assert grant
+    assert "for_each = local.runtime_identities" in grant.group(1)
+    assert "google_service_account.runtime[each.key].name" in grant.group(1)
+    assert "google_service_account.deploy.email" in grant.group(1)
+    assert "google_service_account.deploy.name" not in grant.group(1)  # never on itself
+    # Every identity a job or the scheduler runs as is one of those eight.
+    prod = code(terraform(PROD))
+    used = set(re.findall(r'identity\s*=\s*"(ms-[a-z-]+)"', prod)) | {"ms-scheduler"}
+    assert used == IDENTITIES
+    assert 'service_account_email = local.sa["ms-scheduler"]' in prod
+    assert "ms-deploy" not in prod  # nothing in production runs as the deployer
+
+
 def test_the_deploy_identity_can_manage_secrets_but_never_read_one() -> None:
     bootstrap = code(read(BOOTSTRAP / "main.tf"))
     role = re.search(r'"secret_container_admin" \{(.*?)\n\}', bootstrap, re.S)
@@ -201,6 +240,8 @@ def test_the_deploy_identity_can_manage_secrets_but_never_read_one() -> None:
     assert {"secretmanager.secrets.create", "secretmanager.secrets.setIamPolicy"} <= permissions
     deploy_roles = re.search(r"deploy_roles = \[(.*?)\]", bootstrap, re.S)
     assert deploy_roles and "secretmanager" not in deploy_roles.group(1)
+    # Recorded, not hidden: managing a secret's IAM is itself a privilege.
+    assert "privileged identity" in read(BOOTSTRAP / "main.tf")
 
 
 def test_collectors_can_write_only_their_own_paths() -> None:
@@ -341,20 +382,50 @@ def test_every_fact_table_has_a_schema_whose_partition_and_cluster_columns_exist
 # --- GitHub trust ------------------------------------------------------------------------
 
 
-def test_github_is_trusted_by_numeric_id_branch_and_environment() -> None:
+def test_github_is_trusted_only_for_one_manual_workflow_by_one_user() -> None:
     bootstrap = read(BOOTSTRAP / "main.tf")
-    for required in (
+    condition = re.search(r"attribute_condition = join\(\" && \", \[(.*?)\]\)", bootstrap, re.S)
+    assert condition
+    clauses = re.findall(r'"(assertion\.[^"]+)"', condition.group(1))
+    assert clauses == [
         "assertion.repository_id == '${var.github_repository_id}'",
         "assertion.repository_owner_id == '${var.github_owner_id}'",
+        "assertion.repository_visibility == 'private'",
         "assertion.ref == 'refs/heads/main'",
-        "assertion.environment == '${var.github_environment}'",
-        'issuer_uri = "https://token.actions.githubusercontent.com"',
-        "roles/iam.workloadIdentityUser",
-    ):
-        assert required in bootstrap, required
+        "assertion.workflow_ref == "
+        "'${var.github_repository}/.github/workflows/deploy.yml@refs/heads/main'",
+        "assertion.event_name == 'workflow_dispatch'",
+        "assertion.actor_id == '${var.github_actor_id}'",
+    ]
+    assert "||" not in condition.group(1)  # every clause must hold; there is no alternative
+    mapping = re.search(r"attribute_mapping = \{(.*?)\}", bootstrap, re.S)
+    assert mapping
+    assert dict(re.findall(r'"([\w.]+)"\s*=\s*"([\w.]+)"', mapping.group(1))) == {
+        "google.subject": "assertion.sub",
+        "attribute.repository_id": "assertion.repository_id",
+        "attribute.repository_owner_id": "assertion.repository_owner_id",
+        "attribute.repository_visibility": "assertion.repository_visibility",
+        "attribute.ref": "assertion.ref",
+        "attribute.workflow_ref": "assertion.workflow_ref",
+        "attribute.event_name": "assertion.event_name",
+        "attribute.actor_id": "assertion.actor_id",
+    }
+    text = code(bootstrap)
+    assert 'issuer_uri = "https://token.actions.githubusercontent.com"' in text
+    assert text.count("roles/iam.workloadIdentityUser") == 1
+    assert "attribute.repository_id/${var.github_repository_id}" in text  # bound by numeric id
+    # No GitHub environment or reviewer is part of the trust boundary.
+    assert "environment" not in text
     variables = read(BOOTSTRAP / "variables.tf")
-    assert variables.count('can(regex("^[0-9]+$"') == 2  # ids must be numeric, not names
-    assert 'default     = "production"' in variables
+    assert "github_environment" not in variables
+    assert variables.count('can(regex("^[0-9]+$"') == 3  # repo, owner and actor ids are numeric
+    for name in ("github_repository", "github_actor_id"):
+        declaration = re.search(rf'variable "{name}" \{{(.*?)\n\}}', variables, re.S)
+        assert declaration and "default" not in declaration.group(1), name
+    # The registry exists before any image does, and the deploy identity only pushes to it.
+    assert 'resource "google_artifact_registry_repository" "images"' in text
+    assert "roles/artifactregistry.writer" in text and "roles/artifactregistry.admin" not in text
+    assert "google_artifact_registry_repository" not in code(terraform(PROD))
     budget = code(bootstrap)
     assert "google_billing_budget" in budget and "[0.25, 0.5, 0.75, 1.0]" in budget
     assert "FORECASTED_SPEND" in budget
@@ -397,20 +468,45 @@ def test_verification_runs_once_per_commit_and_gates_every_cloud_step() -> None:
     triggers = ci[ci.index("\non:\n") : ci.index("\npermissions:")]
     assert "pull_request:" in triggers and "workflow_call:" in triggers
     assert "push:" not in triggers  # a push to main is verified by deploy, not twice
+    jobs = deploy[deploy.index("\njobs:\n") :]
+    names = re.findall(r"^  ([a-z-]+):\n", jobs, re.M)
+    assert names == ["verify", "identity-check", "plan", "apply"]
+    bodies = dict(zip(names, re.split(r"^  [a-z-]+:\n", jobs, flags=re.M)[1:], strict=True))
     # Deploy reuses the whole CI workflow as its first job; it has no weaker copy of it.
-    verify = deploy[deploy.index("  verify:\n") : deploy.index("  build-and-plan:\n")]
-    assert "uses: ./.github/workflows/ci.yml" in code(verify)
-    assert "uv run pytest" not in code(deploy)  # no second, divergent test list
-    # Nothing that authenticates can start unless verification passed.
-    build = deploy[deploy.index("  build-and-plan:\n") : deploy.index("  apply:\n")]
-    apply = deploy[deploy.index("  apply:\n") :]
-    assert "needs: verify" in code(build) and "needs: build-and-plan" in code(apply)
-    assert "google-github-actions/auth" not in verify
-    assert code(deploy).index("needs: verify") < code(deploy).index("google-github-actions/auth")
+    assert "uses: ./.github/workflows/ci.yml" in code(bodies["verify"])
+    assert "uv run pytest" not in code(deploy)
+    assert "google-github-actions/auth" not in bodies["verify"]
+    assert "id-token" not in bodies["verify"]
+    for name in ("identity-check", "plan", "apply"):
+        body = code(bodies[name])
+        # Nothing that authenticates can start unless verification passed...
+        assert "needs: verify" in body, name
+        # ...or for anything but a manual run on main, of the named operation...
+        assert "github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'" in body
+        assert f"inputs.operation == '{name}'" in body
+        # ...or before the bootstrap has provided identifiers.
+        assert "vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''" in body
+        assert "id-token: write" in body and "google-github-actions/auth" in body
+        assert "environment:" not in body  # no GitHub environment is relied on
     assert "if: always()" not in deploy and "continue-on-error" not in deploy
-    # And nothing authenticates at all before the bootstrap has provided identifiers.
-    assert "if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''" in code(build)
+    assert deploy.count("id-token: write") == 3  # exactly the three jobs above
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in ci
+
+
+def test_a_push_to_main_can_never_reach_cloud_authentication() -> None:
+    deploy = code(workflow("deploy.yml"))
+    triggers = deploy[deploy.index("\non:\n") : deploy.index("\npermissions:")]
+    assert "push:" in triggers and "workflow_dispatch:" in triggers  # pushes still verify
+    assert "pull_request" not in triggers and "schedule" not in triggers
+    assert "default: identity-check" in triggers  # the default manual run changes nothing
+    # Every `if` that leads to authentication demands workflow_dispatch; none accepts push.
+    conditions = re.findall(r"    if: >-\n((?:      .+\n)+)", deploy)
+    assert len(conditions) == 3
+    for condition in conditions:
+        assert "github.event_name == 'workflow_dispatch'" in condition
+        assert "||" not in condition and "push" not in condition
+    # And Google would refuse a push's token anyway.
+    assert "assertion.event_name == 'workflow_dispatch'" in read(BOOTSTRAP / "main.tf")
 
 
 def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
@@ -457,7 +553,12 @@ def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = code(read(path))
         assert "credentials_json" not in text and "service_account_key" not in text
-        assert "GOOGLE_APPLICATION_CREDENTIALS" not in text and "BEGIN PRIVATE KEY" not in text
+        assert "BEGIN PRIVATE KEY" not in text
+        # The credentials path is only ever READ, to prove the credential is federated.
+        assert not re.search(r"GOOGLE_APPLICATION_CREDENTIALS\s*[:=]", text)
+        assert text.count("GOOGLE_APPLICATION_CREDENTIALS") == (
+            1 if path.name == "deploy.yml" else 0
+        )
         assert "secrets." not in text  # nothing here needs a stored secret at all
         assert not re.search(r"\b[0-9A-F]{32}\b", text)
         assert not re.search(
@@ -467,21 +568,36 @@ def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
         assert not re.search(r"projects/\d+/locations", text)  # no real provider path
 
 
-def test_deployment_uses_oidc_waits_for_approval_and_shouts_about_destruction() -> None:
+def test_deployment_is_two_manual_runs_and_applies_only_a_plan_named_by_hash() -> None:
     deploy = workflow("deploy.yml")
     text = code(deploy)
-    assert "branches: [main]" in text and "pull_request" not in text
-    assert text.count("id-token: write") == 2 and text.count("environment: production") == 2
     assert "workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}" in text
     assert "service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}" in text
     assert "cancel-in-progress: false" in text
-    # Built, scanned, then pushed; and what is deployed is the digest that was pushed.
-    assert text.index("trivy-action") < text.index("docker push")
-    assert "RepoDigests" in text and "image=${{ steps.push.outputs.image }}" in text
-    # Plan, show, approve, then apply exactly that plan.
-    assert text.index("terraform plan") < text.index("terraform apply -input=false tfplan")
-    assert "GITHUB_STEP_SUMMARY" in text and "DESTRUCTIVE PLAN" in text
-    assert "outputs.destructive == '0' || github.event_name == 'workflow_dispatch'" in text
+    jobs = text[text.index("\njobs:\n") :]
+    plan = jobs[jobs.index("  plan:\n") : jobs.index("  apply:\n")]
+    apply = jobs[jobs.index("  apply:\n") :]
+    # Plan: built, scanned, THEN authenticated and pushed; the pushed digest is planned.
+    assert plan.index("trivy-action") < plan.index("google-github-actions/auth")
+    assert plan.index("google-github-actions/auth") < plan.index("docker push")
+    assert "RepoDigests" in plan and "image=${{ steps.push.outputs.image }}" in plan
+    assert "terraform plan" in plan and "terraform apply" not in plan  # it changes nothing
+    assert "sha256sum tfplan" in plan and "GITHUB_STEP_SUMMARY" in plan
+    assert "DESTRUCTIVE PLAN" in plan and "upload-artifact" in plan
+    # Apply: a separate manual run, given the plan's run id AND its hash, never re-planning.
+    assert "inputs.plan_run_id != '' && inputs.plan_sha256 != ''" in apply
+    assert "run-id: ${{ inputs.plan_run_id }}" in apply
+    assert 'test "${actual}" = "${{ inputs.plan_sha256 }}"' in apply
+    assert apply.index("sha256sum tfplan") < apply.index("google-github-actions/auth")
+    assert "terraform plan" not in apply and "terraform apply -input=false tfplan" in apply
+    assert "allow_destroy" in apply and apply.index("allow_destroy") < apply.index(
+        "terraform apply"
+    )
+    assert "docker" not in apply  # the image is whatever the reviewed plan names
+    # The identity check is read-only: it neither builds, plans nor applies.
+    check = jobs[jobs.index("  identity-check:\n") : jobs.index("  plan:\n")]
+    assert "terraform" not in check and "docker" not in check and "gcloud auth list" in check
+    assert 'test "${kind}" = "external_account"' in check
     assert "terraform destroy" not in text and "-auto-approve" not in text
 
 

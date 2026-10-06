@@ -140,7 +140,8 @@ and validated locally. **No cloud resource exists**: nothing has been applied.
   one identity per job, a dispatcher that cannot read source secrets, one scheduler
   trigger that starts paused, GitHub trust by OIDC with no service-account key.
 - **One image** (`Dockerfile`) and two workflows: pull-request CI with no cloud
-  credentials, and a deploy workflow that waits for the owner's approval.
+  credentials, and a deploy workflow that only the owner can start by hand and that
+  applies only a plan named by its hash.
 
 See `docs/phase4-runbook.md` for the bootstrap steps, secret loading, the one-action
 stop and the policy gates that must clear before unattended collection.

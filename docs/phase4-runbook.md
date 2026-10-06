@@ -16,7 +16,7 @@ infrastructure for the one public release that comes later.
 | `infra/prod` | Applied through CI only: buckets, datasets, secret containers, jobs, the one scheduler trigger, alerts |
 | `Dockerfile` | One application image; every job runs it with a different command and identity |
 | `.github/workflows/ci.yml` | Pull-request checks. No cloud credentials |
-| `.github/workflows/deploy.yml` | Build, scan, push by digest, plan, wait for approval, apply |
+| `.github/workflows/deploy.yml` | By hand only: identity check, or plan (build, scan, push by digest, plan), or apply a plan named by its hash |
 
 ## Architecture in one picture
 
@@ -41,9 +41,9 @@ regional BigQuery datasets (not the `US` multi-region).
 
 1. A billing account, and a decision on the project id. Project ids are globally
    unique, so the id is a variable; the display name can be "MetaSpike Production".
-2. **A private GitHub repository** for MetaSpike, with an environment named
-   `production` that requires the owner's approval. The repository's numeric id and
-   the owner's numeric id are needed for the trust configuration; names are not used.
+2. **A private GitHub repository** for MetaSpike. The repository's numeric id and the
+   owner's numeric id are needed for the trust configuration; names are not the
+   boundary. No GitHub environment or reviewer is relied on (see "Who can deploy").
 3. `gcloud` and `terraform` installed locally, for the one-time bootstrap only.
 
 ## One-time bootstrap (Part A2, by hand)
@@ -69,10 +69,55 @@ terraform apply -var-file=<a tfvars file that is NOT committed>
 ```
 
 Its outputs (the workload identity provider, the deploy service account and the
-notification channel) are stored as GitHub environment **variables**. They are
+notification channel) are stored as GitHub repository **variables**. They are
 identifiers, not credentials. No service-account key is ever created or downloaded.
 
 From then on `infra/prod` is applied only by the deploy workflow.
+
+## Who can deploy
+
+Google accepts a GitHub token for the deploy identity only when every one of these
+holds: this repository and this owner (by immutable numeric id), while the repository
+is private, on `refs/heads/main`, from `.github/workflows/deploy.yml` as it exists on
+main, started by hand (`workflow_dispatch`), by the owner's own account (numeric id).
+
+A push to main runs verification only. The jobs that authenticate do not start for a
+push, and Google would refuse a push's token if they did.
+
+A deployment is always two manual runs of the deploy workflow:
+
+1. `operation = plan` builds, scans and pushes the image by digest, plans, and
+   publishes the plan with its run id and SHA-256. It changes nothing.
+2. `operation = apply`, given that run id and that SHA-256, applies exactly that plan.
+   A plan that destroys or replaces anything also needs `allow_destroy`.
+
+`operation = identity-check` (the default) only proves federation works.
+
+The image registry is created by the bootstrap root, because the production root
+cannot plan without an image digest and an image cannot be pushed to a registry that
+does not exist.
+
+## Security review items before Part C
+
+Nothing below blocks the foundation, because no job runs and no secret has a value
+yet. Each must be reviewed before unattended collection starts.
+
+1. **The deploy identity is privileged.** `ms-deploy` cannot read a secret's value, but
+   it can set IAM on the three secret containers and it can deploy jobs that run as
+   the identities that do read them. Once secret versions exist, whoever controls
+   `ms-deploy` could reach them. The control is the federation condition: one
+   workflow, on main, started by hand, by the owner. It may act as the eight runtime
+   service accounts only, each granted individually, never project-wide.
+2. **Unfixed base-image vulnerabilities.** The image has 0 fixable HIGH or CRITICAL
+   findings, and the scanner also lists 53 HIGH and 2 CRITICAL findings in Debian
+   packages for which no fix has been published. The scan policy is unchanged.
+3. **Google's default compute service account** appeared when the Cloud Run API was
+   enabled. It holds no project role and has no key, and no MetaSpike job uses it.
+4. **The OIDC issuer** is `https://token.actions.githubusercontent.com` with no
+   trailing slash, as in GitHub's own discovery document and the Terraform provider's
+   example. Google's deployment-pipeline documentation shows a trailing-slash
+   example; it is not used. The live identity check is the operational proof.
+5. `actions/checkout` v4 runs on a Node.js version GitHub now warns about.
 
 ## Loading secrets
 

@@ -39,13 +39,12 @@ locals {
   # Identities that run BigQuery jobs. Data access is granted per dataset in infra/prod.
   bigquery_job_runners = ["ms-warehouse", "ms-features", "ms-parity"]
 
-  # Roles the deploy identity needs to manage the resources in infra/prod. There is no
-  # Owner, no Editor, and no role that can read a secret's value.
+  # Project-level roles the deploy identity needs to manage the resources in infra/prod.
+  # There is no Owner, no Editor, and no role that can read a secret's value. Acting as
+  # a service account is NOT here: it is granted per service account, further down.
   deploy_roles = [
-    "roles/artifactregistry.admin",
     "roles/bigquery.admin",
     "roles/cloudscheduler.admin",
-    "roles/iam.serviceAccountUser",
     "roles/logging.configWriter",
     "roles/monitoring.editor",
     "roles/run.admin",
@@ -79,20 +78,31 @@ resource "google_iam_workload_identity_pool_provider" "github" {
   display_name                       = "GitHub OIDC"
 
   attribute_mapping = {
-    "google.subject"                = "assertion.sub"
-    "attribute.repository_id"       = "assertion.repository_id"
-    "attribute.repository_owner_id" = "assertion.repository_owner_id"
-    "attribute.ref"                 = "assertion.ref"
-    "attribute.environment"         = "assertion.environment"
+    "google.subject"                  = "assertion.sub"
+    "attribute.repository_id"         = "assertion.repository_id"
+    "attribute.repository_owner_id"   = "assertion.repository_owner_id"
+    "attribute.repository_visibility" = "assertion.repository_visibility"
+    "attribute.ref"                   = "assertion.ref"
+    "attribute.workflow_ref"          = "assertion.workflow_ref"
+    "attribute.event_name"            = "assertion.event_name"
+    "attribute.actor_id"              = "assertion.actor_id"
   }
 
-  # Numeric ids cannot be re-registered by someone else the way a name can. Only the
-  # main branch, running in the approval-gated environment, is accepted at all.
+  # A token is accepted only if EVERY line holds. The boundary is made of GitHub's
+  # immutable numeric ids, which cannot be re-registered the way a name can:
+  #   this repository, owned by this account, while it is private;
+  #   the main branch; this one workflow file, as it exists on main;
+  #   started by hand (never by a push); by this one user.
+  # There is no GitHub environment or reviewer in this design. A push to main can run
+  # verification, but the token GitHub issues for it fails this condition.
   attribute_condition = join(" && ", [
     "assertion.repository_id == '${var.github_repository_id}'",
     "assertion.repository_owner_id == '${var.github_owner_id}'",
+    "assertion.repository_visibility == 'private'",
     "assertion.ref == 'refs/heads/main'",
-    "assertion.environment == '${var.github_environment}'",
+    "assertion.workflow_ref == '${var.github_repository}/.github/workflows/deploy.yml@refs/heads/main'",
+    "assertion.event_name == 'workflow_dispatch'",
+    "assertion.actor_id == '${var.github_actor_id}'",
   ])
 
   oidc {
@@ -120,10 +130,19 @@ resource "google_project_iam_member" "deploy" {
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.deploy.email}"
+
+  # Project-level IAM is read and written through an API this root itself enables.
+  depends_on = [google_project_service.enabled]
 }
 
 # Manage secret CONTAINERS and who may read them, without being able to read a value.
 # The built-in secretmanager.admin role includes versions.access, so it is not used.
+#
+# Security property to keep in view: an identity that can set IAM on a secret could,
+# once the secret has a version, grant itself or anything else access to it. ms-deploy
+# is therefore a privileged identity even though it cannot read a value directly, and
+# the control on it is the federation condition (one workflow, started by hand, by one
+# user). To be reviewed before Part C, when the first secret versions are added.
 resource "google_project_iam_custom_role" "secret_container_admin" {
   project     = var.project_id
   role_id     = "msSecretContainerAdmin"
@@ -140,6 +159,8 @@ resource "google_project_iam_custom_role" "secret_container_admin" {
     "secretmanager.versions.get",
     "secretmanager.versions.list",
   ]
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_project_iam_member" "deploy_secret_containers" {
@@ -152,6 +173,49 @@ resource "google_storage_bucket_iam_member" "deploy_state" {
   bucket = var.state_bucket_name
   role   = "roles/storage.objectUser"
   member = "serviceAccount:${google_service_account.deploy.email}"
+}
+
+# --- Image registry -------------------------------------------------------------------
+# Here, not in infra/prod: the production root needs an image digest before it can
+# plan, and an image cannot be pushed to a registry that does not exist yet.
+
+resource "google_artifact_registry_repository" "images" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "metaspike"
+  format        = "DOCKER"
+  description   = "MetaSpike application image. Private. Jobs are deployed by digest."
+
+  cleanup_policies {
+    id     = "keep-recent"
+    action = "KEEP"
+    most_recent_versions {
+      keep_count = 10
+    }
+  }
+
+  cleanup_policies {
+    id     = "delete-old"
+    action = "DELETE"
+    condition {
+      older_than = "2592000s"
+    }
+  }
+
+  labels = {
+    system = "metaspike"
+  }
+
+  depends_on = [google_project_service.enabled]
+}
+
+# The deploy identity may push to this one repository. It administers no registry.
+resource "google_artifact_registry_repository_iam_member" "deploy_pushes" {
+  project    = var.project_id
+  location   = var.region
+  repository = google_artifact_registry_repository.images.name
+  role       = "roles/artifactregistry.writer"
+  member     = "serviceAccount:${google_service_account.deploy.email}"
 }
 
 # --- Runtime identities ---------------------------------------------------------------
@@ -167,12 +231,28 @@ resource "google_service_account" "runtime" {
   depends_on = [google_project_service.enabled]
 }
 
+# To create a Cloud Run job that runs as an identity, or a scheduler job that calls as
+# one, the deployer must be allowed to act as that identity. That is granted here on
+# each of the eight runtime service accounts individually: seven are a job's identity
+# and ms-scheduler is the scheduler job's caller. It is not granted on the project, so
+# it does not extend to ms-deploy itself, to Google's default service accounts, or to
+# any service account created later.
+resource "google_service_account_iam_member" "deploy_acts_as_runtime" {
+  for_each = local.runtime_identities
+
+  service_account_id = google_service_account.runtime[each.key].name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.deploy.email}"
+}
+
 resource "google_project_iam_member" "runtime_logs" {
   for_each = { for name, _ in local.runtime_identities : name => name if name != "ms-scheduler" }
 
   project = var.project_id
   role    = "roles/logging.logWriter"
   member  = "serviceAccount:${google_service_account.runtime[each.key].email}"
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_project_iam_member" "bigquery_jobs" {
@@ -181,6 +261,8 @@ resource "google_project_iam_member" "bigquery_jobs" {
   project = var.project_id
   role    = "roles/bigquery.jobUser"
   member  = "serviceAccount:${google_service_account.runtime[each.key].email}"
+
+  depends_on = [google_project_service.enabled]
 }
 
 # --- Budget: a warning, from day one --------------------------------------------------
@@ -197,8 +279,11 @@ resource "google_monitoring_notification_channel" "owner_email" {
   depends_on = [google_project_service.enabled]
 }
 
+# Read only after the APIs are on: looking a project up needs one of them.
 data "google_project" "this" {
   project_id = var.project_id
+
+  depends_on = [google_project_service.enabled]
 }
 
 resource "google_billing_budget" "monthly" {

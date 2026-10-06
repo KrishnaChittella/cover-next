@@ -47,10 +47,24 @@ variable "github_repository_id" {
   }
 }
 
-variable "github_environment" {
-  description = "GitHub environment that must approve a production deployment."
+variable "github_repository" {
+  description = "owner/name of the repository. Used only to name the one workflow file that may deploy; the security boundary is the numeric ids."
   type        = string
-  default     = "production"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "Use the form owner/name."
+  }
+}
+
+variable "github_actor_id" {
+  description = "Immutable numeric id of the one GitHub user allowed to start a deployment."
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]+$", var.github_actor_id))
+    error_message = "Use the numeric user id, not the login."
+  }
 }
 
 variable "alert_email" {

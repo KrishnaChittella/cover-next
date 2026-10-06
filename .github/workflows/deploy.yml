@@ -1,16 +1,47 @@
-# Production deployment. Runs on main only, authenticates with short-lived GitHub OIDC
-# tokens through Workload Identity Federation, and waits for the owner's approval in
-# the `production` environment before anything is applied.
+# Production deployment.
 #
-# There is no service-account key anywhere: not in this file, not in repository
-# secrets. The values below are identifiers, not credentials, and are stored as
-# environment VARIABLES so that nothing specific to the owner's accounts is committed.
+# WHO CAN DEPLOY
+# Cloud authentication uses short-lived GitHub OIDC tokens through Workload Identity
+# Federation. There is no service-account key anywhere, and no GitHub environment or
+# reviewer is relied on. Google accepts a token only when all of these are true:
+# this repository and owner (by numeric id), private, the main branch, THIS workflow
+# file as it exists on main, started by hand with workflow_dispatch, by the owner.
+#
+# A push to main runs verification and nothing else. Its token would be refused by
+# Google, and the jobs that authenticate do not start for a push in the first place.
+#
+# HOW A DEPLOYMENT HAPPENS (always by hand, always two runs)
+#   1. operation = plan    builds, scans and pushes the image by digest, plans, and
+#                          publishes the plan with its SHA-256. Changes nothing.
+#   2. operation = apply   applies exactly that plan: it must be given the run id and
+#                          the SHA-256 of the plan that was read. Nothing is re-planned.
+#   operation = identity-check proves federation works and changes nothing at all.
+#
+# The values below are identifiers, not credentials, stored as repository VARIABLES.
 name: deploy
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      operation:
+        description: "identity-check (read-only), plan (no change), or apply (a reviewed plan)"
+        type: choice
+        options: [identity-check, plan, apply]
+        default: identity-check
+      plan_run_id:
+        description: "apply only: id of the `plan` run whose plan was reviewed"
+        type: string
+        default: ""
+      plan_sha256:
+        description: "apply only: SHA-256 of that plan, copied from the plan run's summary"
+        type: string
+        default: ""
+      allow_destroy:
+        description: "apply only: the reviewed plan destroys or replaces resources, and that is intended"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,31 +63,62 @@ jobs:
     permissions:
       contents: read
 
-  # First approval: lets the run obtain a short-lived credential to push the image and
-  # read state for the plan. It changes no infrastructure.
-  build-and-plan:
-    # `needs` means a failed or cancelled verification skips this job and everything
-    # after it: no approval is requested and no credential is ever issued.
+  # Proves federation and nothing more: who Google says we are. Read-only.
+  identity-check:
     needs: verify
-    # Until the one-time bootstrap has stored the project's identifiers as environment
-    # variables there is nothing to authenticate against, so the run ends here, cleanly,
-    # after verification.
-    if: vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && inputs.operation == 'identity-check'
+      && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    environment: production
+    timeout-minutes: 5
     permissions:
       contents: read
       id-token: write
-    outputs:
-      image: ${{ steps.push.outputs.image }}
-      destructive: ${{ steps.inspect.outputs.destructive }}
+    steps:
+      - name: Authenticate (OIDC, no key)
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@e427ad8a34f8676edf47cf7d7925499adf3eb74f # v2.2.1
+      - name: Who are we, and how did we get here
+        run: |
+          kind="$(jq -r .type "${GOOGLE_APPLICATION_CREDENTIALS}")"
+          account="$(gcloud auth list --filter=status:ACTIVE --format='value(account)')"
+          project="$(gcloud projects describe '${{ vars.GCP_PROJECT_ID }}' --format='value(projectId,lifecycleState)')"
+          {
+            echo "## Identity check (read-only)"
+            echo "- credential type: \`${kind}\` (a federated token; \`service_account\` would mean a key)"
+            echo "- Google principal: \`${account}\`"
+            echo "- project: \`${project}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "${kind}" = "external_account"
+          test "${account}" = "${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}"
+
+  # Builds and pushes the image, then plans. It changes no infrastructure.
+  plan:
+    # `needs` means a failed or cancelled verification skips this job: no credential
+    # is ever issued. The `if` means a push never starts it at all.
+    needs: verify
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && inputs.operation == 'plan'
+      && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build
         run: docker build --pull --no-cache --tag candidate .
       - name: Smoke
-        run: docker run --rm candidate --help
+        run: |
+          docker run --rm candidate --help
+          test "$(docker run --rm --entrypoint id candidate -u)" != "0"
       - name: Scan before anything is pushed
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -94,21 +156,24 @@ jobs:
             -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}"
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
+          sha256sum tfplan | cut -d' ' -f1 > tfplan.sha256
       - name: Show the plan, and say loudly if it destroys or replaces anything
-        id: inspect
         working-directory: infra/prod
         run: |
           destructive="$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' plan.json)"
-          echo "destructive=${destructive}" >> "$GITHUB_OUTPUT"
           {
             if [ "${destructive}" != "0" ]; then
               echo "## DESTRUCTIVE PLAN: ${destructive} resource(s) would be DESTROYED or REPLACED"
               jq -r '.resource_changes[] | select(.change.actions | index("delete")) | "- `\(.address)` (\(.change.actions | join(" then ")))"' plan.json
               echo
-              echo "This will not be applied unless the run was started by hand with the destructive approval."
+              echo "Applying this needs allow_destroy as well as the plan's SHA-256."
             else
               echo "## Plan: nothing is destroyed or replaced"
             fi
+            echo
+            echo "- image: \`${{ steps.push.outputs.image }}\`"
+            echo "- plan run id: \`${GITHUB_RUN_ID}\`"
+            echo "- plan SHA-256: \`$(cat tfplan.sha256)\`"
             echo
             echo '```'
             cat plan.txt
@@ -117,40 +182,55 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: tfplan
-          path: infra/prod/tfplan
+          path: |
+            infra/prod/tfplan
+            infra/prod/tfplan.sha256
           retention-days: 3
 
+  # Applies one specific plan that a person has read: named by run id AND by hash.
   apply:
-    needs: build-and-plan
-    # A destroy or replace is never applied by a push. It needs a manual run of this
-    # workflow as well as the environment approval below.
-    if: needs.build-and-plan.outputs.destructive == '0' || github.event_name == 'workflow_dispatch'
+    needs: verify
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+      && inputs.operation == 'apply'
+      && inputs.plan_run_id != '' && inputs.plan_sha256 != ''
+      && vars.GCP_WORKLOAD_IDENTITY_PROVIDER != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # Second approval, given AFTER the plan above has been read. Nothing below runs,
-    # and no credential is issued for it, until that approval is given.
-    environment: production
     permissions:
       contents: read
       id-token: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      - name: Fetch the plan that was reviewed
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: tfplan
+          path: infra/prod
+          run-id: ${{ inputs.plan_run_id }}
+          github-token: ${{ github.token }}
+      - name: It must be exactly the plan whose hash was given
+        working-directory: infra/prod
+        run: |
+          actual="$(sha256sum tfplan | cut -d' ' -f1)"
+          test "${actual}" = "${{ inputs.plan_sha256 }}" || {
+            echo "::error::plan hash mismatch: this is not the plan that was reviewed"; exit 1; }
       - uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: tfplan
-          path: infra/prod
-      - name: Apply exactly the plan that was reviewed
+      - name: Refuse an unannounced destroy, then apply exactly that plan
         working-directory: infra/prod
         run: |
           terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          destructive="$(terraform show -json tfplan | jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length')"
+          if [ "${destructive}" != "0" ] && [ "${{ inputs.allow_destroy }}" != "true" ]; then
+            echo "::error::the plan destroys or replaces ${destructive} resource(s) and allow_destroy was not set"; exit 1
+          fi
           terraform apply -input=false tfplan
-      - name: Record what was deployed
-        run: echo "Deployed \`${{ needs.build-and-plan.outputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Applied plan \`${{ inputs.plan_sha256 }}\` from run \`${{ inputs.plan_run_id }}\`" >> "$GITHUB_STEP_SUMMARY"

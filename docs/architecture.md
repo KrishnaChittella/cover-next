@@ -141,6 +141,7 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
   deployment. Data is stored in `us-central1` only. No bucket holding Steam Data
   carries a retention lock, because that data may have to be deleted.
 - **No long-lived cloud credential exists.** Deployment authenticates with GitHub
-  OIDC through workload identity federation, restricted by numeric repository id,
-  branch and an approval-gated environment. Secret values are added by the owner
+  OIDC through workload identity federation, restricted by numeric repository, owner
+  and actor ids, the private repository, the main branch, the one deploy workflow
+  file and a manual start. A push can verify; it can never authenticate. Secret values are added by the owner
   from standard input and never pass through Terraform.
