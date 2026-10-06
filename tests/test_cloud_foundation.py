@@ -441,6 +441,18 @@ def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
     assert all(len(shas) == 1 for shas in versions.values()), versions
 
 
+def test_the_image_scan_gate_is_strict_and_builds_are_never_from_a_stale_cache() -> None:
+    for name in ("ci.yml", "deploy.yml"):
+        text = code(workflow(name))
+        assert "docker build --pull --no-cache " in text, name
+        assert text.count("docker build") == 1
+        scan = text[text.index("trivy-action") :][:400]
+        assert "severity: CRITICAL,HIGH" in scan and 'exit-code: "1"' in scan
+        assert "trivyignores" not in text and ".trivyignore" not in text
+        assert "skip-" not in scan and 'exit-code: "0"' not in text
+    assert not (REPO / ".trivyignore").exists()
+
+
 def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         text = code(read(path))
@@ -479,6 +491,23 @@ def test_deployment_uses_oidc_waits_for_approval_and_shouts_about_destruction() 
 def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> None:
     dockerfile = read(REPO / "Dockerfile")
     assert dockerfile.count("FROM python:3.12-slim-bookworm") == 2
+    # Both stages use the official base by tag AND immutable digest, and the same one.
+    bases = re.findall(
+        r"^FROM (python:3\.12-slim-bookworm@sha256:[0-9a-f]{64})\b", dockerfile, re.M
+    )
+    assert len(bases) == 2 and len(set(bases)) == 1
+    assert not re.search(r"^FROM (?!.*@sha256:)", dockerfile, re.M)  # no mutable base
+    # The security fix is targeted: two named packages, upgrade only, no blanket upgrade,
+    # no pinned Debian revision, and it runs as root before the user is dropped.
+    patch = re.search(r"RUN apt-get update \\\n(.*?)rm -rf /var/lib/apt/lists/\*", dockerfile, re.S)
+    assert patch and "--no-install-recommends --only-upgrade" in patch.group(1)
+    assert re.findall(r"^\s+([a-z0-9.+-]+) \\$", patch.group(1), re.M) == [
+        "libpcre2-8-0",
+        "perl-base",
+    ]
+    assert "apt-get upgrade" not in code(dockerfile) and "dist-upgrade" not in dockerfile
+    assert "=" not in patch.group(1)  # no hard-coded package version
+    assert dockerfile.index("--only-upgrade") < dockerfile.index("USER 10001:10001")
     assert "uv sync --locked --no-dev" in dockerfile and "--no-editable" in dockerfile
     assert "USER 10001:10001" in dockerfile and 'ENTRYPOINT ["metaspike"]' in dockerfile
     instructions = code(dockerfile)

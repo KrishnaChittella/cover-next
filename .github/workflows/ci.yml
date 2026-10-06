@@ -78,8 +78,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # --pull and --no-cache: the base is pinned by digest, and the security-update
+      # layer must really run, so nothing is ever taken from a stale local cache.
       - name: Build (not pushed)
-        run: docker build --tag metaspike:ci .
+        run: docker build --pull --no-cache --tag metaspike:ci .
       - name: The image runs and is not root
         run: |
           docker run --rm metaspike:ci --help

@@ -54,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Build
-        run: docker build --tag candidate .
+        run: docker build --pull --no-cache --tag candidate .
       - name: Smoke
         run: docker run --rm candidate --help
       - name: Scan before anything is pushed
