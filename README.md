@@ -54,6 +54,32 @@ entities, the source ids that recorded evidence proves and whether the entity is
 eligible for Steam telemetry (`yes`, `no` or `unknown`). No Steam id is inferred
 from a title.
 
+Phase 3 Part A (sample-now sources and Steam concurrent-player history) is built:
+
+- **Source modes:** a source is `FETCH_HISTORY` (Wikimedia) or `SAMPLE_NOW` (Steam
+  concurrent players). A sampling adapter takes one source-native id and no window:
+  it cannot be asked for the past and cannot backfill.
+- **Samples:** every attempt is an append-only event with its own id. A logical slot
+  (source, metric, source-native id, slot start) can hold several attempts; the
+  earliest valid observation speaks for it. Missing is never zero: an unsampled
+  slot is `not_sampled`, and only a successful response reporting 0 is a zero.
+- **Sample store:** JSON Lines, one file per app per UTC month, keyed by the
+  source's own id. Reads are point-in-time by when an attempt was stored.
+- **Rebinding:** which entity a sample belongs to is resolved from the mapping
+  history at the moment it was observed. Stored samples are never rewritten.
+- **Eligibility:** `eligible`, `ineligible` or `unknown`, derived from trusted
+  bindings at a moment, never from a title. Today the bootstrap scope yields eight
+  apps; GTA V and Minecraft are `unknown`. An entity with several eligible apps has
+  each sampled and stored separately, and no combined series
+  (`multi_app_combination_unresolved`) until a combination rule exists.
+- **Policy:** `steam_current_players` is cleared for private development only. Its
+  derived-metrics and commercial permissions are `unknown`, so nothing sampled or
+  computed from it can be registered for a public stage or enter a published
+  artifact. An unanswered permission is never read as granted.
+
+Sampling is one-shot. No scheduler, cron entry or background process is installed,
+and no history is being accumulated; unattended collection belongs to Phase 4.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:
@@ -108,8 +134,17 @@ generate-catalogue` resolves recorded source records into a catalogue state file
 
 `uv run --env-file .env metaspike probe-sources` makes one small authenticated
 call per catalogue source and reports the field names and vocabularies it sees. It
-is the only command that uses IGDB or Steam, it is never run by tests, and it never
-prints a credential.
+is never run by tests, and it never prints a credential.
+`--source steam-players --app APPID` makes one concurrent-player call for one
+eligible app instead; it is never part of `all`.
+
+`uv run --env-file .env metaspike sample` samples concurrent players once, for the
+current 15-minute slot, for every eligible app in the bootstrap scope, and appends
+every outcome to `.metaspike/samples/`. It is safe to rerun: a slot that already has
+its observation is not requested again. It prints statuses, not values.
+`--replay tests/fixtures/steam_players` answers from the recorded response instead
+of calling Steam. `uv run metaspike sample-status` reports coverage, failures,
+quota and policy clearance, and never a value or a secret.
 
 `run` and `collect` accept `--store-dir DIR` to also append what they collect to a
 local point-in-time observation store.
@@ -160,15 +195,18 @@ src/metaspike/
     observations.py      Observation and gap-free TimeSeries at any granularity
     signals.py           SignalKey, Signal and EntitySignals (many signals, any missing)
     scores.py            score, confidence and explanation results
-    source_policy.py     permissions, rate limits, quota, lag, field and display rules
+    source_policy.py     permissions, stage-aware gates, rate limits, quota, display rules
+    samples.py           sample attempts, logical slots and slot resolution
+    baseline_rules.py    baseline_rules_v1: recorded constants (not yet computed)
   catalogue/
     seed.py              bootstrap entities and migration anchors
     bindings.py          audit of the bootstrap entities' proven source bindings
+    eligibility.py       point-in-time Steam eligibility and sampling targets
     legacy_ids.py        frozen msg_NNNN -> UUIDv4 migration table
     overrides.py         versioned identity overrides (FiveM only)
     generate.py          generates the canonical catalogue from source records
   sources/
-    base.py              SourceAdapter protocol, SourceError
+    base.py              source modes, SourceAdapter and SamplingAdapter protocols
     registry.py          refuses adapters whose policy does not clear the stage
     limiter.py           per-budget-group rate limiter and quota ledger
     http.py              the limited HTTP client every adapter must use; redaction
@@ -177,7 +215,9 @@ src/metaspike/
     igdb_auth.py         Twitch OAuth client-credentials with a cached token
     igdb.py              IGDB identity-metadata adapter and its policy
     steam_catalogue.py   Steam app-list adapter and its policy
+    steam_players.py     Steam concurrent-player sampler and its policy
     catalogue_sources.py wiring for the catalogue sources
+    sampling_sources.py  wiring and offline replay for sample-now sources
     replay.py            offline client that replays recorded responses
   features/attention.py  daily feature maths and machine-readable definitions
   scoring/
@@ -188,10 +228,13 @@ src/metaspike/
     normalize.py         gap-free series, publication-lag awareness
     assess.py            per-signal features -> score -> confidence -> explanation
     run.py               orchestration
+    sampling.py          one sampling run for one slot; health summary
+    history.py           entity history resolved from bindings at observation time
   storage/
     base.py              ObservationStore contract (append-only, point-in-time)
     local.py             local JSON Lines implementation
     records.py           local store for source-native records
+    samples.py           SampleStore contract and local JSON Lines implementation
   resolution/
     normalize.py         deterministic title normalisation
     source_urls.py       strict extraction of a source id from a store URL
@@ -423,8 +466,9 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 3 of the internal roadmap: Steam demand signals and cross-source
-normalisation. Steam's current-player count is a sample-now source, so the adapter
-contract must gain a sampling mode and history must come from our own store. No
-cloud resources exist yet; private collection begins in Phase 4, and nothing is
-public before the single production release.
+Phase 3 Part B: aggregation, history maturity, baselines and seasonality, velocity
+and acceleration, change points and cross-source normalisation, under
+`baseline_rules_v1`. It is validated on deterministic synthetic and replayed
+histories, because Phase 3 does not accumulate real history. No cloud resources
+exist yet; scheduled private collection begins in Phase 4 after its policy and
+storage-country gate, and nothing is public before the single production release.

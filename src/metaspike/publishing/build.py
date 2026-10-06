@@ -76,7 +76,7 @@ from metaspike.scoring.v0 import (
     V0_INDEPENDENT_SOURCES,
     source_ceiling,
 )
-from metaspike.sources.registry import SourceRegistry
+from metaspike.sources.registry import SourcePolicyError, SourceRegistry
 
 _PENDING_RUN_ID = "00000000T000000Z-00000000"
 # Fields that describe when a run happened rather than what it found. They are left
@@ -108,6 +108,10 @@ def build_bundle(
     registry: SourceRegistry,
     generated_at: datetime,
 ) -> ArtifactBundle:
+    # Nothing computed from a source may be published unless its policy says so
+    # explicitly. An unanswered permission blocks publication; it is never assumed.
+    for source, refusal in registry.publication_refusals().items():
+        raise SourcePolicyError(f"{source}: {refusal}")
     by_game = {assessment.canonical_game_id: assessment for assessment in assessments}
     ranks = _ranks(catalogue, by_game)
 

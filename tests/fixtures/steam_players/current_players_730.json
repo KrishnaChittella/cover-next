@@ -1,0 +1,34 @@
+{
+ "note": "One recorded response of ISteamUserStats/GetNumberOfCurrentPlayers/v1. The API key travelled in a request header and is not recorded.",
+ "recorded_at": "2026-10-06T01:25:26+00:00",
+ "request": {
+  "method": "GET",
+  "host": "api.steampowered.com",
+  "path": "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/",
+  "query": {
+   "appid": 730
+  }
+ },
+ "response": {
+  "status": 200,
+  "headers": {
+   "cache-control": "public, max-age=436",
+   "content-type": "application/json; charset=UTF-8",
+   "date": "Tue, 06 Oct 2026 01:25:26 GMT",
+   "expires": "Tue, 06 Oct 2026 01:32:42 GMT",
+   "vary": "Accept-Encoding"
+  },
+  "other_header_names": [
+   "connection",
+   "content-encoding",
+   "content-length",
+   "server"
+  ],
+  "body": {
+   "response": {
+    "player_count": 482350,
+    "result": 1
+   }
+  }
+ }
+}

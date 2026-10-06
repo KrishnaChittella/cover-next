@@ -80,3 +80,29 @@ seed catalogue ─► Wikimedia adapter ─► normalise ─► features ─► 
 - **Canonical ids are opaque.** Slugs and names can change; `canonical_game_id`
   cannot. Related entities (GTA V, GTA Online, FiveM) stay separate and are
   linked by typed relationships.
+- **A source either has history or is sampled.** A `SAMPLE_NOW` source answers
+  only for the instant it is asked; a missed slot cannot be recovered. Collection
+  writes to the sample store and assessment reads from it, point-in-time. Nothing
+  downstream uses the return value of a network call as data.
+- **Samples belong to the source's id, not to an entity.** The entity is resolved
+  from the mapping history at each sample's observed time, so a rebinding changes
+  who a later sample belongs to and never rewrites an earlier one. A binding later
+  found to have been wrong for its whole history is not corrected retroactively
+  yet; the samples and their audit stamps are kept intact for that later mechanism.
+- **Permissions are checked against the stage.** An unanswered permission may be
+  lived with privately, where nothing it governs happens. It blocks every public
+  stage and every published artifact, and is never treated as granted.
+- **Several apps are not one number.** An entity with several eligible apps has no
+  combined series until an explicit rule exists (`multi_app_combination_unresolved`).
+  That is unresolved semantics, not missing data.
+- **Confidence has two parts, kept apart.** Signal-quality confidence (maturity,
+  freshness, coverage, source quality) and evidence breadth (which independent,
+  applicable source families were observed). The public Confidence formula is not
+  defined yet, but it must account for breadth: one mature, fresh family is not
+  the same evidence as several agreeing ones. A family that cannot observe an
+  entity is inapplicable, never a missing or failing source; breadth is counted
+  over applicable families only.
+- **Sampled-signal constants are versioned.** `baseline_rules_v1` holds the starting
+  values. The 50-player low-base floor only nulls a percentage lift (`low_base`);
+  it never disables log lift, robust anomaly, absolute movement, change-point
+  detection, eligibility or opportunity consideration.

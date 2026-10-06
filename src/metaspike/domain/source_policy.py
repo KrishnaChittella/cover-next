@@ -52,6 +52,10 @@ class DeploymentStage(StrEnum):
     COMMERCIAL_PRODUCTION = "commercial_production"  # shown publicly and monetized
 
 
+# Stages at which a source's data, or anything computed from it, is shown to someone else.
+PUBLIC_STAGES = frozenset({DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION})
+
+
 class SourcePurpose(StrEnum):
     """What a source is used for, which decides which permissions it must hold."""
 
@@ -219,14 +223,28 @@ class SourcePolicy(FrozenModel):
         )
 
     def registration_refusal(self, purpose: SourcePurpose, stage: DeploymentStage) -> str | None:
-        """Why this source may not be used for `purpose` at `stage`, or None if it may."""
-        if purpose is SourcePurpose.DEMAND_SIGNALS and not self.collection_permitted:
-            return (
-                "policy does not permit collection "
-                "(derived metrics must be allowed and any required approval granted)"
-            )
+        """Why this source may not be used for `purpose` at `stage`, or None if it may.
+
+        What a source must hold depends on how far its data travels. Privately, a
+        demand source may be built against and studied while its derived-metrics
+        permission is still unanswered, because nothing derived leaves the building.
+        From public launch onward the permission must be an explicit ALLOWED. An
+        unanswered permission is never read as granted; it only stops mattering
+        where nothing it governs happens.
+        """
         if not self._approval_settled:
             return "policy does not permit collection (required approval has not been granted)"
+        if purpose is SourcePurpose.DEMAND_SIGNALS:
+            if self.derived_metrics_allowed is Permission.PROHIBITED:
+                return "policy does not permit collection (derived metrics are prohibited)"
+            if stage in PUBLIC_STAGES and not self.derived_output_permitted:
+                return (
+                    f"derived metrics are not explicitly allowed "
+                    f"({self.derived_metrics_allowed.value}), so the source may not be "
+                    f"part of a {stage.value} configuration"
+                )
+            if self.historical_storage_allowed in (Permission.UNKNOWN, Permission.PROHIBITED):
+                return "policy does not permit storing the source's history"
         if purpose is SourcePurpose.CATALOGUE_METADATA and self.historical_storage_allowed in (
             Permission.UNKNOWN,
             Permission.PROHIBITED,
@@ -242,6 +260,23 @@ class SourcePolicy(FrozenModel):
         """We may collect and score only if derived metrics are allowed and approval is settled."""
         approved = self.approval_status in (ApprovalStatus.NOT_REQUIRED, ApprovalStatus.APPROVED)
         return self.derived_metrics_allowed.permits and approved
+
+    @property
+    def derived_output_permitted(self) -> bool:
+        """Whether anything computed from this source may appear in a published artifact."""
+        return self.derived_metrics_allowed.permits
+
+    def publication_refusal(self) -> str | None:
+        """Why this source's data or anything derived from it may not be published."""
+        if not self._approval_settled:
+            return "required approval has not been granted"
+        if not self.derived_output_permitted:
+            return (
+                f"derived metrics are not explicitly allowed "
+                f"({self.derived_metrics_allowed.value}); nothing computed from this "
+                "source may enter a published artifact"
+            )
+        return None
 
     @property
     def commercial_production_permitted(self) -> bool:

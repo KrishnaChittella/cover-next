@@ -33,7 +33,7 @@ from metaspike.domain.source_policy import (
     StageClearance,
 )
 from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
-from metaspike.sources.base import SourceError
+from metaspike.sources.base import SourceError, SourceMode
 from metaspike.sources.http import LimitedHttpClient, build_http_client
 from metaspike.sources.http import RetryConfig as RetryConfig
 from metaspike.sources.limiter import Clock, RateLimiter
@@ -161,6 +161,10 @@ class WikimediaPageviewsAdapter:
     @property
     def source(self) -> str:
         return SOURCE_ID
+
+    @property
+    def mode(self) -> SourceMode:
+        return SourceMode.FETCH_HISTORY
 
     @property
     def signals(self) -> tuple[SignalSpec, ...]:

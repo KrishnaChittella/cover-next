@@ -89,5 +89,25 @@ PAGEVIEWS = MetricDefinition(
 )
 
 
+CONCURRENT_PLAYERS = MetricDefinition(
+    metric_id="concurrent_players",
+    display_name="Concurrent players",
+    unit="players",
+    description=(
+        "Players in the game at the instant it was sampled. A level sampled over time: "
+        "never a count of distinct players, and never a daily total."
+    ),
+    role=MetricRole.DEMAND,
+    aggregation=Aggregation.MEAN,
+    granularities=(Granularity.FIFTEEN_MINUTES, Granularity.HOURLY, Granularity.DAILY),
+)
+
+
 def default_metrics() -> MetricRegistry:
+    """The metrics of the published pipeline. Sampled metrics are deliberately absent."""
     return MetricRegistry((PAGEVIEWS,))
+
+
+def sampled_metrics() -> MetricRegistry:
+    """The metrics of SAMPLE_NOW sources, which no published artifact may use yet."""
+    return MetricRegistry((CONCURRENT_PLAYERS,))

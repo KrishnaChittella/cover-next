@@ -53,5 +53,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-m 'not live'"
 markers = [
-    "live: hits the real Wikimedia API; run explicitly with `uv run pytest -m live`",
+    "live: hits a real source API; run explicitly with `uv run pytest -m live`",
 ]

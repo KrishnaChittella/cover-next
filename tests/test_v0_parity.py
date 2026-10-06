@@ -27,7 +27,7 @@ from metaspike.domain.timeseries import Granularity, TimeWindow
 from metaspike.pipeline.collection import window_ending
 from metaspike.pipeline.run import RunResult, run_pipeline
 from metaspike.publishing.validation import validate_published
-from metaspike.sources.base import SourceError
+from metaspike.sources.base import SourceError, SourceMode
 from metaspike.sources.registry import SourceRegistry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, WikimediaPageviewsAdapter
@@ -54,6 +54,7 @@ class FakePlayersAdapter:
     """A second, intraday source. It exists only to prove v0 ignores other signals."""
 
     source = PLAYERS_SOURCE
+    mode = SourceMode.FETCH_HISTORY
     signals = (HOURLY_PLAYERS,)
     description = "Test-only hourly player counts."
 

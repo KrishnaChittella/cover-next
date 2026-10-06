@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from metaspike.catalogue.seed import load_seed_catalogue
+from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus
 from metaspike.domain.source_records import ProductType
 from metaspike.pipeline.collection import latest_complete_day, window_ending
@@ -19,6 +20,7 @@ from metaspike.publishing.validation import validate_published
 from metaspike.sources.catalogue_sources import build_igdb, build_steam, register_catalogue_sources
 from metaspike.sources.limiter import FileQuotaLedger, LimiterPool
 from metaspike.sources.registry import SourceRegistry, default_registry
+from metaspike.sources.sampling_sources import build_steam_players, sampling_registry
 from metaspike.sources.steam_catalogue import SteamAppKind
 from metaspike.sources.wikimedia import build_client
 
@@ -68,3 +70,15 @@ def test_live_steam_catalogue_page(tmp_path: Path) -> None:
     assert page.apps_returned == 5 and len(page.records) == 5
     assert page.observed_app_fields >= {"appid", "name"}
     assert page.has_more is True and page.next_after_appid is not None
+
+
+@pytest.mark.live
+def test_live_steam_current_players_sample(tmp_path: Path) -> None:
+    """One concurrent-player call for one eligible app, on the public host."""
+    with build_client() as client:
+        pool = LimiterPool(ledger=FileQuotaLedger(tmp_path / "quota"))
+        adapter = build_steam_players(client, pool)
+        sampling_registry(adapter)
+        reading = adapter.sample("730")
+    assert reading.status is SampleStatus.OBSERVED
+    assert reading.value is not None and reading.value >= 0

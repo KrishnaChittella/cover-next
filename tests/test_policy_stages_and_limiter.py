@@ -136,10 +136,14 @@ def test_reviewed_policy_values_are_recorded_exactly() -> None:
 
 def test_the_permission_checked_depends_on_what_the_source_is_used_for() -> None:
     development = DeploymentStage.PRIVATE_DEVELOPMENT
-    # IGDB does not address derived metrics, so it may supply metadata but not signals.
+    # IGDB does not address derived metrics. That is no obstacle to metadata, and none to
+    # private study, but nothing derived from it could be part of a public configuration.
     assert IGDB_POLICY.registration_refusal(SourcePurpose.CATALOGUE_METADATA, development) is None
-    refusal = IGDB_POLICY.registration_refusal(SourcePurpose.DEMAND_SIGNALS, development)
-    assert refusal is not None and "does not permit collection" in refusal
+    assert IGDB_POLICY.registration_refusal(SourcePurpose.DEMAND_SIGNALS, development) is None
+    refusal = IGDB_POLICY.registration_refusal(
+        SourcePurpose.DEMAND_SIGNALS, DeploymentStage.PUBLIC_LAUNCH
+    )
+    assert refusal is not None and "derived metrics are not explicitly allowed" in refusal
 
     no_storage = STEAM_CATALOGUE_POLICY.model_copy(
         update={"historical_storage_allowed": Permission.UNKNOWN}

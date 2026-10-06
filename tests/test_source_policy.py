@@ -3,7 +3,13 @@ from typing import Any
 import httpx
 import pytest
 
-from metaspike.domain.source_policy import ApprovalStatus, Permission, Requirement, SourcePolicy
+from metaspike.domain.source_policy import (
+    ApprovalStatus,
+    DeploymentStage,
+    Permission,
+    Requirement,
+    SourcePolicy,
+)
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
 from metaspike.sources.wikimedia import (
     SOURCE_ID,
@@ -40,18 +46,29 @@ def test_policy_must_belong_to_the_adapter(adapter: WikimediaPageviewsAdapter) -
 @pytest.mark.parametrize(
     "changes",
     [
-        {"derived_metrics_allowed": Permission.UNKNOWN},
-        {"derived_metrics_allowed": Permission.RESTRICTED},
         {"derived_metrics_allowed": Permission.PROHIBITED},
         {"approval_required": Requirement.REQUIRED, "approval_status": ApprovalStatus.PENDING},
         {"approval_required": Requirement.REQUIRED, "approval_status": ApprovalStatus.DENIED},
     ],
 )
-def test_uncertain_or_unapproved_sources_are_refused(
+def test_prohibited_or_unapproved_sources_are_refused(
     adapter: WikimediaPageviewsAdapter, changes: dict[str, Any]
 ) -> None:
     with pytest.raises(SourcePolicyError, match="does not permit collection"):
         SourceRegistry().register(adapter, policy(**changes))
+
+
+@pytest.mark.parametrize("uncertain", [Permission.UNKNOWN, Permission.RESTRICTED])
+def test_an_uncertain_derived_metrics_permission_is_private_only(
+    adapter: WikimediaPageviewsAdapter, uncertain: Permission
+) -> None:
+    unclear = policy(derived_metrics_allowed=uncertain)
+    private = SourceRegistry()
+    private.register(adapter, unclear)  # may be built against and studied privately
+    assert private.publication_refusals() != {}  # and published nowhere
+    for stage in (DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION):
+        with pytest.raises(SourcePolicyError, match="not explicitly allowed"):
+            SourceRegistry(stage=stage).register(adapter, unclear)
 
 
 def test_a_source_cannot_be_registered_twice(adapter: WikimediaPageviewsAdapter) -> None:
