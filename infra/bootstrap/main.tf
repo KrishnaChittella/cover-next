@@ -42,13 +42,43 @@ locals {
   # Project-level roles the deploy identity needs to manage the resources in infra/prod.
   # There is no Owner, no Editor, and no role that can read a secret's value. Acting as
   # a service account is NOT here: it is granted per service account, further down.
+  #
+  # BigQuery and Cloud Storage are not here either. Their predefined admin roles carry
+  # the data itself (rows, objects, query jobs), which deploying never needs, so each
+  # is replaced by a custom role below that holds configuration and IAM only.
   deploy_roles = [
-    "roles/bigquery.admin",
     "roles/cloudscheduler.admin",
     "roles/logging.configWriter",
     "roles/monitoring.editor",
     "roles/run.admin",
-    "roles/storage.admin",
+  ]
+
+  # What the pinned provider calls for a dataset, a table and a dataset policy: read,
+  # create, update, and the access list. No row can be read or written with these, and
+  # no job can be submitted. Nothing can be deleted: tables are deletion-protected and
+  # removing a dataset or a table is the owner's decision, made with the owner's login.
+  # rowAccessPolicies.list is a read the provider makes while planning a schema change.
+  deploy_bigquery_permissions = [
+    "bigquery.datasets.create",
+    "bigquery.datasets.get",
+    "bigquery.datasets.getIamPolicy",
+    "bigquery.datasets.setIamPolicy",
+    "bigquery.datasets.update",
+    "bigquery.rowAccessPolicies.list",
+    "bigquery.tables.create",
+    "bigquery.tables.get",
+    "bigquery.tables.update",
+  ]
+
+  # What the pinned provider calls for a bucket and its IAM members. No object can be
+  # read, listed, written or deleted with these, and no bucket can be deleted. The
+  # Terraform state is reached through its own grant on the state bucket alone.
+  deploy_storage_permissions = [
+    "storage.buckets.create",
+    "storage.buckets.get",
+    "storage.buckets.getIamPolicy",
+    "storage.buckets.setIamPolicy",
+    "storage.buckets.update",
   ]
 }
 
@@ -133,6 +163,44 @@ resource "google_project_iam_member" "deploy" {
 
   # Project-level IAM is read and written through an API this root itself enables.
   depends_on = [google_project_service.enabled]
+}
+
+# Manage datasets, tables and buckets as infrastructure, without the data in them.
+#
+# Security property to keep in view, as with the secret containers below: these roles
+# can set IAM on a dataset or a bucket, so the identity could grant itself the data
+# access it does not hold. That is a recorded IAM change, not a quiet read, and the
+# control on it remains the federation condition.
+resource "google_project_iam_custom_role" "deploy_bigquery" {
+  project     = var.project_id
+  role_id     = "msDeployBigQueryConfig"
+  title       = "MetaSpike deploy: BigQuery configuration"
+  description = "Datasets, tables and dataset access as infrastructure. No rows, no jobs, no deletion."
+  permissions = local.deploy_bigquery_permissions
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_project_iam_member" "deploy_bigquery" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.deploy_bigquery.id
+  member  = "serviceAccount:${google_service_account.deploy.email}"
+}
+
+resource "google_project_iam_custom_role" "deploy_storage" {
+  project     = var.project_id
+  role_id     = "msDeployBucketConfig"
+  title       = "MetaSpike deploy: bucket configuration"
+  description = "Bucket settings and bucket IAM as infrastructure. No objects, no bucket deletion."
+  permissions = local.deploy_storage_permissions
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_project_iam_member" "deploy_storage" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.deploy_storage.id
+  member  = "serviceAccount:${google_service_account.deploy.email}"
 }
 
 # Manage secret CONTAINERS and who may read them, without being able to read a value.

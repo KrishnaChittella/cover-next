@@ -287,12 +287,10 @@ def test_the_deploy_identity_may_act_only_as_the_named_runtime_identities() -> N
     assert deploy_roles
     project_roles = set(re.findall(r'"(roles/[A-Za-z.]+)"', deploy_roles.group(1)))
     assert project_roles == {
-        "roles/bigquery.admin",
         "roles/cloudscheduler.admin",
         "roles/logging.configWriter",
         "roles/monitoring.editor",
         "roles/run.admin",
-        "roles/storage.admin",
     }
     # No project-level "act as any service account", for ms-deploy or anyone.
     assert "roles/iam.serviceAccountUser" not in deploy_roles.group(1)
@@ -318,6 +316,73 @@ def test_the_deploy_identity_may_act_only_as_the_named_runtime_identities() -> N
     assert used == IDENTITIES
     assert 'service_account_email = local.sa["ms-scheduler"]' in prod
     assert "ms-deploy" not in prod  # nothing in production runs as the deployer
+
+
+def test_the_deploy_identity_manages_data_stores_without_holding_their_data() -> None:
+    bootstrap = code(read(BOOTSTRAP / "main.tf"))
+    # The predefined admin roles carry rows, objects and query jobs. Neither is bound,
+    # to ms-deploy or to anything else, anywhere in either root.
+    for root in (BOOTSTRAP, PROD):
+        for role in ("roles/bigquery.admin", "roles/storage.admin"):
+            assert role not in code(terraform(root)), (root.name, role)
+
+    def permissions(name: str) -> set[str]:
+        block = re.search(rf"{name} = \[(.*?)\]", bootstrap, re.S)
+        assert block, name
+        return set(re.findall(r'"([a-zA-Z]+\.[A-Za-z.]+)"', block.group(1)))
+
+    bigquery = permissions("deploy_bigquery_permissions")
+    assert bigquery == {
+        "bigquery.datasets.create",
+        "bigquery.datasets.get",
+        "bigquery.datasets.getIamPolicy",
+        "bigquery.datasets.setIamPolicy",
+        "bigquery.datasets.update",
+        "bigquery.rowAccessPolicies.list",
+        "bigquery.tables.create",
+        "bigquery.tables.get",
+        "bigquery.tables.update",
+    }
+    storage = permissions("deploy_storage_permissions")
+    assert storage == {
+        "storage.buckets.create",
+        "storage.buckets.get",
+        "storage.buckets.getIamPolicy",
+        "storage.buckets.setIamPolicy",
+        "storage.buckets.update",
+    }
+    # No rows, no jobs, no objects, and nothing that deletes.
+    for permission in bigquery | storage:
+        assert not permission.endswith(("Data", ".delete", ".export")), permission
+        assert ".jobs." not in permission and ".objects." not in permission, permission
+    # Each list is one custom role, bound once, to the deploy identity.
+    for name, role_id, source in (
+        ("deploy_bigquery", "msDeployBigQueryConfig", "deploy_bigquery_permissions"),
+        ("deploy_storage", "msDeployBucketConfig", "deploy_storage_permissions"),
+    ):
+        custom = re.search(
+            rf'resource "google_project_iam_custom_role" "{name}" \{{(.*?)\n\}}', bootstrap, re.S
+        )
+        assert custom and f'role_id     = "{role_id}"' in custom.group(1)
+        assert f"permissions = local.{source}" in custom.group(1)
+        member = re.search(
+            rf'resource "google_project_iam_member" "{name}" \{{(.*?)\n\}}', bootstrap, re.S
+        )
+        assert member and f"google_project_iam_custom_role.{name}.id" in member.group(1)
+        assert "google_service_account.deploy.email" in member.group(1)
+        assert "for_each" not in member.group(1)
+    # Objects are reachable in the Terraform state bucket only.
+    assert bootstrap.count("roles/storage.object") == 1
+    state = re.search(
+        r'resource "google_storage_bucket_iam_member" "deploy_state" \{(.*?)\n\}', bootstrap, re.S
+    )
+    assert state and "var.state_bucket_name" in state.group(1)
+    assert 'role   = "roles/storage.objectUser"' in state.group(1)
+    # The limits are proven by `terraform test` in the bootstrap root, in CI.
+    assert (BOOTSTRAP / "tests" / "deploy_identity.tftest.hcl").is_file()
+    assert workflow("ci.yml").count("run: terraform test") == 2
+    # Recorded, not hidden: setting IAM on a dataset or a bucket is itself a privilege.
+    assert "grant itself the data" in read(BOOTSTRAP / "main.tf")
 
 
 def test_the_deploy_identity_can_manage_secrets_but_never_read_one() -> None:

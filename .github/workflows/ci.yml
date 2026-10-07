@@ -91,6 +91,10 @@ jobs:
       - name: Terraform tests (mocked provider, nothing planned for real)
         working-directory: infra/prod
         run: terraform test
+      # Offline in the same way. Proves the deploy identity holds no data role.
+      - name: Terraform tests, bootstrap (mocked provider)
+        working-directory: infra/bootstrap
+        run: terraform test
 
   image:
     runs-on: ubuntu-24.04

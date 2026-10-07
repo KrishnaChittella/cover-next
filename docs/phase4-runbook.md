@@ -405,6 +405,21 @@ owner, project editors, project viewers) are not in the policy and are removed o
 apply. `ms-deploy` manages tables through its project-level role and holds nothing at
 dataset level.
 
+### What the deploy identity may do to data stores
+
+`ms-deploy` holds two custom project roles instead of the predefined admin roles:
+`msDeployBigQueryConfig` (datasets, tables, dataset access) and `msDeployBucketConfig`
+(bucket settings, bucket IAM). With them it cannot read or write a row, submit a query
+job, or read, list, write or delete an object; its only object access is the Terraform
+state bucket. It also cannot delete a dataset, a table or a bucket, and it cannot drop
+a column (the provider does that with a query job). Those are the owner's decisions,
+made with the owner's login. Both roles live in `infra/bootstrap`, so changing either
+is an owner-run bootstrap apply: `ms-deploy` cannot grant itself a role.
+
+Two things remain true and are not hidden. The roles can set IAM on a dataset or a
+bucket, so the identity could grant itself data access; that is a recorded IAM change.
+And changing a table's or dataset's expiry is a configuration change that removes data.
+
 ### Running the permission check
 
 It runs as the job's own identity, by overriding one job execution's arguments. No
