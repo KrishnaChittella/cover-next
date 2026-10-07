@@ -54,7 +54,8 @@ files = ["src", "tests"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-m 'not live'"
+addopts = "-m 'not live and not slow'"
 markers = [
     "live: hits a real source API; run explicitly with `uv run pytest -m live`",
+    "slow: an offline proof that takes minutes; run explicitly with `uv run pytest -m slow`",
 ]
