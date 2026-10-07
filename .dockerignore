@@ -5,6 +5,11 @@
 !uv.lock
 !README.md
 !src/
+!warehouse/
+warehouse/.venv/
+warehouse/target/
+warehouse/logs/
+warehouse/dbt_packages/
 
 # Never, even if a rule above is loosened later.
 .env

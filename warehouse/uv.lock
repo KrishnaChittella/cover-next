@@ -910,6 +910,10 @@ source = { virtual = "." }
 dependencies = [
     { name = "dbt-bigquery" },
     { name = "dbt-core" },
+]
+
+[package.dev-dependencies]
+dev = [
     { name = "dbt-duckdb" },
 ]
 
@@ -917,8 +921,10 @@ dependencies = [
 requires-dist = [
     { name = "dbt-bigquery", specifier = ">=1.11,<1.13" },
     { name = "dbt-core", specifier = ">=1.11,<1.12" },
-    { name = "dbt-duckdb", specifier = ">=1.10,<1.12" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "dbt-duckdb", specifier = ">=1.10,<1.12" }]
 
 [[package]]
 name = "more-itertools"

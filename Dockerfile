@@ -1,8 +1,12 @@
 # MetaSpike application image. One image, several Cloud Run jobs, each with its own
 # command and identity. Private: it is never published and serves nothing.
 #
-# The image contains the application and its locked runtime dependencies. It contains
-# no credential, no .env, no local state and no test fixture: see .dockerignore.
+# The image contains the application and its locked runtime dependencies, and, beside
+# them in a separate environment, the locked dbt that the warehouse job runs. The two
+# environments are resolved and locked independently (uv.lock and warehouse/uv.lock)
+# and neither imports the other: `metaspike warehouse` starts /opt/dbt/bin/dbt as its
+# own process. The image contains no credential, no .env, no local state and no test
+# fixture: see .dockerignore.
 #
 # The base is the official image pinned by its multi-architecture index digest, so a
 # build never silently moves to a different base. The tag is kept for people; the
@@ -29,6 +33,11 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --locked --no-dev --no-editable
 
+# dbt, exactly as locked, in its own environment. Its development group (the offline
+# DuckDB adapter the tests use) is left out: production needs only dbt and BigQuery.
+COPY warehouse/pyproject.toml warehouse/uv.lock /dbt/
+RUN UV_PROJECT_ENVIRONMENT=/opt/dbt uv sync --project /dbt --locked --no-dev --no-install-project
+
 
 FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
 
@@ -52,6 +61,14 @@ RUN groupadd --system --gid 10001 metaspike \
     && useradd --system --uid 10001 --gid metaspike --no-create-home metaspike
 
 COPY --from=build --chown=root:root /app/.venv /app/.venv
+COPY --from=build --chown=root:root /opt/dbt /opt/dbt
+
+# The dbt project: models, macros, tests and the profile. Read-only, like the rest of
+# /app; dbt writes its working files under /tmp.
+COPY --chown=root:root warehouse/dbt_project.yml warehouse/profiles.yml warehouse/selectors.yml /app/warehouse/
+COPY --chown=root:root warehouse/macros /app/warehouse/macros
+COPY --chown=root:root warehouse/models /app/warehouse/models
+COPY --chown=root:root warehouse/tests /app/warehouse/tests
 
 USER 10001:10001
 WORKDIR /tmp

@@ -1,17 +1,26 @@
-# The dbt tool environment, kept apart from the application on purpose.
+# The dbt environment, kept apart from the application on purpose.
 #
 # dbt and its adapters pin versions of shared tooling that the application's own
-# development environment resolves differently, so the two are locked separately:
+# environment resolves differently, so the two are locked separately:
 #   uv run --project warehouse --locked dbt <command> --project-dir warehouse ...
-# Nothing here is a runtime dependency of the application image.
+#
+# The production image carries BOTH environments: the application's at /app/.venv and
+# this one, without its development group, at /opt/dbt. `metaspike warehouse` starts
+# /opt/dbt/bin/dbt as a separate process. Neither environment imports the other.
 [project]
 name = "metaspike-warehouse"
 version = "0.1.0"
 description = "dbt models for MetaSpike's warehouse: cleaning and aggregation only."
 requires-python = ">=3.12,<3.13"
+# What runs in production: dbt and the BigQuery adapter.
 dependencies = [
     "dbt-core>=1.11,<1.12",
     "dbt-bigquery>=1.11,<1.13",
+]
+
+[dependency-groups]
+# The offline engine the tests build against. Never in the image.
+dev = [
     "dbt-duckdb>=1.10,<1.12",
 ]
 
