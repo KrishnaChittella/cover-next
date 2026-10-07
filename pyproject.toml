@@ -14,11 +14,14 @@ metaspike = "metaspike.cli:main"
 
 [dependency-groups]
 dev = [
+    "duckdb>=1.4",
     "jsonschema>=4.23",
     "mypy>=1.13",
     "pytest>=8.3",
+    "pyyaml>=6",
     "ruff>=0.8",
     "types-jsonschema>=4.23",
+    "types-pyyaml>=6",
 ]
 
 [build-system]

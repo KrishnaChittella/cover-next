@@ -1,0 +1,16 @@
+version: 2
+
+# The append-only tables the loader fills. Terraform owns their shape; dbt only
+# reads them. Each requires a filter on its partition column, and every model that
+# reads one supplies it through ms_window_start().
+sources:
+  - name: ms_raw
+    schema: ms_raw
+    tables:
+      - name: sample_attempts
+      - name: period_observations
+      - name: source_records
+  - name: ms_ops
+    schema: ms_ops
+    tables:
+      - name: collection_runs

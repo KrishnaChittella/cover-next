@@ -1,0 +1,14 @@
+selectors:
+  - name: hourly
+    description: Sample slots, coverage and source health, with their tests.
+    definition:
+      method: tag
+      value: hourly
+  - name: daily
+    description: Everything, including period observations and source records.
+    definition:
+      union:
+        - method: tag
+          value: hourly
+        - method: tag
+          value: daily

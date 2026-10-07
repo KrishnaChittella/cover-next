@@ -1,0 +1,23 @@
+# No credential lives here. The production target uses the job's own identity
+# (application default credentials on Cloud Run); the offline target is a local file.
+metaspike_warehouse:
+  target: offline
+  outputs:
+    offline:
+      type: duckdb
+      path: "{{ env_var('MS_DBT_DUCKDB_PATH', 'target/offline.duckdb') }}"
+      schema: main
+      threads: 1
+    prod:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('MS_GCP_PROJECT', 'project-not-set') }}"
+      dataset: ms_staging
+      location: us-central1
+      threads: 4
+      priority: interactive
+      # Every query dbt sends is refused above this many bytes: 1 GiB. An hourly run
+      # reads megabytes; the limit is a guard against a model that lost its window.
+      maximum_bytes_billed: 1073741824
+      job_execution_timeout_seconds: 600
+      job_retries: 1

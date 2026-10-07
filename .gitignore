@@ -47,3 +47,12 @@ secrets/
 .idea/
 .vscode/
 *.swp
+
+# dbt build output (the project itself is in warehouse/)
+warehouse/target/
+warehouse/logs/
+warehouse/dbt_packages/
+warehouse/.venv/
+warehouse/.user.yml
+*.duckdb
+*.duckdb.wal

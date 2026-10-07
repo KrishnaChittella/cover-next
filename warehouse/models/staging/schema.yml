@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: stg_sample_attempts
+    description: One row per sampling attempt, with repeated loads removed.
+    columns:
+      - name: attempt_id
+        tests:
+          - not_null:
+              config: {where: "slot_start >= __window_start__"}
+          - unique:
+              config: {where: "slot_start >= __window_start__"}
+      - name: status
+        description: Never 'not_sampled'. A slot nobody attempted has no row.
+        tests:
+          - accepted_values:
+              arguments:
+                values: [observed, failed, refused, unavailable]
+              config: {where: "slot_start >= __window_start__"}
+      - name: granularity
+        tests:
+          - accepted_values:
+              arguments:
+                values: [15min, hourly, daily]
+              config: {where: "slot_start >= __window_start__"}
+
+  - name: stg_period_observations
+    description: One row per observed version of a period. Missing periods are not rows.
+    columns:
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [observed]
+              config: {where: "period_start >= __window_start__"}
+      - name: value
+        tests:
+          - not_null:
+              config: {where: "period_start >= __window_start__"}
+
+  - name: stg_source_records
+    description: One row per fetched version of a source-native catalogue record.
+    columns:
+      - name: content_hash
+        tests:
+          - not_null:
+              config: {where: "fetched_at >= __window_start__"}
+
+  - name: stg_collection_runs
+    description: One row per run and phase.
+    columns:
+      - name: run_id
+        tests:
+          - not_null:
+              config: {where: "started_at >= __window_start__"}

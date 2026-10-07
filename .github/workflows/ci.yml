@@ -42,8 +42,19 @@ jobs:
         run: uv run ruff check
       - name: Types
         run: uv run mypy
+      # Includes the dbt project, run offline against DuckDB in its own locked tool
+      # environment (warehouse/). MS_REQUIRE_DBT makes "dbt could not start" a
+      # failure here instead of a skip. No BigQuery target is ever used.
       - name: Tests (offline)
+        env:
+          MS_REQUIRE_DBT: "1"
         run: uv run pytest
+      - name: dbt project parses for both targets
+        run: |
+          for target in offline prod; do
+            uv run --project warehouse --locked dbt parse --target "$target" \
+              --project-dir warehouse --profiles-dir warehouse
+          done
       - name: Artifact schemas are current
         run: uv run metaspike export-schemas --check
       - name: Resolver safety gate (0 false merges)

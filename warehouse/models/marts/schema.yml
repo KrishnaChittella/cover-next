@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: resolved_sample_slots
+    description: >
+      What each sampled slot resolves to. Mirrors metaspike.domain.samples.resolve_slot.
+      A slot with no attempt has no row.
+    columns:
+      - name: state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [observed, unavailable, failed, refused]
+              config: {where: "slot_start >= __window_start__"}
+      - name: attempts
+        tests:
+          - not_null:
+              config: {where: "slot_start >= __window_start__"}
+
+  - name: sample_targets
+    description: Every target ever sampled, with its first and latest attempted slot.
+    columns:
+      - name: first_slot_start
+        tests: [not_null]
+      - name: last_slot_start
+        tests: [not_null]
+
+  - name: sample_slot_timeline
+    description: >
+      A view of recent slots including the ones nobody sampled. 'not_sampled' exists
+      only here, reconstructed on read.
+    columns:
+      - name: state
+        tests:
+          - accepted_values:
+              arguments:
+                values: [observed, unavailable, failed, refused, not_sampled]
+
+  - name: sample_coverage_daily
+    description: Per target and UTC day, how many expected slots ended in each state.
+    columns:
+      - name: expected_slots
+        tests:
+          - not_null:
+              config: {where: "day >= __window_start__"}
+
+  - name: source_health_daily
+    description: Per source and UTC day, how its attempts ended. Operational, not a signal.
+    columns:
+      - name: attempts
+        tests:
+          - not_null:
+              config: {where: "day >= __window_start__"}

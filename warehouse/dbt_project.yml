@@ -1,0 +1,39 @@
+# MetaSpike warehouse models.
+#
+# SQL here cleans, de-duplicates and aggregates. It computes NO feature and NO score:
+# those are produced by the one Python engine and nothing in this project may
+# reproduce them. The default target is the offline one, so a bare `dbt run` cannot
+# reach BigQuery.
+name: metaspike_warehouse
+version: "1.0.0"
+config-version: 2
+profile: metaspike_warehouse
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+flags:
+  send_anonymous_usage_stats: false
+
+vars:
+  # A full build reads raw history from here. Nothing was collected before it.
+  history_start: "2026-10-01 00:00:00"
+  # An incremental run recomputes this many whole UTC days before today, which is
+  # how a late-arriving batch is picked up.
+  lookback_days: 3
+  # Fixes "now" for a reproducible run (tests). Unset in production.
+  run_as_of: null
+
+models:
+  metaspike_warehouse:
+    staging:
+      +schema: ms_staging
+      +materialized: incremental
+      +on_schema_change: fail
+    marts:
+      +schema: ms_marts
+      +materialized: incremental
+      +on_schema_change: fail
