@@ -1,10 +1,14 @@
 # Phase 4 runbook: private cloud foundation
 
-**Nothing is collecting.** The foundation was applied in Part A2 and is inert: no job
-has ever run, the one scheduler trigger is paused, no secret has a value, and every
-bucket and table is empty. Part B added application code and a dbt project that run
-offline only. "No cloud resource exists" was true when Part A wrote this document and
-is no longer true; what is true is that no cloud resource is doing anything.
+**Nothing is collecting.** Part C1 is complete: every job has run once under
+supervision, one real Wikimedia collection and one warehouse run are retained as
+history, and the security gates are closed. The one scheduler trigger is still paused
+and has never fired, and no secret has a value. What C1 built and proved is recorded
+in [phase4-c1-implementation-report.md](phase4-c1-implementation-report.md); the plan
+for unattended collection, not yet started, is in
+[phase4-c2-plan.md](phase4-c2-plan.md). Statements below that describe an empty or
+never-run system were true when they were written and are kept as the record of each
+part.
 
 Nothing is public, at any stage of Phase 4. There is no public bucket, no endpoint
 without authentication, and no public MetaSpike deployment. Phase 4 is internal
@@ -483,6 +487,12 @@ gcloud run jobs execute ms-wikimedia --region us-central1 --project <PROJECT_ID>
 ## Hard gates before Part C (unattended collection)
 
 Every one of these must be closed, in writing, before the scheduler is enabled.
+
+Status after Part C1: gates 1 to 5 and 8 to 11 are closed, with the evidence in
+[phase4-c1-implementation-report.md](phase4-c1-implementation-report.md). Gates 6
+(Steam and IGDB policy), 7 (cost re-measurement), 12 (broad discovery), 13 (raw
+deletion needs a rebuild) and 14 (Wikimedia steady-state window) remain open and are
+carried by [phase4-c2-plan.md](phase4-c2-plan.md).
 
 1. **Live prefix-IAM smoke test.** Once the application has a safe runtime smoke
    command, run it as an actual runtime service account: one harmless write inside an

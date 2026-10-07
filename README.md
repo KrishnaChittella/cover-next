@@ -178,6 +178,12 @@ See `docs/phase4-runbook.md` for the bootstrap steps, secret loading, the one-ac
 stop, the layout, the job commands and the hard gates that must clear before
 unattended collection.
 
+Part C1 is complete and its security closeout passed. Each job has run once under
+supervision against the real services, and one real Wikimedia collection (14 articles,
+90 days, 1,260 observations) is retained as the first source history. Nothing runs on
+its own: the scheduler is paused and no secret has a value. See
+`docs/phase4-c1-implementation-report.md` for what was built and proven.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:
@@ -575,6 +581,6 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 4 Part C (policy-gated collectors), once the hard gates in
-`docs/phase4-runbook.md` are closed, then Part D (baseline state, parity and soak).
+Phase 4 Part C2 (safe, low-cost, unattended collection), planned in
+`docs/phase4-c2-plan.md` and not started, then Part D (baseline state, parity and soak).
 Nothing is public before the single production release.
