@@ -19,7 +19,7 @@ with attempts as (
 
     select *
     from {{ ref('stg_sample_attempts') }}
-    where slot_start >= {{ ms_window_start(is_incremental()) }}
+    where slot_start >= {{ ms_window_start(is_incremental(), ['samples']) }}
 
 ),
 

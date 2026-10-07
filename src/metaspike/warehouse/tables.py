@@ -21,7 +21,7 @@ import re
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Protocol
 
@@ -107,7 +107,16 @@ _SCALAR_CHECKS: dict[str, Callable[[Any], bool]] = {
     "BOOL": lambda v: isinstance(v, bool),
     "TIMESTAMP": lambda v: isinstance(v, str) and _parse_timestamp(v) is not None,
     "JSON": lambda v: isinstance(v, dict | list | str | int | float | bool),
+    "DATE": lambda v: isinstance(v, str) and _is_date(v),
 }
+
+
+def _is_date(text: str) -> bool:
+    try:
+        date.fromisoformat(text)
+    except ValueError:
+        return False
+    return len(text) == 10
 
 
 def _parse_timestamp(text: str) -> datetime | None:
@@ -479,4 +488,4 @@ def _scalar(kind: str, raw: Any) -> Any:
         return _EPOCH + timedelta(microseconds=int(raw))
     if kind == "JSON":
         return json.loads(raw)
-    return raw
+    return raw  # STRING, and DATE as its ISO text

@@ -17,12 +17,13 @@ select
     value,
     status,
     observed_at,
+    source_timestamp,
     collection_run_id,
     landed_object,
     content_sha256,
     loaded_at
 from {{ source('ms_raw', 'period_observations') }}
-where period_start >= {{ ms_window_start(is_incremental()) }}
+where period_start >= {{ ms_window_start(is_incremental(), ['periods']) }}
 qualify row_number() over (
     partition by source, metric, source_identifier, granularity, period_start, observed_at
     order by loaded_at, landed_object

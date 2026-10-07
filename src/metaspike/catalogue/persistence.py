@@ -552,3 +552,83 @@ def land_catalogue_events(
         writer.land(table, source, record.generation, record.generated_at, rows)
         landed += len(rows)
     return landed
+
+
+def entity_and_lifecycle_rows(
+    previous: CatalogueState | None, new: CatalogueState, generation: str
+) -> dict[Table, list[dict[str, Any]]]:
+    """Rows for `ms_catalogue.entity_events` and `ms_catalogue.lifecycle_events`.
+
+    These describe canonical entities, which are MetaSpike's own derived records and
+    not anything a source said, so they are landed under the catalogue's own prefix.
+    Each row states what changed in this generation, with the state before it.
+    """
+    at = timestamp(new.generated_at)
+    before = {} if previous is None else {g.canonical_game_id: g for g in previous.catalogue.games}
+    entities: list[dict[str, Any]] = []
+    for game in new.catalogue.games:
+        earlier = before.get(game.canonical_game_id)
+        if earlier != game:
+            entities.append(
+                {
+                    "canonical_game_id": game.canonical_game_id,
+                    "event_type": "created" if earlier is None else "updated",
+                    "occurred_at": at,
+                    "previous": None if earlier is None else earlier.model_dump(mode="json"),
+                    "entity": game.model_dump(mode="json"),
+                    "catalogue_generation": generation,
+                    "schema_version": "entity_events_v1",
+                }
+            )
+
+    histories = {} if previous is None else {h.canonical_game_id: h for h in previous.lifecycle}
+    lifecycle: list[dict[str, Any]] = []
+    for history in new.lifecycle:
+        earlier_history = histories.get(history.canonical_game_id)
+        known = 0 if earlier_history is None else len(earlier_history.records)
+        for position in range(known, len(history.records)):
+            record = history.records[position]
+            lifecycle.append(
+                {
+                    "canonical_game_id": history.canonical_game_id,
+                    "event_type": "state_recorded",
+                    "occurred_at": at,
+                    "previous_state": (
+                        None if position == 0 else history.records[position - 1].state.value
+                    ),
+                    "new_state": record.state.value,
+                    "valid_from": record.valid_from.isoformat(),
+                    "rule_id": record.rule_id,
+                    "rule_version": record.rule_version,
+                    "detail": record.model_dump(mode="json"),
+                    "catalogue_generation": generation,
+                    "schema_version": "lifecycle_events_v1",
+                }
+            )
+        pending = (history.pending_state, history.pending_since)
+        earlier_pending = (
+            (None, None)
+            if earlier_history is None
+            else (earlier_history.pending_state, earlier_history.pending_since)
+        )
+        if pending != earlier_pending:
+            current = history.current
+            lifecycle.append(
+                {
+                    "canonical_game_id": history.canonical_game_id,
+                    "event_type": "pending_changed",
+                    "occurred_at": at,
+                    "previous_state": None if current is None else current.state.value,
+                    "new_state": None if pending[0] is None else pending[0].value,
+                    "valid_from": None if pending[1] is None else pending[1].isoformat(),
+                    "rule_id": None,
+                    "rule_version": None,
+                    "detail": {
+                        "pending_state": None if pending[0] is None else pending[0].value,
+                        "pending_since": None if pending[1] is None else pending[1].isoformat(),
+                    },
+                    "catalogue_generation": generation,
+                    "schema_version": "lifecycle_events_v1",
+                }
+            )
+    return {Table.ENTITY_EVENTS: entities, Table.LIFECYCLE_EVENTS: lifecycle}

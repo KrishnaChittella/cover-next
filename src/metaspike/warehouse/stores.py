@@ -7,7 +7,8 @@ functions the local stores use (`resolve_slot`, `build_time_series`), so the two
 implementations cannot drift apart on semantics; the warehouse only returns rows.
 
     SampleStore        ms_raw.sample_attempts      keyed by source-native id;
-                                                   point-in-time by received_at
+                                                   point-in-time by received_at;
+                                                   ids from ms_raw.sample_native_ids
     ObservationStore   ms_raw.period_observations  one row per observed period version;
                                                    point-in-time by observed_at
     source records     ms_raw.source_records       one row per content version;
@@ -52,11 +53,11 @@ from metaspike.warehouse.landing import (
     source_record_from_row,
     source_record_row,
 )
+from metaspike.warehouse.loader import INDEX_HISTORY_START
 from metaspike.warehouse.tables import TableRef, Warehouse
 
-# How far around a source-record read the partition range reaches. Records are read
-# by key across their whole history, which has no natural window.
-_ALL_TIME_START = datetime.fromisoformat("2020-01-01T00:00:00+00:00")
+# Records are read by key across their whole history, which has no natural window.
+_ALL_TIME_START = INDEX_HISTORY_START
 
 
 def _ref(table: Table) -> TableRef:
@@ -183,15 +184,18 @@ class WarehouseSampleStore:
             for slot_start in window.period_starts(key.granularity)
         )
 
-    def native_ids(self, key: SignalKey, window: TimeWindow | None = None) -> tuple[str, ...]:
-        """Ids with a stored attempt. The warehouse needs a bounded range to look in."""
-        end = self._now()
-        bounds = TimeWindow(start=end - timedelta(days=35), end=end) if window is None else window
+    def native_ids(self, key: SignalKey) -> tuple[str, ...]:
+        """Every id that has ever had a stored attempt, across all retained history.
+
+        Answered from the loader's native-id index, which holds one row per target,
+        so the answer covers all of history at a cost bounded by the target count.
+        """
+        index = TABLES[Table.SAMPLE_NATIVE_IDS]
         rows = self._warehouse.rows(
-            _ref(Table.SAMPLE_ATTEMPTS),
-            "slot_start",
-            bounds.start,
-            bounds.end,
+            _ref(Table.SAMPLE_NATIVE_IDS),
+            index.partition,
+            INDEX_HISTORY_START,
+            self._now(),
             {"source": key.source, "metric": key.metric, "granularity": key.granularity.value},
         )
         names = {str(row["source_native_id"]) for row in rows}
@@ -354,6 +358,7 @@ def _observation(canonical: str, key: SignalKey, row: dict[str, Any]) -> Observa
         value=row["value"],
         status=ObservationStatus(row["status"]),
         observed_at=row["observed_at"],
+        source_timestamp=row.get("source_timestamp"),
         freshness=Freshness(
             period_end=period_end,
             lag_hours=round((row["observed_at"] - period_end).total_seconds() / 3600, 2),

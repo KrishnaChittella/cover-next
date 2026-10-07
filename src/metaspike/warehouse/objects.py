@@ -69,6 +69,10 @@ class ObjectStore(Protocol):
         """Every object name that starts with `prefix`, sorted. Raises AccessDenied."""
         ...
 
+    def delete(self, name: str) -> None:
+        """Remove one object. Used only for our own scratch objects, never landed data."""
+        ...
+
 
 @dataclass
 class _Bucket:
@@ -151,6 +155,14 @@ class MemoryObjectStore:
             raise AccessDenied("this identity may not list the bucket")
         return tuple(sorted(name for name in self._bucket.objects if name.startswith(prefix)))
 
+    def delete(self, name: str) -> None:
+        self._may_write(name)
+        if not self._can_overwrite:
+            raise AccessDenied(f"this identity may not delete {name}")
+        if name not in self._bucket.objects:
+            raise ObjectNotFound(name)
+        del self._bucket.objects[name]
+
     def _may_write(self, name: str) -> None:
         if not name or name.startswith("/") or ".." in name.split("/"):
             raise ValueError(f"unsafe object name: {name!r}")
@@ -212,6 +224,15 @@ class GcsObjectStore:
             page = body.get("nextPageToken")
             if page is None:
                 return tuple(sorted(names))
+
+    def delete(self, name: str) -> None:
+        response = self._client.delete(
+            f"{_GCS}/storage/v1/b/{self._bucket}/o/{urllib.parse.quote(name, safe='')}",
+            headers=self._headers(),
+        )
+        if response.status_code == 404:
+            raise ObjectNotFound(name)
+        self._check(response, name)
 
     def _upload(self, name: str, data: bytes, content_type: str, if_generation: int) -> int:
         response = self._client.post(

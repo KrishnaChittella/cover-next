@@ -16,7 +16,7 @@ select
     content_sha256,
     loaded_at
 from {{ source('ms_raw', 'source_records') }}
-where fetched_at >= {{ ms_window_start(is_incremental()) }}
+where fetched_at >= {{ ms_window_start(is_incremental(), ['records']) }}
 qualify row_number() over (
     partition by source, source_id, content_hash, fetched_at
     order by loaded_at, landed_object

@@ -29,7 +29,7 @@ import yaml
 from metaspike.domain.samples import SampleAttempt, SampleStatus, SlotState
 from metaspike.domain.signals import SourceErrorCode
 from metaspike.domain.timeseries import TimeWindow
-from metaspike.warehouse.landing import TABLES, encode_rows, sample_attempt_row
+from metaspike.warehouse.landing import TABLES, Table, encode_rows, sample_attempt_row, timestamp
 from metaspike.warehouse.stores import WarehouseSampleStore
 from metaspike.warehouse.tables import TableRef
 from tests.test_sampling import KEY, SLOT, SOURCE, attempt, minutes
@@ -50,6 +50,7 @@ _DUCKDB_TYPES = {
     "TIMESTAMP": "TIMESTAMP",
     "JSON": "JSON",
     "BOOL": "BOOLEAN",
+    "DATE": "DATE",
 }
 
 
@@ -136,8 +137,19 @@ def query(path: Path, sql: str) -> list[tuple[Any, ...]]:
         connection.close()
 
 
-def build(path: Path, *extra: str, as_of: datetime = AS_OF, selector: str = "hourly") -> str:
-    variables = json.dumps({"run_as_of": f"{naive(as_of):%Y-%m-%d %H:%M:%S}"})
+def build(
+    path: Path,
+    *extra: str,
+    as_of: datetime = AS_OF,
+    selector: str = "hourly",
+    rebuild_from: dict[str, str] | None = None,
+) -> str:
+    variables = json.dumps(
+        {
+            "run_as_of": f"{naive(as_of):%Y-%m-%d %H:%M:%S}",
+            **{f"rebuild_from_{group}": day for group, day in (rebuild_from or {}).items()},
+        }
+    )
     return _dbt(
         "build", "--target", "offline", "--selector", selector, "--vars", variables, *extra,
         database=path,
@@ -203,12 +215,83 @@ def loaded_world(attempts: Sequence[SampleAttempt], batches: int = 7) -> World:
     return w
 
 
+# Who the dispatcher intended to sample, slot by slot (see `expectations`).
+NEVER_ATTEMPTED = "5000"  # scheduled throughout, and nobody ever sampled it
+DROPPED = "1007"  # scheduled for the first half only, then no longer eligible
+UNSCHEDULED = "1014"  # sampled, but never in the dispatcher's plan
+SLOTS = 40
+Plan = dict[str, list[datetime]]
+Built = tuple[World, Path, Plan]
+
+
+def expectations(apps: Sequence[str]) -> Plan:
+    """The slots each target was expected in. Eligibility changes are point-in-time."""
+    plan = {app: [D0 + i * SLOT.step for i in range(SLOTS)] for app in apps}
+    plan[NEVER_ATTEMPTED] = [D0 + i * SLOT.step for i in range(SLOTS)]
+    plan[DROPPED] = plan[DROPPED][: SLOTS // 2]
+    del plan[UNSCHEDULED]
+    return plan
+
+
+def ledger_row(source: str, metric: str, granularity: str, mode: str, app: str, slot: datetime,
+               version: str = "g1") -> dict[str, Any]:  # fmt: skip
+    return {
+        "source": source,
+        "metric": metric,
+        "granularity": granularity,
+        "mode": mode,
+        "source_native_id": app,
+        "slot_start": timestamp(slot),
+        "schedule_version": version,
+        "dispatch_run_id": f"tick-{slot:%Y%m%dT%H%MZ}",
+        "recorded_at": timestamp(slot),
+    }
+
+
+def land_expectations(w: World, plan: Plan) -> None:
+    by_slot: dict[datetime, list[str]] = {}
+    for app, slots in plan.items():
+        for slot in slots:
+            by_slot.setdefault(slot, []).append(app)
+    for slot, apps in sorted(by_slot.items()):
+        w.writer.land_internal(
+            Table.EXPECTED_TARGETS,
+            "dispatch",
+            f"tick-{slot:%Y%m%dT%H%MZ}",
+            slot,
+            [
+                ledger_row(SOURCE, "concurrent_players", SLOT.value, "sample_now", app, slot)
+                for app in sorted(apps)
+            ],
+        )
+
+
 @pytest.fixture(scope="module")
-def built(
-    dbt_ready: None, tmp_path_factory: pytest.TempPathFactory
-) -> Iterator[tuple[World, Path]]:
+def built(dbt_ready: None, tmp_path_factory: pytest.TempPathFactory) -> Iterator[Built]:
     attempts = generated_attempts()
     w = loaded_world(attempts)
+    plan = expectations(sorted({a.source_native_id for a in attempts}))
+    land_expectations(w, plan)
+    # A period source is fetched, not sampled: its intent is recorded and never
+    # becomes a sampling slot.
+    day = datetime(2026, 10, 7, tzinfo=UTC)
+    w.writer.land_internal(
+        Table.EXPECTED_TARGETS,
+        "dispatch",
+        "tick-daily",
+        D0,
+        [
+            ledger_row(
+                "wikimedia_pageviews",
+                "pageviews",
+                "daily",
+                "fetch_history",
+                "en.wikipedia.org/Minecraft",
+                day,
+            )
+        ],
+    )
+    w.load_everything("load-ledger")
     # One batch loaded a second time, as a failed guard would: staging must absorb it.
     again = [
         {**row, "loaded_at": "2026-10-09T05:00:00.000000Z", "landed_object": "loaded/twice"}
@@ -221,7 +304,7 @@ def built(
     path = tmp_path_factory.mktemp("dbt") / "warehouse.duckdb"
     copy_to_duckdb(w, path)
     build(path)
-    yield w, path
+    yield w, path, plan
 
 
 # --- the project as written ----------------------------------------------------------------
@@ -239,8 +322,8 @@ def test_the_project_parses_for_the_offline_and_the_bigquery_target(
             "stg_period_observations",
             "stg_source_records",
             "stg_collection_runs",
+            "stg_expected_targets",
             "resolved_sample_slots",
-            "sample_targets",
             "sample_slot_timeline",
             "sample_coverage_daily",
             "source_health_daily",
@@ -310,8 +393,8 @@ def test_no_feature_and_no_score_is_computed_in_sql() -> None:
 # --- parity with Python ------------------------------------------------------------------
 
 
-def test_sql_slot_resolution_is_identical_to_python_resolve_slot(built: tuple[World, Path]) -> None:
-    w, path = built
+def test_sql_slot_resolution_is_identical_to_python_resolve_slot(built: Built) -> None:
+    w, path, _ = built
     store = WarehouseSampleStore(w.writer, w.warehouse, w.policy_for, now=w.now)
     span = TimeWindow(start=D0, end=D0 + 39 * SLOT.step)
     expected: dict[tuple[str, datetime], tuple[Any, ...]] = {}
@@ -345,45 +428,78 @@ def test_sql_slot_resolution_is_identical_to_python_resolve_slot(built: tuple[Wo
     assert any(v[5] > 0 for v in expected.values())  # duplicate successes
 
 
-def test_the_timeline_view_reconstructs_the_slots_nobody_sampled(
-    built: tuple[World, Path],
+def test_expected_slots_come_from_the_ledger_and_are_joined_to_what_happened(
+    built: Built,
 ) -> None:
-    w, path = built
+    w, path, plan = built
     store = WarehouseSampleStore(w.writer, w.warehouse, w.policy_for, now=w.now)
-    latest = max(row["slot_start"] for row in w.warehouse.all_rows(ATTEMPTS))
+    # What Python says each EXPECTED slot is, from the attempts alone.
     expected = {}
-    for app in store.native_ids(KEY):
-        first = min(
-            r["slot_start"] for r in w.warehouse.all_rows(ATTEMPTS) if r["source_native_id"] == app
-        )
-        for slot in store.read(KEY, app, TimeWindow(start=first, end=latest), AS_OF):
-            expected[(app, naive(slot.key.slot_start))] = (slot.state.value, slot.value)
-    found = {
-        (row[0], row[1]): (row[2], row[3])
-        for row in query(
-            path,
-            "select source_native_id, slot_start, state, value from ms_marts.sample_slot_timeline",
-        )
-    }
-    assert found == expected
-    assert sum(1 for state, _ in expected.values() if state == "not_sampled") > 30
+    for app, slots in plan.items():
+        for slot in slots:
+            resolved = store.resolve(KEY, app, slot, AS_OF)
+            expected[(app, naive(slot))] = (resolved.state.value, resolved.value)
+    timeline = query(
+        path,
+        "select source_native_id, slot_start, was_expected, state, value "
+        "from ms_marts.sample_slot_timeline",
+    )
+    found = {(row[0], row[1]): (row[3], row[4]) for row in timeline if row[2]}
+    assert found == expected and len(expected) > 400
+
+    states = {key: state for key, (state, _) in found.items()}
+    # An eligible target that nobody attempted: every one of its slots is NOT_SAMPLED.
+    never = [state for (app, _), state in states.items() if app == NEVER_ATTEMPTED]
+    assert never == ["not_sampled"] * SLOTS
+    assert NEVER_ATTEMPTED not in store.native_ids(KEY)  # it has no attempt at all
+    # A successful attempt is OBSERVED; an attempt with no usable answer keeps its state.
+    assert set(states.values()) == {"observed", "unavailable", "failed", "refused", "not_sampled"}
     # Missing is never zero: an unsampled slot has no value at all.
     assert all(value is None for state, value in found.values() if state != "observed")
+
+    # A target that stopped being eligible has no expected slot afterwards, and the
+    # slots it was expected in before the change are still there.
+    dropped = sorted(slot for (app, slot) in states if app == DROPPED)
+    assert len(dropped) == SLOTS // 2
+    assert dropped[-1] == naive(D0 + (SLOTS // 2 - 1) * SLOT.step)
+    # A target that was never scheduled has no expected slot. What was attempted for
+    # it is shown, marked as not expected, and is not counted as coverage.
+    unexpected = [row for row in timeline if not row[2]]
+    assert {row[0] for row in unexpected} == {UNSCHEDULED, DROPPED}
+    assert all(row[3] != "not_sampled" for row in unexpected)
+    assert not [row for row in timeline if row[0].startswith("en.wikipedia")]  # not a sampler
 
     coverage = query(
         path,
         "select source_native_id, sum(expected_slots), sum(observed_slots), "
-        "sum(not_sampled_slots) from ms_marts.sample_coverage_daily group by 1",
+        "sum(not_sampled_slots), sum(unexpected_attempt_slots) "
+        "from ms_marts.sample_coverage_daily group by 1",
     )
-    for app, slots, observed, unsampled in coverage:
-        states = Counter(state for (a, _), (state, _) in expected.items() if a == app)
+    assert {row[0] for row in coverage} == {*plan, UNSCHEDULED}
+    for app, slots, observed, unsampled, extra in coverage:
+        mine = Counter(state for (a, _), state in states.items() if a == app)
         assert (slots, observed, unsampled) == (
-            sum(states.values()), states["observed"], states["not_sampled"]
+            sum(mine.values()), mine["observed"], mine["not_sampled"]
         )  # fmt: skip
+        assert extra == len([row for row in unexpected if row[0] == app])
 
 
-def test_not_sampled_is_never_a_stored_row(built: tuple[World, Path]) -> None:
-    _, path = built
+def test_the_ledger_is_point_in_time_and_nothing_fake_is_inserted(built: Built) -> None:
+    w, path, plan = built
+    staged = query(
+        path,
+        "select source_native_id, slot_start, schedule_version, recorded_at "
+        "from ms_staging.stg_expected_targets where mode = 'sample_now'",
+    )
+    assert len(staged) == sum(len(slots) for slots in plan.values())
+    assert {row[2] for row in staged} == {"g1"}
+    # The intent for a slot was recorded at that slot, not afterwards.
+    assert all(row[3] == row[1] for row in staged)
+    assert "not_sampled" not in {row["status"] for row in w.warehouse.all_rows(ATTEMPTS)}
+
+
+def test_not_sampled_is_never_a_stored_row(built: Built) -> None:
+    _, path, _ = built
     tables = query(
         path,
         "select table_schema, table_name, table_type from information_schema.tables "
@@ -404,8 +520,8 @@ def test_not_sampled_is_never_a_stored_row(built: tuple[World, Path]) -> None:
             assert hits == [(0,)], f"{name}.{column}"
 
 
-def test_staging_absorbs_a_batch_that_was_loaded_twice(built: tuple[World, Path]) -> None:
-    _w, path = built
+def test_staging_absorbs_a_batch_that_was_loaded_twice(built: Built) -> None:
+    _, path, _ = built
     raw = query(path, "select count(*), count(distinct attempt_id) from ms_raw.sample_attempts")
     staged = query(
         path, "select count(*), count(distinct attempt_id) from ms_staging.stg_sample_attempts"
@@ -425,7 +541,7 @@ def snapshot(path: Path) -> dict[str, list[tuple[Any, ...]]]:
         for table in (
             "ms_staging.stg_sample_attempts",
             "ms_marts.resolved_sample_slots",
-            "ms_marts.sample_targets",
+            "ms_staging.stg_expected_targets",
             "ms_marts.sample_coverage_daily",
             "ms_marts.source_health_daily",
         )
@@ -476,15 +592,19 @@ def test_incremental_runs_are_repeatable_and_pick_up_late_batches_within_the_loo
         k: [r for r in rows if "0000-late" not in repr(r)] for k, rows in snapshot(path).items()
     }
     assert untouched["ms_marts.source_health_daily"] != first["ms_marts.source_health_daily"]
-    # Outside the lookback an incremental run does not see the row...
+    # Outside the lookback a plain incremental run does not see the row. The warehouse
+    # job never leaves it there: it passes the day the late data reaches back to, and
+    # the same incremental run rebuilds from that day, with no full refresh.
     count = "select count(*) from ms_marts.resolved_sample_slots where slot_start < '2026-10-03'"
     assert query(path, count) == [(0,)]
-    # ...and a full refresh, which reads all of history, does. The raw table had it all along.
-    build(path, "--full-refresh")
+    build(path, rebuild_from={"samples": "2026-10-02 00:00:00"})
     assert query(path, count) == [(1,)]
-    rebuilt = snapshot(path)
+    targeted = snapshot(path)
+    build(path, rebuild_from={"samples": "2026-10-02 00:00:00"})
+    assert snapshot(path) == targeted
+    # A full refresh, which reads all of history, arrives at exactly the same tables.
     build(path, "--full-refresh")
-    assert snapshot(path) == rebuilt
+    assert snapshot(path) == targeted
 
 
 def copy_raw_only(w: World, path: Path) -> None:

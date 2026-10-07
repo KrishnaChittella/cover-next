@@ -22,8 +22,9 @@ so it can be compared with the original before anything is replaced.
 import contextlib
 import hashlib
 from collections.abc import Callable, Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import AwareDatetime
 
@@ -56,6 +57,8 @@ LOADER_VERSION = "loader_v1"
 # of the same verified batch is a defect, not bad luck, and needs a person.
 MAX_LOAD_ATTEMPTS = 3
 RECEIPT_PREFIX = "warehouse/loads/"
+# Nothing was collected before this, so a read "across all history" starts here.
+INDEX_HISTORY_START = datetime(2020, 1, 1, tzinfo=UTC)
 
 
 class LoadInProgress(WarehouseError):
@@ -81,13 +84,17 @@ class LoadReceipt(FrozenModel):
     rows: int
     loaded_at: AwareDatetime
     load_run_id: str
+    # The earliest value of the table's partition column in the batch.
+    earliest: AwareDatetime | None = None
 
 
 class LoadedBatch(FrozenModel):
     data_object: str
+    table: Table
     outcome: BatchOutcome
     rows: int
     job_id: str
+    earliest: AwareDatetime | None = None
 
 
 class LoadReport(FrozenModel):
@@ -127,16 +134,23 @@ class Loader:
         *,
         now: Callable[[], datetime],
         run_id: str,
+        before_receipt: Callable[[BatchManifest, datetime], None] | None = None,
     ) -> None:
         self._landing = landing
         self._operations = operations
         self._warehouse = warehouse
         self._now = now
         self._run_id = run_id
+        # Called with a batch's earliest partition value once its rows are in the
+        # table and BEFORE its receipt is written. A caller that must act on what was
+        # loaded (see the late-arrival handling in the warehouse job) records that
+        # here, so a crash can never leave a receipt without the record.
+        self._before_receipt = before_receipt
 
     def load_batch(self, manifest: BatchManifest, target: TableRef | None = None) -> LoadedBatch:
         spec = TABLES[manifest.table]
-        table = TableRef(spec.dataset, spec.table.value) if target is None else target
+        original = TableRef(spec.dataset, spec.table.value)
+        table = original if target is None else target
         receipt = receipt_name(manifest, table)
         try:
             stored = LoadReceipt.model_validate_json(self._operations.get(receipt).data)
@@ -145,28 +159,38 @@ class Loader:
         else:
             return LoadedBatch(
                 data_object=manifest.data_object,
+                table=manifest.table,
                 outcome=BatchOutcome.ALREADY_LOADED,
                 rows=stored.rows,
                 job_id=stored.job_id,
+                earliest=stored.earliest,
             )
 
+        rows = decode_rows(read_batch(self._landing, manifest))  # verified against the manifest
+        earliest = min(datetime.fromisoformat(row[spec.partition]) for row in rows)
         for attempt in range(MAX_LOAD_ATTEMPTS):
             job_id = load_job_id(manifest, table, attempt)
             job = self._warehouse.job(job_id)
             outcome = BatchOutcome.RECOVERED
             if job is None:
-                job = self._submit(job_id, table, manifest)
+                job = self._submit(job_id, table, manifest, rows)
                 outcome = BatchOutcome.LOADED
             if job.state is JobState.RUNNING:
                 raise LoadInProgress(f"{manifest.data_object}: job {job_id} is still running")
             if job.state is JobState.FAILED:
                 continue  # that id is spent; the next attempt has its own
-            self._write_receipt(receipt, manifest, table, job)
+            if manifest.table is Table.SAMPLE_ATTEMPTS and table == original:
+                self._index_native_ids(manifest, rows)
+            if self._before_receipt is not None and table == original:
+                self._before_receipt(manifest, earliest)
+            self._write_receipt(receipt, manifest, table, job, earliest)
             return LoadedBatch(
                 data_object=manifest.data_object,
+                table=manifest.table,
                 outcome=outcome,
                 rows=manifest.rows,
                 job_id=job_id,
+                earliest=earliest,
             )
         raise LoadAbandoned(
             f"{manifest.data_object}: {MAX_LOAD_ATTEMPTS} load jobs failed; it needs a person"
@@ -206,20 +230,11 @@ class Loader:
             incomplete=tuple(name for report in reports for name in report.incomplete),
         )
 
-    def _submit(self, job_id: str, table: TableRef, manifest: BatchManifest) -> LoadJob:
-        data = read_batch(self._landing, manifest)  # verified against the manifest
-        loaded_at = timestamp(self._now())
-        rows = [
-            {
-                **row,
-                "landed_object": manifest.data_object,
-                "content_sha256": manifest.content_sha256,
-                "loaded_at": loaded_at,
-            }
-            for row in decode_rows(data)
-        ]
+    def _submit(
+        self, job_id: str, table: TableRef, manifest: BatchManifest, rows: list[dict[str, Any]]
+    ) -> LoadJob:
         try:
-            return self._warehouse.load(job_id, table, encode_rows(rows))
+            return self._warehouse.load(job_id, table, encode_rows(self._stamped(manifest, rows)))
         except JobAlreadyExists:
             # Another run submitted it between our check and our submission.
             existing = self._warehouse.job(job_id)
@@ -231,8 +246,84 @@ class Loader:
             # a lasting reason is tried a bounded number of times, never in a loop.
             raise LoadFailed(f"{manifest.data_object}: {error}") from None
 
+    def _stamped(
+        self, manifest: BatchManifest, rows: Sequence[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        loaded_at = timestamp(self._now())
+        return [
+            {
+                **row,
+                "landed_object": manifest.data_object,
+                "content_sha256": manifest.content_sha256,
+                "loaded_at": loaded_at,
+            }
+            for row in rows
+        ]
+
+    def _index_native_ids(self, manifest: BatchManifest, rows: Sequence[dict[str, Any]]) -> None:
+        """Add the batch's targets that the native-id index has not seen yet.
+
+        The index holds one row per target that has ever had an attempt, so "which ids
+        exist" is answered from a table as small as the target list instead of from
+        the whole of history. It is written after the attempts and before the receipt:
+        a batch with a receipt is always fully indexed. Two loaders may both add the
+        same id; readers take the distinct set.
+        """
+        spec = TABLES[Table.SAMPLE_NATIVE_IDS]
+        index = TableRef(spec.dataset, spec.table.value)
+        first: dict[tuple[str, str, str, str], str] = {}
+        for row in rows:
+            key = (row["source"], row["metric"], row["granularity"], row["source_native_id"])
+            first[key] = min(first.get(key, row["slot_start"]), row["slot_start"])
+        known: set[tuple[str, str, str, str]] = set()
+        for source, metric in sorted({(key[0], key[1]) for key in first}):
+            known |= {
+                (r["source"], r["metric"], r["granularity"], r["source_native_id"])
+                for r in self._warehouse.rows(
+                    index,
+                    spec.partition,
+                    INDEX_HISTORY_START,
+                    self._now(),
+                    {"source": source, "metric": metric},
+                )
+            }
+        fresh = [
+            {
+                "source": key[0],
+                "metric": key[1],
+                "granularity": key[2],
+                "source_native_id": key[3],
+                "first_slot_start": slot,
+            }
+            for key, slot in sorted(first.items())
+            if key not in known
+        ]
+        if not fresh:
+            return
+        digest = batch_digest(manifest, index)
+        for attempt in range(MAX_LOAD_ATTEMPTS):
+            job_id = f"ms_index_{digest}_a{attempt}"
+            job = self._warehouse.job(job_id)
+            if job is None:
+                try:
+                    job = self._warehouse.load(
+                        job_id, index, encode_rows(self._stamped(manifest, fresh))
+                    )
+                except JobAlreadyExists:
+                    job = self._warehouse.job(job_id)
+            if job is not None and job.state is JobState.DONE:
+                return
+            if job is not None and job.state is JobState.RUNNING:
+                raise LoadInProgress(f"{manifest.data_object}: index job {job_id} is running")
+        raise LoadAbandoned(f"{manifest.data_object}: the native-id index could not be updated")
+
     def _write_receipt(
-        self, name: str, manifest: BatchManifest, table: TableRef, job: LoadJob
+        self,
+        name: str,
+        manifest: BatchManifest,
+        table: TableRef,
+        job: LoadJob,
+        earliest: datetime,
     ) -> None:
         receipt = LoadReceipt(
             table=str(table),
@@ -242,6 +333,7 @@ class Loader:
             rows=manifest.rows,
             loaded_at=self._now(),
             load_run_id=self._run_id,
+            earliest=earliest,
         )
         # If the name is taken, another run recorded the same load.
         with contextlib.suppress(PreconditionFailed):

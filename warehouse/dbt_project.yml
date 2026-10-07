@@ -24,8 +24,14 @@ vars:
   # An incremental run recomputes this many whole UTC days before today, which is
   # how a late-arriving batch is picked up.
   lookback_days: 3
-  # Fixes "now" for a reproducible run (tests). Unset in production.
+  # "Now", as the warehouse job saw it, so the job and the models agree on the window.
   run_as_of: null
+  # Set by the warehouse job when it loaded rows older than the normal window:
+  # the day the affected models must be rebuilt from.
+  rebuild_from_samples: null
+  rebuild_from_periods: null
+  rebuild_from_records: null
+  rebuild_from_runs: null
 
 models:
   metaspike_warehouse:

@@ -7,7 +7,8 @@ where day >= {{ ms_window_start(true) }}
     and (
         expected_slots != observed_slots + unavailable_slots + failed_slots
             + refused_slots + not_sampled_slots
-        or expected_slots < 1
+        or expected_slots < 0
+        or (expected_slots = 0 and unexpected_attempt_slots = 0)
         or observed_fraction < 0
         or observed_fraction > 1
     )

@@ -31,7 +31,7 @@ select
     content_sha256,
     loaded_at
 from {{ source('ms_raw', 'sample_attempts') }}
-where slot_start >= {{ ms_window_start(is_incremental()) }}
+where slot_start >= {{ ms_window_start(is_incremental(), ['samples']) }}
 qualify row_number() over (
     partition by attempt_id
     order by loaded_at, landed_object

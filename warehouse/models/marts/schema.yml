@@ -17,14 +17,6 @@ models:
           - not_null:
               config: {where: "slot_start >= __window_start__"}
 
-  - name: sample_targets
-    description: Every target ever sampled, with its first and latest attempted slot.
-    columns:
-      - name: first_slot_start
-        tests: [not_null]
-      - name: last_slot_start
-        tests: [not_null]
-
   - name: sample_slot_timeline
     description: >
       A view of recent slots including the ones nobody sampled. 'not_sampled' exists

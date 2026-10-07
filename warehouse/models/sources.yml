@@ -14,3 +14,4 @@ sources:
     schema: ms_ops
     tables:
       - name: collection_runs
+      - name: expected_targets

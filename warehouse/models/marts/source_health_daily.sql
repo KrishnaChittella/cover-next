@@ -6,7 +6,7 @@ with attempts as (
 
     select *
     from {{ ref('stg_sample_attempts') }}
-    where slot_start >= {{ ms_window_start(is_incremental()) }}
+    where slot_start >= {{ ms_window_start(is_incremental(), ['samples', 'runs']) }}
 
 ),
 
@@ -19,7 +19,7 @@ runs as (
         count(distinct case when halted_by is not null then run_id end) as halted_runs,
         sum(coalesce(requests_sent, 0)) as requests_sent
     from {{ ref('stg_collection_runs') }}
-    where started_at >= {{ ms_window_start(is_incremental()) }}
+    where started_at >= {{ ms_window_start(is_incremental(), ['samples', 'runs']) }}
         and source is not null
         and phase = 'finished'
     group by source, {{ ms_day('started_at') }}

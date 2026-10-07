@@ -17,7 +17,7 @@ select
     content_sha256,
     loaded_at
 from {{ source('ms_ops', 'collection_runs') }}
-where started_at >= {{ ms_window_start(is_incremental()) }}
+where started_at >= {{ ms_window_start(is_incremental(), ['runs']) }}
 qualify row_number() over (
     partition by run_id, phase
     order by loaded_at, landed_object

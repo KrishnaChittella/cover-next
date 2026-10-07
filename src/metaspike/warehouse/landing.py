@@ -31,7 +31,7 @@ from typing import Any
 from pydantic import AwareDatetime, Field, ValidationError
 
 from metaspike.domain.model import FrozenModel
-from metaspike.domain.observations import ObservationStatus, TimeSeries
+from metaspike.domain.observations import Observation, ObservationStatus, TimeSeries
 from metaspike.domain.samples import SampleAttempt
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
@@ -64,6 +64,10 @@ class Table(StrEnum):
     RESOLUTION_DECISIONS = "resolution_decisions"
     QUARANTINE_EVENTS = "quarantine_events"
     COLLECTION_RUNS = "collection_runs"
+    EXPECTED_TARGETS = "expected_targets"
+    SAMPLE_NATIVE_IDS = "sample_native_ids"
+    ENTITY_EVENTS = "entity_events"
+    LIFECYCLE_EVENTS = "lifecycle_events"
 
 
 @dataclass(frozen=True)
@@ -124,7 +128,7 @@ TABLES: dict[Table, TableSpec] = {
             "period_start",
             SourcePurpose.DEMAND_SIGNALS,
             "source metric source_identifier canonical_game_id granularity period_start "
-            "value status observed_at collection_run_id",
+            "value status observed_at collection_run_id source_timestamp",
         ),
         _spec(
             Table.SOURCE_RECORDS,
@@ -168,8 +172,50 @@ TABLES: dict[Table, TableSpec] = {
             "run_id job source phase started_at finished_at outcome requests_sent "
             "halted_by policy_version image_digest detail",
         ),
+        # What the dispatcher intended to be collected, slot by slot. Our own record of
+        # intent, not source data: it is what lets a slot nobody attempted be seen.
+        _spec(
+            Table.EXPECTED_TARGETS,
+            "ms_ops",
+            "slot_start",
+            None,
+            "source metric granularity mode source_native_id slot_start schedule_version "
+            "dispatch_run_id recorded_at",
+        ),
+        # Written by the loader only: every source-native id that has ever had an attempt.
+        _spec(
+            Table.SAMPLE_NATIVE_IDS,
+            "ms_raw",
+            "first_slot_start",
+            None,
+            "source metric granularity source_native_id first_slot_start",
+        ),
+        # Derived MetaSpike catalogue history about canonical entities. Not source data.
+        _spec(
+            Table.ENTITY_EVENTS,
+            "ms_catalogue",
+            "occurred_at",
+            None,
+            "canonical_game_id event_type occurred_at previous entity catalogue_generation "
+            "schema_version",
+            source_column="",
+        ),
+        _spec(
+            Table.LIFECYCLE_EVENTS,
+            "ms_catalogue",
+            "occurred_at",
+            None,
+            "canonical_game_id event_type occurred_at previous_state new_state valid_from "
+            "rule_id rule_version detail catalogue_generation schema_version",
+            source_column="",
+        ),
     )
 }
+
+# Prefixes in the landing bucket that hold MetaSpike's own derived records rather than
+# anything a source said. Each belongs to exactly one job.
+INTERNAL_AREAS = frozenset({"dispatch", "catalogue"})
+INTERNAL_POLICY_VERSION = "internal"
 
 
 class BatchManifest(FrozenModel):
@@ -300,6 +346,51 @@ class LandingWriter:
             content_sha256=hashlib.sha256(data).hexdigest(),
             data_object=name,
         )
+        return self._write(manifest, data)
+
+    def land_internal(
+        self,
+        table: Table,
+        area: str,
+        run_id: str,
+        retrieved_at: datetime,
+        rows: Sequence[Mapping[str, Any]],
+        part: int = 0,
+    ) -> BatchManifest:
+        """Land MetaSpike's own records: run logs, dispatch intent, catalogue history.
+
+        These are not source data, so no source policy governs them, and for the same
+        reason a table that holds source data can never be landed this way.
+        """
+        spec = TABLES[table]
+        if spec.purpose is not None:
+            raise LandingError(f"{table.value} holds source data and needs a source policy")
+        if not rows:
+            raise LandingError("an empty batch is not landed")
+        for row in rows:
+            if set(row) != set(spec.columns):
+                raise LandingError(
+                    f"{table.value}: a row does not have exactly the table's columns"
+                )
+        data = encode_rows(rows)
+        name = batch_name(area, table, run_id, part, retrieved_at)
+        manifest = BatchManifest(
+            table=table,
+            source=area,
+            run_id=run_id,
+            part=part,
+            retrieved_at=retrieved_at,
+            schema_version=spec.schema_version,
+            policy_version=INTERNAL_POLICY_VERSION,
+            rows=len(rows),
+            bytes=len(data),
+            content_sha256=hashlib.sha256(data).hexdigest(),
+            data_object=name,
+        )
+        return self._write(manifest, data)
+
+    def _write(self, manifest: BatchManifest, data: bytes) -> BatchManifest:
+        name = manifest.data_object
         try:
             self._store.create(name, data, "application/x-ndjson")
         except PreconditionFailed:
@@ -385,8 +476,8 @@ def sample_attempt_from_row(row: Mapping[str, Any]) -> SampleAttempt:
         raise StorageCorruptionError("a stored row is not a valid sample attempt") from None
 
 
-def period_observation_rows(
-    series: TimeSeries, source_identifier: str, run_id: str
+def observation_rows(
+    observations: Sequence[Observation], source_identifier: str, run_id: str
 ) -> list[dict[str, Any]]:
     """One row per OBSERVED point. A missing period is never a row."""
     return [
@@ -401,10 +492,19 @@ def period_observation_rows(
             "status": point.status.value,
             "observed_at": timestamp(point.observed_at),
             "collection_run_id": run_id,
+            "source_timestamp": (
+                None if point.source_timestamp is None else timestamp(point.source_timestamp)
+            ),
         }
-        for point in series.points
+        for point in observations
         if point.status is ObservationStatus.OBSERVED
     ]
+
+
+def period_observation_rows(
+    series: TimeSeries, source_identifier: str, run_id: str
+) -> list[dict[str, Any]]:
+    return observation_rows(series.points, source_identifier, run_id)
 
 
 def source_record_row(record: SourceRecord, run_id: str) -> dict[str, Any]:

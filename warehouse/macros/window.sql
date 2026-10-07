@@ -7,12 +7,25 @@
 
 {#- Where a model starts reading. An incremental run recomputes whole UTC days, back
     `lookback_days`; a first build or a full refresh reads all of history. Every read
-    of a raw table goes through this, so every read is bounded on the partition column. -#}
-{% macro ms_window_start(incremental) -%}
-  {%- if incremental -%}
-    {{ ms_day(ms_sub_days(ms_now(), var('lookback_days'))) }}
-  {%- else -%}
+    of a raw table goes through this, so every read is bounded on the partition column.
+
+    `groups` names the kinds of data the model is built from. When the warehouse job
+    has loaded rows older than the normal window for one of them, it passes
+    `rebuild_from_<group>`, and the model starts from there instead, so late data is
+    never left out of what it builds. -#}
+{% macro ms_window_start(incremental, groups=[]) -%}
+  {%- if not incremental -%}
     timestamp '{{ var("history_start") }}'
+  {%- else -%}
+    {%- set starts = [ms_day(ms_sub_days(ms_now(), var('lookback_days')))] -%}
+    {%- for group in groups -%}
+      {%- if var('rebuild_from_' ~ group, none) -%}
+        {%- do starts.append("timestamp '" ~ var('rebuild_from_' ~ group) ~ "'") -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {%- if starts | length > 1 -%} least({{ starts | join(', ') }})
+    {%- else -%} {{ starts[0] }}
+    {%- endif -%}
   {%- endif -%}
 {%- endmacro %}
 

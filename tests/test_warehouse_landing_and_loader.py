@@ -95,10 +95,13 @@ def test_every_landed_row_shape_is_exactly_the_declared_table() -> None:
     schemas = table_schemas()
     for spec in TABLES.values():
         declared = [field["name"] for field in schemas[spec.qualified]]
-        assert [*spec.columns, *LOAD_COLUMNS] == declared, spec.qualified
+        # The same columns exactly. Order may differ only where a column had to be
+        # appended to a table that already existed.
+        assert sorted([*spec.columns, *LOAD_COLUMNS]) == sorted(declared), spec.qualified
+        assert len(declared) == len(set(declared))
         partition = next(f for f in schemas[spec.qualified] if f["name"] == spec.partition)
         assert partition["type"] == "TIMESTAMP"
-        assert spec.source_column in spec.columns
+        assert spec.source_column in spec.columns or spec.purpose is None
 
 
 def test_a_batch_is_immutable_ndjson_with_a_manifest_that_names_its_provenance() -> None:

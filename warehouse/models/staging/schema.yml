@@ -53,3 +53,13 @@ models:
         tests:
           - not_null:
               config: {where: "started_at >= __window_start__"}
+
+  - name: stg_expected_targets
+    description: The dispatcher's record of intent, one row per target and slot.
+    columns:
+      - name: mode
+        tests:
+          - accepted_values:
+              arguments:
+                values: [sample_now, fetch_history]
+              config: {where: "slot_start >= __window_start__"}
