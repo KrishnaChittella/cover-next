@@ -19,15 +19,45 @@ run "every_dataset_has_one_whole_policy" {
     error_message = "Each of the six datasets has exactly one authoritative policy."
   }
 
+  # 1. Every dataset has projectOwners, and only projectOwners, as its owner.
   assert {
     condition = alltrue([
       for name, policy in google_bigquery_dataset_iam_policy.this :
-      contains(
-        [for b in jsondecode(policy.policy_data).bindings : b.role if contains(b.members, "projectOwner:test-project")],
-        "roles/bigquery.dataOwner"
-      )
+      [for b in jsondecode(policy.policy_data).bindings : join(",", b.members) if b.role == "roles/bigquery.dataOwner"] == ["projectOwners"]
     ])
-    error_message = "Project owners keep ownership of every dataset."
+    error_message = "Every dataset is owned by the BigQuery special group projectOwners and by nothing else."
+  }
+
+  # 2. The IAM-style spelling is never used: the provider cannot map it to a dataset.
+  assert {
+    condition = alltrue(flatten([
+      for name, policy in google_bigquery_dataset_iam_policy.this : [
+        for b in jsondecode(policy.policy_data).bindings : [for m in b.members : !startswith(m, "projectOwner:")]
+      ]
+    ]))
+    error_message = "No dataset policy may contain a member beginning 'projectOwner:'."
+  }
+
+  # 3 and 4. The default reader and writer groups are absent.
+  assert {
+    condition = alltrue(flatten([
+      for name, policy in google_bigquery_dataset_iam_policy.this : [
+        for b in jsondecode(policy.policy_data).bindings : [
+          for m in b.members : !contains(["projectReaders", "projectWriters", "allUsers", "allAuthenticatedUsers"], m)
+        ]
+      ]
+    ]))
+    error_message = "projectReaders, projectWriters and public members are absent from every dataset."
+  }
+
+  # 5. The deploy identity holds nothing at dataset level.
+  assert {
+    condition = alltrue(flatten([
+      for name, policy in google_bigquery_dataset_iam_policy.this : [
+        for b in jsondecode(policy.policy_data).bindings : [for m in b.members : !strcontains(m, "ms-deploy")]
+      ]
+    ]))
+    error_message = "ms-deploy is absent from dataset-level IAM."
   }
 
   assert {
@@ -35,21 +65,38 @@ run "every_dataset_has_one_whole_policy" {
       for name, policy in google_bigquery_dataset_iam_policy.this : [
         for b in jsondecode(policy.policy_data).bindings : [
           for m in b.members :
-          m == "projectOwner:test-project" || can(regex("^serviceAccount:ms-(warehouse|features|parity)@test-project\\.iam\\.gserviceaccount\\.com$", m))
+          m == "projectOwners" || can(regex("^serviceAccount:ms-(warehouse|features|parity)@test-project\\.iam\\.gserviceaccount\\.com$", m))
         ]
       ]
     ]))
-    error_message = "Only project owners and the three warehouse-facing runtime identities may appear. No deploy identity, no project editors or viewers, no default entry."
+    error_message = "Only projectOwners and the three warehouse-facing runtime identities may appear."
   }
 
+  # 6. The 14 approved runtime grants, exactly: dataset | role | identity.
   assert {
-    condition = alltrue(flatten([
+    condition = sort(flatten([
       for name, policy in google_bigquery_dataset_iam_policy.this : [
-        for b in jsondecode(policy.policy_data).bindings :
-        b.role == "roles/bigquery.dataOwner" ? length(b.members) == 1 : true
+        for b in jsondecode(policy.policy_data).bindings : [
+          for m in b.members : "${name}|${b.role}|${m}" if m != "projectOwners"
+        ]
       ]
-    ]))
-    error_message = "Nothing but the project owners owns a dataset: no creator entry, no service account."
+      ])) == sort([
+      "ms_catalogue|roles/bigquery.dataEditor|serviceAccount:ms-warehouse@test-project.iam.gserviceaccount.com",
+      "ms_catalogue|roles/bigquery.dataViewer|serviceAccount:ms-features@test-project.iam.gserviceaccount.com",
+      "ms_catalogue|roles/bigquery.dataViewer|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
+      "ms_features|roles/bigquery.dataEditor|serviceAccount:ms-features@test-project.iam.gserviceaccount.com",
+      "ms_features|roles/bigquery.dataViewer|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
+      "ms_marts|roles/bigquery.dataEditor|serviceAccount:ms-warehouse@test-project.iam.gserviceaccount.com",
+      "ms_marts|roles/bigquery.dataViewer|serviceAccount:ms-features@test-project.iam.gserviceaccount.com",
+      "ms_marts|roles/bigquery.dataViewer|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
+      "ms_ops|roles/bigquery.dataEditor|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
+      "ms_ops|roles/bigquery.dataEditor|serviceAccount:ms-warehouse@test-project.iam.gserviceaccount.com",
+      "ms_raw|roles/bigquery.dataEditor|serviceAccount:ms-warehouse@test-project.iam.gserviceaccount.com",
+      "ms_raw|roles/bigquery.dataViewer|serviceAccount:ms-features@test-project.iam.gserviceaccount.com",
+      "ms_raw|roles/bigquery.dataViewer|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
+      "ms_staging|roles/bigquery.dataEditor|serviceAccount:ms-warehouse@test-project.iam.gserviceaccount.com",
+    ])
+    error_message = "The runtime dataset grants are exactly the 14 that were approved: none added, none removed, none changed."
   }
 
   assert {
@@ -60,18 +107,6 @@ run "every_dataset_has_one_whole_policy" {
       ]
     ]))
     error_message = "Only the three dataset data roles are used."
-  }
-
-  assert {
-    condition = sort([
-      for b in jsondecode(google_bigquery_dataset_iam_policy.this["ms_features"].policy_data).bindings :
-      join("|", concat([b.role], b.members))
-      ]) == sort([
-      "roles/bigquery.dataEditor|serviceAccount:ms-features@test-project.iam.gserviceaccount.com",
-      "roles/bigquery.dataOwner|projectOwner:test-project",
-      "roles/bigquery.dataViewer|serviceAccount:ms-parity@test-project.iam.gserviceaccount.com",
-    ])
-    error_message = "ms_features: features writes, parity reads, project owners own. Nothing else."
   }
 
   assert {

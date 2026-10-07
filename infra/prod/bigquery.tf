@@ -107,14 +107,17 @@ locals {
   }
 
   # Every role held on each dataset, and by whom. This is the whole policy.
-  #   - Project owners keep ownership, so the dataset stays recoverable and manageable
-  #     by a person. BigQuery also requires a dataset to have an owner.
+  #   - `projectOwners` is BigQuery's own special group for a dataset: whoever owns
+  #     the project owns the dataset. It keeps every dataset recoverable and
+  #     manageable by a person, and BigQuery requires a dataset to have an owner. It
+  #     is written exactly so: the provider maps the bare word to the dataset's
+  #     special group and refuses the IAM-style "projectOwner:<project>".
   #   - The deploy identity is NOT listed: it manages tables through its reviewed
   #     project-level role, and needs no dataset-level ownership on top of it.
-  #   - Project editors and viewers are NOT listed.
+  #   - `projectWriters` and `projectReaders` are NOT listed.
   dataset_policy = {
     for dataset in keys(local.datasets) : dataset => merge(
-      { "roles/bigquery.dataOwner" = ["projectOwner:${var.project_id}"] },
+      { "roles/bigquery.dataOwner" = ["projectOwners"] },
       {
         for role in distinct([for g in local.dataset_grants : g[2] if g[1] == dataset]) :
         role => sort([

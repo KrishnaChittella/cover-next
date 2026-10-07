@@ -464,7 +464,11 @@ def test_dataset_access_is_authoritative_and_default_entries_cannot_return() -> 
     assert "destroy = false" in removed.group(1)
     # The only owner is the project's owners. The deploy identity, project editors and
     # project viewers hold nothing at dataset level.
-    assert '{ "roles/bigquery.dataOwner" = ["projectOwner:${var.project_id}"] }' in bigquery
+    # The owner is BigQuery's dataset special group, spelt as the provider requires.
+    # The IAM-style "projectOwner:<project>" is not a dataset member and is refused.
+    assert '{ "roles/bigquery.dataOwner" = ["projectOwners"] }' in bigquery
+    assert "projectOwner:" not in bigquery
+    assert bigquery.count('"projectOwners"') == 1
     for absent in ("ms-deploy", "projectEditor", "projectViewer", "projectWriters",
                    "projectReaders", "allUsers", "allAuthenticatedUsers"):  # fmt: skip
         assert absent not in bigquery, absent
