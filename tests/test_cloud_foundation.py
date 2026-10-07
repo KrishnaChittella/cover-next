@@ -740,7 +740,7 @@ def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> N
 def test_the_runbook_says_what_an_operator_must_know(name: str) -> None:
     runbook = read(REPO / "docs" / name)
     for statement in (
-        "No cloud resource exists",
+        "Nothing is collecting",
         "state bucket",
         "gcloud secrets versions add",
         "--data-file=-",

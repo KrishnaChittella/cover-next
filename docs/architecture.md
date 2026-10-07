@@ -9,9 +9,12 @@ internal engineering milestone, not a product version.
 | --- | --- |
 | Catalogue, Wikimedia collector, source policy, generic time series and signals, metric registry, features, score v0, confidence v0, explanations, local point-in-time store, local atomic artifact publishing | **Implemented**, runs locally |
 | More sources, entity resolution, event detection, launch scoring model | **FUTURE** |
-| Raw storage (GCS), BigQuery, dbt, scheduled collection (Cloud Run Jobs + Scheduler), R2 artifact publishing, web app | **FUTURE**, not built and not deployed |
+| Landing format, idempotent loader, warehouse-backed stores, dbt models, blocked incremental resolution, persistent catalogue | **Built and tested offline.** Has never run in the cloud |
+| Private cloud foundation (buckets, datasets, jobs, one paused scheduler trigger) | **Applied and idle.** No job has run; nothing is collecting |
+| Scheduled collection, R2 artifact publishing, web app | **FUTURE**, not built |
 
-Nothing in this repository talks to a cloud provider.
+The Cloud Storage and BigQuery adapters exist and have only been run against
+stand-ins. No test and no default command reaches a cloud provider.
 
 ## Intended eventual flow
 
@@ -22,11 +25,11 @@ collectors                   one adapter per source, per-game failure isolation
    │
 source policy                gate: may we collect, store, derive, redistribute?
    │
-raw storage where permitted  FUTURE: GCS, retention enforced from SourcePolicy.retention_days
+raw storage where permitted  built offline: refused unless the source's policy allows raw storage
    │
-BigQuery                     FUTURE: observations and history
+BigQuery                     built offline: landed batches, loaded at most once
    │
-dbt                          FUTURE: normalised models and tests
+dbt                          built offline: cleaning and aggregation only, never features
    │
 feature / scoring paths      implemented in Python today; SQL or Python FUTURE
    │

@@ -1,8 +1,10 @@
 # Phase 4 runbook: private cloud foundation
 
-**No cloud resource exists.** Phase 4 Part A wrote this configuration and validated it
-on a laptop. Nothing has been applied, no project has been created, and no schedule
-is running. This document is what an operator needs when that changes.
+**Nothing is collecting.** The foundation was applied in Part A2 and is inert: no job
+has ever run, the one scheduler trigger is paused, no secret has a value, and every
+bucket and table is empty. Part B added application code and a dbt project that run
+offline only. "No cloud resource exists" was true when Part A wrote this document and
+is no longer true; what is true is that no cloud resource is doing anything.
 
 Nothing is public, at any stage of Phase 4. There is no public bucket, no endpoint
 without authentication, and no public MetaSpike deployment. Phase 4 is internal
@@ -228,10 +230,11 @@ What Google's Cloud Run pricing page said when it was read on 2026-10-05:
 
 Cloud Run jobs need at least 1 vCPU. The two statements above were both on the page;
 which one governs a job that finishes in a few seconds is not something to assume in
-either direction. **Billable instance time per job is therefore measured in Part A2**
-from the `container/billable_instance_time` metric and the first invoice lines, and
-the cost for 8, 100 and 500 sampled apps is recalculated from those measurements
-before unattended collection is enabled. Earlier estimates are withdrawn until then.
+either direction. Billable instance time per job was to be measured in Part A2 from
+the `container/billable_instance_time` metric and the first invoice lines. **It was
+not measured, because no job has run.** The Part A2 cost model is therefore an
+estimate built on the documented one-minute minimum, and re-measuring it from real
+job durations is a hard gate before unattended collection (see below).
 
 One thing does not depend on that question: 500 apps sampled at one request per second
 is about 500 seconds of real work every 15 minutes, which is materially expensive
@@ -250,3 +253,126 @@ the scheduler pause above.
 provider's schema. It does not prove that an API is enabled, that an IAM condition
 behaves as intended on object listing, that a name is free, or what a plan would
 change. Those are verified in Part A2 by reading the first plan before approving it.
+
+## Part B: warehouse history and the persistent catalogue
+
+Part B is application code and dbt. It was developed and tested offline; nothing in
+it has run in the cloud, and it changed no cloud resource.
+
+| Path | What it is |
+|---|---|
+| `src/metaspike/warehouse/landing.py` | The landing format: immutable NDJSON batches, each with a manifest |
+| `src/metaspike/warehouse/loader.py` | The idempotent loader, its receipts (the load manifest) and replay |
+| `src/metaspike/warehouse/stores.py` | The storage contracts kept in the warehouse |
+| `src/metaspike/warehouse/objects.py`, `tables.py`, `auth.py` | Narrow ports for object storage and tables, in-memory implementations, and REST adapters for Cloud Storage and BigQuery |
+| `warehouse/` | The dbt project and its own locked tool environment |
+| `src/metaspike/resolution/blocking.py` | Candidate blocking for the resolver |
+| `src/metaspike/catalogue/incremental.py` | Catalogue generation with blocking and incremental resolution |
+| `src/metaspike/catalogue/persistence.py` | Events, snapshots and the conditional `CURRENT` pointer |
+
+### Object layout
+
+```
+landing bucket   {source}/{table}/dt={YYYY-MM-DD}/{run_id}/part-NNNN.ndjson
+                 {source}/{table}/dt={YYYY-MM-DD}/{run_id}/part-NNNN.manifest.json
+raw bucket       {source}/dt={YYYY-MM-DD}/{run_id}/{name}        (only where raw storage is allowed)
+ops bucket       warehouse/loads/{dataset.table}/{digest}.json   (one receipt per loaded batch)
+state bucket     catalogue/CURRENT
+                 catalogue/generations/{generation}.json
+                 catalogue/snapshots/{generation}.json
+                 catalogue/events/{generation}.ndjson
+```
+
+Bindings, decisions and quarantine events are stated about a source record, so their
+warehouse rows land under that source's prefix (`igdb/binding_events/...`) and obey
+that source's policy. Lifecycle and entity events are about canonical entities; they
+are in the state bucket only, because no table and no landing prefix exists for them.
+
+### Identities that cannot list
+
+An identity whose storage grant is conditional on an object-name prefix is expected
+to be refused a listing of the bucket, because the condition does not match the
+bucket itself. This is unproven until the live smoke test, and the design assumes
+the refusal:
+
+- A collector writes a batch at a name derived from its run id. It never reads or
+  lists the landing bucket.
+- The catalogue job reads `catalogue/CURRENT` by name and follows it to a snapshot.
+  History is walked from each generation record to the one before it.
+- The loader's receipts are read by exact name. Only the landing bucket is listed,
+  and only by `ms-warehouse`, whose grant there is on the whole bucket.
+- A collector cannot find out from storage whether a slot was already sampled: it can
+  neither list nor read landing, and the warehouse sees a batch only after the hourly
+  load. Part C must give each collector a marker it can read by exact name under its
+  own operations prefix (for example `{source}/slots/{slot}.json`), or accept that a
+  retried execution samples the slot again. A repeat is harmless to the data (the
+  earliest success speaks for the slot, the other is kept as a duplicate) but costs
+  quota.
+
+### dbt
+
+```
+uv run --project warehouse --locked dbt build --selector hourly \
+    --project-dir warehouse --profiles-dir warehouse
+```
+
+The default target is `offline` (DuckDB). The `prod` target is BigQuery with the job's
+own identity and a 1 GiB maximum-bytes-billed limit on every job. An incremental run
+recomputes the three whole UTC days before now; a batch that lands later than that is
+in the raw table and reaches the marts with `--full-refresh`. dbt computes no feature
+and no score.
+
+### Catalogue scope
+
+Only the bootstrap entities and records tied to them by an explicit link are resolved.
+Broad catalogue discovery is switched off in code (`BROAD_DISCOVERY_ENABLED = False`)
+and stays off until the owner approves it.
+
+## Hard gates before Part C (unattended collection)
+
+Every one of these must be closed, in writing, before the scheduler is enabled.
+
+1. **Live prefix-IAM smoke test.** Once the application has a safe runtime smoke
+   command, run it as an actual runtime service account: one harmless write inside an
+   allowed prefix must succeed, one outside must be denied, the allowed object is
+   cleaned up, and no long-lived impersonation permission is added. The same run
+   must establish whether a prefix-conditional identity can list, which the design
+   above assumes it cannot.
+2. **BigQuery dataset IAM review.** Decide whether MetaSpike manages dataset access
+   authoritatively in Terraform, removing the creator (`ms-deploy` OWNER) and default
+   `projectOwners` / `projectWriters` / `projectReaders` entries before collection
+   starts.
+3. **The 53 HIGH / 2 CRITICAL unfixed image findings.** Review each before any job
+   runs unattended. The scan policy is unchanged.
+4. **`ms-deploy` as a privileged identity.** It can set IAM on the secret containers
+   and deploy jobs that run as the identities that read them. Review before any
+   secret has a version.
+5. **Alert delivery proof.** Send a test notification through the channel and confirm
+   it arrives. No alert or budget threshold has ever fired.
+6. **Steam and IGDB policy conditions.** Every Steam condition listed under "Policy
+   gates" above, the Valve clarification request, and IGDB collection limited to the
+   catalogue fields MetaSpike uses. The real Steam policies refuse private-collection
+   storage in code until they are changed by a reviewed commit.
+7. **Cost re-measurement.** Measure billable instance time from real executions and
+   recompute the 8 / 100 / 500 app model. Anything expected above $20 a month needs
+   the owner's explicit approval; 500 apps at a flat 15-minute cadence is estimated
+   above it.
+8. **Node.js action migration.** `actions/checkout`, `google-github-actions/auth`,
+   `hashicorp/setup-terraform` and `actions/upload-artifact` as pinned target a
+   Node.js version GitHub is retiring.
+
+Part B added these, which are gates for the same reason:
+
+9. **First contact with the real services.** The Cloud Storage and BigQuery adapters
+   and the BigQuery dialect of the dbt models have only been exercised against
+   stand-ins. Before anything depends on them: one create-only write, one
+   conditional replace and one refused overwrite against a real bucket; one load job
+   and one bounded query against a real table, including a JSON column and a
+   repeated column; and `dbt build` against BigQuery on an empty dataset.
+10. **dbt in the image.** The image contains no dbt. `ms-warehouse` cannot run the
+    models until an image that does is built, scanned and deployed, which changes the
+    image's size and its vulnerability surface.
+11. **Job commands.** `dispatch`, `collect-*`, `warehouse`, `features` and `parity`
+    do not exist as commands yet.
+12. **Broad catalogue discovery** stays off until the blocked resolver's equivalence
+    results are accepted and discovery is approved.

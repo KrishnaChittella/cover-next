@@ -119,8 +119,10 @@ from every artifact and schema. Maturity states, reason codes and the constants
 that were introduced in this part without separate approval are listed in
 `src/metaspike/domain/baseline_rules.py`.
 
-Phase 4 Part A (signal semantics v2 and private cloud foundation code) is written
-and validated locally. **No cloud resource exists**: nothing has been applied.
+Phase 4 Part A (signal semantics v2 and private cloud foundation code) is written,
+and Part A2 applied the foundation to one private project. **Nothing is collecting**:
+no job has run, the scheduler is paused, no secret has a value, and every bucket and
+table is empty.
 
 - **`signal_semantics_v2`** changes how a signal is read, not what the engine
   computes. Raw freshness (a sampled source is stale when its latest valid observation
@@ -143,8 +145,25 @@ and validated locally. **No cloud resource exists**: nothing has been applied.
   credentials, and a deploy workflow that only the owner can start by hand and that
   applies only a plan named by its hash.
 
+Phase 4 Part B (warehouse history and the persistent catalogue) is built and tested
+offline. It has not run in the cloud.
+
+- **Landing and loading.** Immutable NDJSON batches with manifests, checked against
+  each source's policy (no Steam payload can be landed), and a loader that appends
+  each batch at most once and can rebuild a table from landing.
+- **Warehouse stores.** The sample, observation and source-record contracts kept in
+  the warehouse, each tested against its local counterpart.
+- **dbt** (`warehouse/`): staging, de-duplication, resolved sample slots, coverage and
+  source health. The SQL slot rule is held to the Python one on the same attempts.
+  dbt computes no feature and no score.
+- **Catalogue.** Candidate blocking and incremental resolution that return exactly
+  what all-pairs resolution returns, and a catalogue stored as append-only events,
+  immutable snapshots and one conditionally replaced pointer. Only bootstrap
+  entities and records linked to them are in scope; broad discovery is off.
+
 See `docs/phase4-runbook.md` for the bootstrap steps, secret loading, the one-action
-stop and the policy gates that must clear before unattended collection.
+stop, the Part B layout and the hard gates that must clear before unattended
+collection.
 
 ## What is implemented
 
@@ -169,9 +188,10 @@ so (`scope_note`), and confidence is capped accordingly.
 
 ## What it does not implement yet
 
-No cloud (GCP, BigQuery, GCS, R2, Cloud Run, Scheduler), no Terraform, no dbt, no
-ML, no LLM, no public web UI, no event detection, no second source, and no
-permanent raw-data store. Those come after this slice is reviewed.
+No unattended collection, no accumulated history, no R2 publishing, no ML, no LLM, no
+public web UI and no event detection. The cloud foundation exists and is idle; the
+warehouse code and dbt models exist and have run only offline. Nothing is public
+before the single production release.
 
 ## Setup
 
@@ -542,8 +562,6 @@ articles; the other games have no recording, which exercises partial failure.
 
 ## Next planned step
 
-Phase 4 Part A2: the owner's one-time bootstrap (project, billing, state bucket,
-private GitHub repository) and the first reviewed apply, with job durations measured
-so that cost can be recalculated. Then Part B (warehouse and production catalogue),
-Part C (policy-gated collectors) and Part D (baseline state, parity and soak). No
-cloud resource exists yet, and nothing is public before the single production release.
+Phase 4 Part C (policy-gated collectors), once the hard gates in
+`docs/phase4-runbook.md` are closed, then Part D (baseline state, parity and soak).
+Nothing is public before the single production release.
