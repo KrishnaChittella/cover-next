@@ -806,9 +806,8 @@ def test_an_object_user_prefix_passes_and_cleans_up_itself() -> None:
         "delete": ALLOWED,
     }
     assert result["passed"] and result["unexpected"] == [] and result["for_review"] == []
-    assert result["cleanup"] == {
-        "actor": RUNTIME, "object": result["cleanup"]["object"], "done": True
-    }  # fmt: skip
+    assert (result["cleanup"]["actor"], result["cleanup"]["done"]) == (RUNTIME, True)
+    assert result["cleanup"]["objects"] == []
     assert w.operations.list("") == ()  # nothing left behind
     assert log[-1]["event"] == "smoke_result" and log[-1]["severity"] == "INFO"
 
@@ -833,9 +832,11 @@ def test_a_create_only_prefix_passes_with_its_denials_and_leaves_cleanup_to_an_a
     assert result["passed"] and result["unexpected"] == []
     # The object is still there, exactly as created, and the result says who removes it.
     left = result["cleanup"]["object"]
-    assert result["cleanup"] == {"actor": ADMINISTRATOR, "object": left, "done": False}
+    assert result["cleanup"] == {
+        "actor": ADMINISTRATOR, "object": left, "objects": [left], "done": False
+    }  # fmt: skip
     assert w.landing.list("") == (left,) and "/_smoke/" in left  # never where the loader looks
-    assert w.landing.get(left).data.startswith(b"metaspike smoke")
+    assert w.landing.get(left).data.startswith(b"metaspike-storage-smoke")
     assert log[-1]["severity"] == "INFO"
     # The administrator removes it afterwards, with access the runtime identity never had.
     w.landing.delete(left)
@@ -912,8 +913,9 @@ def test_a_read_only_prefix_cannot_create_and_reads_an_object_placed_for_it() ->
         "read": ALLOWED,
         "list": EXPECTED_DENIAL,
     }
-    assert result["passed"] and result["cleanup"] == {"actor": NOBODY, "object": None}
+    assert result["passed"] and result["cleanup"]["actor"] == NOBODY
     assert state.list("") == ("catalogue/_smoke/fixture.txt",)  # it wrote nothing
+    assert result["probes"]["read"]["status"] is None
     # With nothing placed, read is not probed and is not counted either way.
     bare = smoke(runtime, "state", "catalogue/", "baseline/", mode="viewer")
     assert bare["passed"] and bare["probes"]["read"]["verdict"] == NOT_APPLICABLE

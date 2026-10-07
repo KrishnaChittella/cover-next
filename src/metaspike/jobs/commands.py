@@ -30,7 +30,14 @@ from metaspike.jobs.runtime import (
     Runtime,
     runtime_from_environment,
 )
-from metaspike.jobs.smoke import MODES, SmokeFailed, smoke
+from metaspike.jobs.smoke import (
+    MODES,
+    PROFILES,
+    SmokeFailed,
+    checked_run_id,
+    smoke,
+    smoke_suite,
+)
 from metaspike.jobs.targets import load_targets
 from metaspike.jobs.warehouse_job import warehouse
 from metaspike.sources.catalogue_sources import build_igdb
@@ -152,11 +159,31 @@ _EXPECTATION = {"allowed": True, "denied": False}
 
 
 def _smoke(args: argparse.Namespace) -> int:
+    suite = args.suite is not None
+    if suite and args.run_id is None:
+        print("error: --suite needs --run-id", file=sys.stderr)
+        return EXIT_CONFIGURATION
+    if not suite and args.bucket is None:
+        print("error: give --suite and --run-id, or --bucket for a single probe", file=sys.stderr)
+        return EXIT_CONFIGURATION
     try:
-        runtime = runtime_from_environment("smoke")
-    except ConfigurationError as error:
+        # Storage only: no warehouse client exists in this process, and no source
+        # client is ever built on this path.
+        runtime = runtime_from_environment("smoke", storage_only=True)
+        if suite:
+            checked_run_id(args.run_id)
+            running_as = runtime.environ.get("CLOUD_RUN_JOB")
+            if running_as is not None and running_as != args.suite:
+                raise ConfigurationError(
+                    f"suite {args.suite} must run as its own job, not as {running_as}"
+                )
+    except (ConfigurationError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_CONFIGURATION
+    if suite:
+        document = smoke_suite(runtime, args.suite, args.run_id)
+        print(json.dumps(document, sort_keys=True))
+        return runlog.EXIT_OK if document["overall"] == "PASS" else runlog.EXIT_FAILED
     try:
         result = smoke(
             runtime,
@@ -183,7 +210,13 @@ def register(commands: Any) -> None:
     parser = commands.add_parser(
         "smoke", help="check this identity's storage permissions; calls no source"
     )
-    parser.add_argument("--bucket", required=True, choices=list(BUCKETS))
+    parser.add_argument(
+        "--suite",
+        choices=sorted(PROFILES),
+        help="run this runtime identity's whole storage matrix in one execution",
+    )
+    parser.add_argument("--run-id", help="with --suite: the identifier in every object name")
+    parser.add_argument("--bucket", choices=list(BUCKETS), help="single probe: the bucket")
     parser.add_argument("--mode", default="user", choices=MODES)
     parser.add_argument("--allowed-prefix", default="", help="empty for a whole-bucket mode")
     parser.add_argument("--outside-prefix", default=None)

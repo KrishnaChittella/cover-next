@@ -111,9 +111,25 @@ class Runtime:
             raise Refused(f"{source}: {refusal}")
 
 
+class NoWarehouse:
+    """Stands where the warehouse would be for a job that must not touch it."""
+
+    def __getattr__(self, name: str) -> Any:
+        raise RuntimeError(f"this job has no warehouse access (attempted: {name})")
+
+
 def runtime_from_environment(
-    job: str, environ: Mapping[str, str] | None = None, client: httpx.Client | None = None
+    job: str,
+    environ: Mapping[str, str] | None = None,
+    client: httpx.Client | None = None,
+    *,
+    storage_only: bool = False,
 ) -> Runtime:
+    """Build a job's runtime from its environment.
+
+    With `storage_only` no BigQuery client is constructed at all: the runtime can
+    reach Cloud Storage (and the metadata server for its token) and nothing else.
+    """
     env = os.environ if environ is None else environ
     missing = [
         name for name in (STAGE_ENV, PROJECT_ENV, REGION_ENV, IMAGE_ENV) if not env.get(name)
@@ -135,7 +151,11 @@ def runtime_from_environment(
         stage=stage,
         image=env[IMAGE_ENV],
         buckets={name: GcsObjectStore(http, f"{project}-{name}", token) for name in BUCKETS},
-        warehouse=BigQueryWarehouse(http, project, region, token, sleep=_sleep),
+        warehouse=(
+            NoWarehouse()
+            if storage_only
+            else BigQueryWarehouse(http, project, region, token, sleep=_sleep)
+        ),
         environ=env,
         project=project,
         region=region,

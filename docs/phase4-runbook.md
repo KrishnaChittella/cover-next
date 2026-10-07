@@ -433,12 +433,29 @@ does not fail the check unless `--strict-list` is given. Where another reviewed
 grant independently gives read or listing on the same bucket, say so with
 `--expect-read allowed` or `--expect-list allowed`.
 
+A single probe set can be run on its own (`--bucket`, `--mode`, `--allowed-prefix`,
+`--outside-prefix`). The normal way is a suite: one execution per runtime identity
+that runs every probe set that identity's grants call for.
+
 ```
 gcloud run jobs execute ms-wikimedia --region us-central1 --project <PROJECT_ID> --wait \
-    --args=smoke,--bucket=ops,--mode=user,--allowed-prefix=wikimedia_pageviews/,--outside-prefix=dispatch/
-gcloud run jobs execute ms-dispatch --region us-central1 --project <PROJECT_ID> --wait \
-    --args=smoke,--bucket=landing,--mode=creator,--allowed-prefix=dispatch/,--outside-prefix=catalogue/
+    --args=smoke,--suite=ms-wikimedia,--run-id=<RUN_ID>
 ```
+
+- `--run-id` is required and appears in every object name:
+  `<prefix>_smoke/<RUN_ID>/<profile>-probe.txt`. Nothing a loader or a collector
+  reads lives under `_smoke/`.
+- A suite refuses to run as any job but its own.
+- It stops at the first unexpected verdict and still prints one result document,
+  saying where it stopped. Listing is required to be as expected.
+- Read-only shapes read a fixture an administrator places first, at
+  `<prefix>_smoke/<RUN_ID>/<profile>-fixture.txt`. The suite never creates one. If a
+  fixture is missing, an identity that can list is told so; one that cannot is told
+  "forbidden", which the result flags as indistinguishable from a denial.
+- The result lists every object left behind with `cleanup_actor: administrator`:
+  the create-only objects and the fixtures. They are removed afterwards by exact name.
+- The smoke path builds no source client and no warehouse client. It reaches the
+  metadata server for the job's own token, and Cloud Storage.
 
 ## Hard gates before Part C (unattended collection)
 
