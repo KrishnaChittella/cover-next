@@ -25,6 +25,7 @@ from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.domain.source_records import SourceRecord
+from metaspike.jobs import commands as job_commands
 from metaspike.pipeline.collection import (
     CollectionReport,
     collect,
@@ -248,6 +249,8 @@ def _parser() -> argparse.ArgumentParser:
     schemas.add_argument("--schemas-dir", type=Path, default=DEFAULT_SCHEMAS_DIR)
     schemas.add_argument("--check", action="store_true", help="fail if schemas are out of date")
     schemas.set_defaults(handler=_export_schemas)
+
+    job_commands.register(commands)
     return parser
 
 

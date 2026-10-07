@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, StageClearance
 from metaspike.sources.igdb import IGDB_POLICY
@@ -20,6 +20,9 @@ from metaspike.warehouse.landing import TABLES, LandingWriter
 from metaspike.warehouse.loader import Loader
 from metaspike.warehouse.objects import MemoryObjectStore
 from metaspike.warehouse.tables import MemoryWarehouse
+
+if TYPE_CHECKING:
+    from metaspike.jobs.runtime import Runtime
 
 SCHEMAS = Path(__file__).parent.parent / "infra" / "prod" / "schemas"
 
@@ -123,3 +126,40 @@ def world(
         now=now,
         policy_for=policy_for,
     )
+
+
+def runtime_for(
+    w: World,
+    job: str,
+    *,
+    policy_for: Callable[[str], SourcePolicy] | None = None,
+    environ: dict[str, str] | None = None,
+    state: MemoryObjectStore | None = None,
+    run_id: str = "run-0001",
+) -> "tuple[Runtime, list[dict[str, Any]]]":
+    """A job runtime over the in-memory world, and the structured log it writes."""
+    from metaspike.domain.source_policy import DeploymentStage
+    from metaspike.jobs.runtime import Runtime
+
+    log: list[dict[str, Any]] = []
+    runtime = Runtime(
+        job=job,
+        run_id=run_id,
+        stage=DeploymentStage.PRIVATE_COLLECTION,
+        image="registry.invalid/metaspike@sha256:" + "0" * 64,
+        buckets={
+            "landing": w.landing,
+            "ops": w.operations,
+            "state": state if state is not None else MemoryObjectStore(),
+            "raw": MemoryObjectStore(),
+            "tokens": MemoryObjectStore(),
+        },
+        warehouse=w.warehouse,
+        now=w.now,
+        policy_for=policy_for or w.policy_for,
+        environ=environ or {},
+        emit=lambda entry: log.append(dict(entry)),
+        project="project",
+        region="us-central1",
+    )
+    return runtime, log
