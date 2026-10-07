@@ -2,8 +2,13 @@
 # are different locations, and only a regional dataset keeps loads from the regional
 # buckets free of transfer charges and keeps the data in one place.
 #
-# Part A declares the datasets and the append-only fact tables whose shape is already
-# fixed by accepted contracts. dbt models (staging, marts) belong to Part B.
+# Terraform declares the datasets and the append-only tables the loader fills. dbt
+# creates its own models in ms_staging and ms_marts.
+#
+# Dataset access is AUTHORITATIVE: each dataset's whole policy is stated below and
+# anything else is removed on apply. BigQuery adds the creating identity as OWNER and
+# three project-wide default entries to every new dataset; none of those is part of
+# the reviewed design, and the policy resource is what keeps them from coming back.
 
 locals {
   datasets = {
@@ -75,6 +80,48 @@ locals {
       partition = "started_at"
       cluster   = ["job", "source"]
     }
+    # What the dispatcher intended to be collected, slot by slot. An unsampled slot is
+    # reconstructed from this on read; it is never stored as a row anywhere.
+    expected_targets = {
+      dataset   = "ms_ops"
+      partition = "slot_start"
+      cluster   = ["source", "metric", "source_native_id"]
+    }
+    # One row per source-native id that has ever had an attempt. Written by the loader.
+    sample_native_ids = {
+      dataset   = "ms_raw"
+      partition = "first_slot_start"
+      cluster   = ["source", "metric"]
+    }
+    # Derived catalogue history about canonical entities. Not source data.
+    entity_events = {
+      dataset   = "ms_catalogue"
+      partition = "occurred_at"
+      cluster   = ["canonical_game_id"]
+    }
+    lifecycle_events = {
+      dataset   = "ms_catalogue"
+      partition = "occurred_at"
+      cluster   = ["canonical_game_id"]
+    }
+  }
+
+  # Every role held on each dataset, and by whom. This is the whole policy.
+  #   - Project owners keep ownership, so the dataset stays recoverable and manageable
+  #     by a person. BigQuery also requires a dataset to have an owner.
+  #   - The deploy identity is NOT listed: it manages tables through its reviewed
+  #     project-level role, and needs no dataset-level ownership on top of it.
+  #   - Project editors and viewers are NOT listed.
+  dataset_policy = {
+    for dataset in keys(local.datasets) : dataset => merge(
+      { "roles/bigquery.dataOwner" = ["projectOwner:${var.project_id}"] },
+      {
+        for role in distinct([for g in local.dataset_grants : g[2] if g[1] == dataset]) :
+        role => sort([
+          for g in local.dataset_grants : local.member[g[0]] if g[1] == dataset && g[2] == role
+        ])
+      },
+    )
   }
 }
 
@@ -93,15 +140,32 @@ resource "google_bigquery_dataset" "this" {
   }
 }
 
-resource "google_bigquery_dataset_iam_member" "access" {
-  for_each = {
-    for grant in local.dataset_grants : "${grant[0]}:${grant[1]}:${grant[2]}" => grant
-  }
+resource "google_bigquery_dataset_iam_policy" "this" {
+  for_each = local.dataset_policy
 
   project    = var.project_id
-  dataset_id = google_bigquery_dataset.this[each.value[1]].dataset_id
-  role       = each.value[2]
-  member     = local.member[each.value[0]]
+  dataset_id = google_bigquery_dataset.this[each.key].dataset_id
+
+  # The policy document, written out in full. Nothing is merged with what exists.
+  policy_data = jsonencode({
+    bindings = [
+      for role in sort(keys(each.value)) : {
+        role    = role
+        members = each.value[role]
+      }
+    ]
+  })
+}
+
+# The per-member grants this policy replaces. They are forgotten, not destroyed:
+# destroying one would remove its binding from a dataset whose policy has just been
+# written, in whatever order Terraform happened to run the two.
+removed {
+  from = google_bigquery_dataset_iam_member.access
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "google_bigquery_table" "fact" {

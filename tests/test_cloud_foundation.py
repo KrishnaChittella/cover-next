@@ -361,10 +361,22 @@ def test_collectors_can_write_only_their_own_paths() -> None:
         "ms-features"
     }
     assert ("state", "roles/storage.objectViewer", "baseline/") in by_identity["ms-parity"]
-    # The dispatcher writes only its own operational state.
-    assert {(b, p) for b, r, p in by_identity["ms-dispatch"] if r in writers} == {
-        ("ops", "dispatch/")
+    # The dispatcher writes only its own operational state and its own record of
+    # intent. It can create under its landing prefix and cannot read or replace there.
+    assert {(b, r, p) for b, r, p in by_identity["ms-dispatch"] if r in writers} == {
+        ("ops", "roles/storage.objectUser", "dispatch/"),
+        ("landing", "roles/storage.objectCreator", "dispatch/"),
     }
+    # Derived catalogue history has its own landing prefix, apart from any source's.
+    assert ("landing", "roles/storage.objectCreator", "catalogue/") in by_identity["ms-catalogue"]
+    # Nothing in the landing bucket is writable by more than create, by anyone.
+    assert {row[2] for row in table if row[1] == "landing" and row[2] in writers} == {
+        "roles/storage.objectCreator"
+    }
+    # Completion markers need no grant of their own: each collector already holds
+    # read and write by exact name under its own operations prefix, and nobody was
+    # given a listing for them.
+    assert len(table) == 26
     # No runtime identity is given a role that can delete landed data or administer a bucket.
     roles = {row[2] for row in table}
     assert roles <= {
@@ -432,6 +444,45 @@ def test_jobs_are_deployed_by_digest_and_data_access_is_per_dataset() -> None:
     assert "deletion_protection = true" in code(bigquery)
 
 
+def test_dataset_access_is_authoritative_and_default_entries_cannot_return() -> None:
+    bigquery = code(read(PROD / "bigquery.tf"))
+    # One whole policy per dataset. Nothing is merged with what BigQuery put there.
+    assert 'resource "google_bigquery_dataset_iam_policy" "this"' in bigquery
+    assert "for_each = local.dataset_policy" in bigquery
+    # No additive dataset grant of any kind exists beside it: mixing the two would let
+    # one silently undo the other.
+    for additive in (
+        'resource "google_bigquery_dataset_iam_member"',
+        'resource "google_bigquery_dataset_iam_binding"',
+        'resource "google_bigquery_dataset_access"',
+    ):
+        assert additive not in bigquery, additive
+    assert not re.search(r"^\s*access\s*\{", bigquery, re.M)  # nor an inline access block
+    # The old per-member grants are forgotten, not destroyed.
+    removed = re.search(r"removed \{(.*?)\n\}", bigquery, re.S)
+    assert removed and "google_bigquery_dataset_iam_member.access" in removed.group(1)
+    assert "destroy = false" in removed.group(1)
+    # The only owner is the project's owners. The deploy identity, project editors and
+    # project viewers hold nothing at dataset level.
+    assert '{ "roles/bigquery.dataOwner" = ["projectOwner:${var.project_id}"] }' in bigquery
+    for absent in ("ms-deploy", "projectEditor", "projectViewer", "projectWriters",
+                   "projectReaders", "allUsers", "allAuthenticatedUsers"):  # fmt: skip
+        assert absent not in bigquery, absent
+    table = [row for row in grants(read(PROD / "bigquery.tf"), "dataset_grants") if len(row) == 3]
+    assert len(table) == 14 and {row[2] for row in table} == {
+        "roles/bigquery.dataEditor", "roles/bigquery.dataViewer"
+    }  # fmt: skip
+    # No runtime identity holds a project-level BigQuery data role.
+    bootstrap = code(terraform(BOOTSTRAP))
+    for broad in (
+        "roles/bigquery.dataEditor",
+        "roles/bigquery.dataViewer",
+        "roles/bigquery.dataOwner",
+    ):
+        assert broad not in bootstrap, broad
+    assert (PROD / "tests" / "dataset_access.tftest.hcl").is_file()
+
+
 def test_every_fact_table_has_a_schema_whose_partition_and_cluster_columns_exist() -> None:
     bigquery = read(PROD / "bigquery.tf")
     shape = (
@@ -448,6 +499,10 @@ def test_every_fact_table_has_a_schema_whose_partition_and_cluster_columns_exist
         "quarantine_events",
         "bucket_evaluations",
         "collection_runs",
+        "expected_targets",
+        "sample_native_ids",
+        "entity_events",
+        "lifecycle_events",
     }
     for name, _, partition, cluster in tables:
         schema = json.loads(read(PROD / "schemas" / f"{name}.json"))
@@ -710,7 +765,7 @@ def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> N
         "ghcr.io/astral-sh/uv:0.5@sha256:"
         "7bff3c3776ec467fc1437960f2c469d8beb30f536a6465a3350c647ccd260ec2"
     ]
-    assert [helper for helper in helpers if "/" not in helper] == ["build"]  # our own stage
+    assert {helper for helper in helpers if "/" not in helper} == {"build"}  # our own stage
     # The security fix is targeted: two named packages, upgrade only, no blanket upgrade,
     # no pinned Debian revision, and it runs as root before the user is dropped.
     patch = re.search(r"RUN apt-get update \\\n(.*?)rm -rf /var/lib/apt/lists/\*", dockerfile, re.S)
@@ -727,11 +782,18 @@ def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> N
     instructions = code(dockerfile)
     assert "COPY . " not in instructions and "ADD " not in instructions
     assert not re.search(r"(?i)\b(ARG|ENV)\s+\w*(KEY|SECRET|TOKEN|PASSWORD)", instructions)
-    assert ".env" not in instructions and "tests" not in instructions
+    assert ".env" not in instructions
+    # The application's own tests and fixtures never enter the image. dbt's data
+    # tests (warehouse/tests, SQL only) do: the warehouse job runs them.
+    copied = re.findall(r"^COPY\s+(?:--\S+\s+)*(.+)$", instructions, re.M)
+    assert not [line for line in copied if re.search(r"(^|\s)tests(/|\s|$)", line)]
+    assert "/opt/dbt" in instructions and "--no-dev --no-install-project" in instructions
     ignore = read(REPO / ".dockerignore").splitlines()
     assert ignore[1] == "*" or "*" in ignore[:3]  # deny by default
     allowed = [line[1:] for line in ignore if line.startswith("!")]
-    assert allowed == ["pyproject.toml", "uv.lock", "README.md", "src/"]
+    assert allowed == ["pyproject.toml", "uv.lock", "README.md", "src/", "warehouse/"]
+    for never in ("warehouse/.venv/", "warehouse/target/", "warehouse/logs/"):
+        assert never in ignore, never
     for never in (".env", ".metaspike/", "tests/", "infra/", ".git/", "*.tfvars"):
         assert never in ignore, never
 

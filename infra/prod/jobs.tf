@@ -3,8 +3,8 @@
 # from the internet; they are started by the scheduler (dispatcher only) or by the
 # dispatcher (everything else).
 #
-# The commands below are the Part C and Part D entry points. They do not exist in the
-# application yet, which is one reason the scheduler starts paused.
+# The commands below exist in the application. The scheduler still starts paused:
+# nothing runs unattended until that is deliberately released.
 
 locals {
   jobs = {

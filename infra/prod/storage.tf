@@ -66,6 +66,9 @@ locals {
     # Dispatcher: reads operational state, writes only its own.
     ["ms-dispatch", "ops", "roles/storage.objectViewer", ""],
     ["ms-dispatch", "ops", "roles/storage.objectUser", "dispatch/"],
+    # Its record of intent (the expected-target ledger) and its own run log. Create
+    # only: it can neither read nor replace what it landed.
+    ["ms-dispatch", "landing", "roles/storage.objectCreator", "dispatch/"],
 
     # Steam players: its own landing and ops paths, the shared Steam quota ledger,
     # and read-only catalogue state to find its targets.
@@ -83,6 +86,9 @@ locals {
     # Catalogue: IGDB and Steam app list, the token cache, and catalogue state.
     ["ms-catalogue", "landing", "roles/storage.objectCreator", "igdb/"],
     ["ms-catalogue", "landing", "roles/storage.objectCreator", "steam_catalogue/"],
+    # Derived catalogue history about canonical entities (entity and lifecycle
+    # events) and the job's run log. MetaSpike's own records, not source data.
+    ["ms-catalogue", "landing", "roles/storage.objectCreator", "catalogue/"],
     ["ms-catalogue", "raw", "roles/storage.objectCreator", "igdb/"],
     ["ms-catalogue", "ops", "roles/storage.objectUser", "catalogue/"],
     ["ms-catalogue", "ops", "roles/storage.objectUser", "quota/steam_web_api/"],
