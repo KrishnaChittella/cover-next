@@ -28,8 +28,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
         with:
           enable-cache: true
       - name: Install Python
@@ -61,15 +61,18 @@ jobs:
         run: uv run metaspike evaluate-resolver
       - name: baseline_rules_v1 reproduction pin
         run: uv run pytest tests/test_v1_reproduction.py
-      - name: Dependency audit
+      # Both environments the image carries: the application's, and dbt's.
+      - name: Dependency audit (application)
         run: uvx pip-audit --strict --requirement <(uv export --locked --no-dev --no-hashes --no-emit-project)
+      - name: Dependency audit (dbt runtime)
+        run: uvx pip-audit --strict --requirement <(uv export --project warehouse --locked --no-dev --no-hashes --no-emit-project)
 
   infrastructure:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.16.5"
       - name: Format
@@ -93,7 +96,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # --pull and --no-cache: the base is pinned by digest, and the security-update
       # layer must really run, so nothing is ever taken from a stale local cache.
       - name: Build (not pushed)
@@ -102,6 +105,14 @@ jobs:
         run: |
           docker run --rm metaspike:ci --help
           test "$(docker run --rm --entrypoint id metaspike:ci -u)" != "0"
+      # The image carries dbt in its own environment. It must start, read the project
+      # for the production target, and be unable to write to /app or /opt/dbt.
+      - name: The image's dbt starts and the image stays read-only
+        run: |
+          docker run --rm --entrypoint /opt/dbt/bin/dbt metaspike:ci parse --target prod \
+            --project-dir /app/warehouse --profiles-dir /app/warehouse \
+            --target-path /tmp/dbt-target --log-path /tmp/dbt-logs
+          ! docker run --rm --entrypoint sh metaspike:ci -c 'touch /app/x || touch /opt/dbt/x'
       - name: Scan the image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
