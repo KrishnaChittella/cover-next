@@ -19,8 +19,10 @@ flags:
   send_anonymous_usage_stats: false
 
 vars:
-  # A full build reads raw history from here. Nothing was collected before it.
-  history_start: "2026-10-01 00:00:00"
+  # Where a first build or a full refresh starts reading. Unset: the boundary is the
+  # earliest partition that holds a row in the raw tables, so ALL retained history is
+  # rebuilt, however old. Set it only to replay deliberately from a later point.
+  history_start: null
   # An incremental run recomputes this many whole UTC days before today, which is
   # how a late-arriving batch is picked up.
   lookback_days: 3

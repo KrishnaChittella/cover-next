@@ -314,10 +314,18 @@ uv run --project warehouse --locked dbt build --selector hourly \
 ```
 
 The default target is `offline` (DuckDB). The `prod` target is BigQuery with the job's
-own identity and a 1 GiB maximum-bytes-billed limit on every job. An incremental run
-recomputes the three whole UTC days before now. Rows older than that are handled by
-the warehouse job (see "Late data" below), never left out. dbt computes no feature and
-no score.
+own identity and a 1 GiB maximum-bytes-billed limit on every job. dbt computes no
+feature and no score. A model reads from one of three starting points:
+
+- **Normal run:** the three whole UTC days before now.
+- **Late data:** the day the late rows reach back to, passed in by the warehouse job
+  (see "Late data" below).
+- **First build or full refresh:** ALL retained history. The starting point is not a
+  date written anywhere. It is read from the warehouse: the earliest day-partition
+  that holds a row in the raw tables a model is built from. That read is of partition
+  metadata, so the raw tables still require a partition filter on every data read.
+  With no raw history the build is simply empty. `history_start` can be passed to
+  replay deliberately from a later point; it is unset by default.
 
 ### Catalogue scope
 
@@ -489,6 +497,21 @@ Every one of these must be closed, in writing, before the scheduler is enabled.
 8. **Node.js action migration.** `actions/checkout`, `google-github-actions/auth`,
    `hashicorp/setup-terraform` and `actions/upload-artifact` as pinned target a
    Node.js version GitHub is retiring.
+
+13. **Deleting raw rows needs a rebuild to be complete.** Raw warehouse tables are
+    append-only during normal operation. If a source, privacy or data-removal request
+    requires deleting raw rows, the deletion workflow MUST be followed by an
+    appropriate full or partition rebuild before the removal is considered complete.
+    An ordinary incremental dbt run is NOT sufficient: it replaces only the partitions
+    present in its new result, so deleted raw rows can remain represented in derived
+    tables. This is part of any future data-removal or privacy operation, including
+    removing Steam data if Valve requires it.
+14. **Wikimedia steady-state window.** The supervised bootstrap collection fetches
+    about 90 days of history per article, which is right for a first run and for the
+    single S3 measurement. Before unattended scheduling, decide a cheaper steady-state
+    window and cadence, so that a routine run does not refetch 90 days and trigger a
+    90-day rebuild of the period models every time. The collector already takes the
+    window from `METASPIKE_WIKIMEDIA_DAYS`; what is missing is the decision.
 
 Part B added these, which are gates for the same reason:
 

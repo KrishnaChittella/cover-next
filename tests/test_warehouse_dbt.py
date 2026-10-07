@@ -666,3 +666,179 @@ def test_the_daily_selector_builds_every_model(dbt_ready: None, tmp_path: Path) 
     }
     assert {"ms_staging.stg_period_observations", "ms_staging.stg_source_records"} <= built_tables
     assert SOURCE and len(built_tables) == 9
+
+
+# --- full refresh rebuilds ALL retained history ----------------------------------------------
+
+OLD_SLOT = datetime(2026, 6, 15, 9, 0, tzinfo=UTC)  # 116 days before the run
+PRE_OCTOBER_SLOT = datetime(2026, 9, 20, 9, 0, tzinfo=UTC)
+RECENT_SLOT = datetime(2026, 10, 8, 9, 0, tzinfo=UTC)
+OLD_COUNT = "select count(*) from ms_marts.resolved_sample_slots where slot_start < '2026-10-01'"
+ALL_SLOTS = "select cast(slot_start as varchar) from ms_marts.resolved_sample_slots order by 1"
+
+
+def historical_world() -> World:
+    """Recent samples, and samples from long before any date this project once assumed."""
+    w = world(lambda: AS_OF)
+    store = WarehouseSampleStore(w.writer, w.warehouse, w.policy_for, now=w.now)
+    for name, slot in (("old", OLD_SLOT), ("sept", PRE_OCTOBER_SLOT), ("recent", RECENT_SLOT)):
+        one = attempt(
+            slot + minutes(1), value=10, app="42", attempt_id=f"h-{name}", scheduled_for=slot
+        )
+        store.append_many([one.model_copy(update={"collection_run_id": f"run-{name}"})])
+        w.writer.land_internal(
+            Table.EXPECTED_TARGETS,
+            "dispatch",
+            f"tick-{name}",
+            slot,
+            [ledger_row(SOURCE, "concurrent_players", SLOT.value, "sample_now", "42", slot)],
+        )
+    w.load_everything()
+    return w
+
+
+def test_a_full_refresh_rebuilds_history_older_than_any_fixed_date(
+    dbt_ready: None, tmp_path: Path
+) -> None:
+    assert (AS_OF - OLD_SLOT).days > 90
+    w = historical_world()
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(w, path)
+    # A first build has no table to be incremental against: it reads all retained history.
+    build(path)
+    slots = [row[0][:10] for row in query(path, ALL_SLOTS)]
+    assert slots == ["2026-06-15", "2026-09-20", "2026-10-08"]
+    first = snapshot(path)
+
+    # The normal fast path still recomputes only the recent days.
+    build(path)
+    assert snapshot(path) == first
+    log = tmp_path / "target" / "compiled" / "metaspike_warehouse" / "models" / "staging"
+    compiled = (log / "stg_sample_attempts.sql").read_text()
+    assert "interval 3 day" in compiled and "2026-06-15" not in compiled
+
+    # A full refresh arrives at the same tables: nothing is lost for being old.
+    build(path, "--full-refresh")
+    assert snapshot(path) == first
+    assert query(path, OLD_COUNT) == [(2,)]
+    refreshed = (log / "stg_sample_attempts.sql").read_text()
+    assert "timestamp '2026-06-15 00:00:00'" in refreshed  # read from the data, not written down
+    coverage = query(
+        path, "select cast(day as varchar), expected_slots, observed_slots "
+        "from ms_marts.sample_coverage_daily order by 1"
+    )  # fmt: skip
+    assert [(d[:10], e, o) for d, e, o in coverage] == [
+        ("2026-06-15", 1, 1), ("2026-09-20", 1, 1), ("2026-10-08", 1, 1)
+    ]  # fmt: skip
+
+
+def test_full_refresh_equals_the_incremental_and_late_rebuild_route(
+    dbt_ready: None, tmp_path: Path
+) -> None:
+    """Old data that arrives late, rebuilt incrementally, equals a full refresh of it all."""
+    recent_only = world(lambda: AS_OF)
+    store = WarehouseSampleStore(
+        recent_only.writer, recent_only.warehouse, recent_only.policy_for, now=recent_only.now
+    )
+    one = attempt(RECENT_SLOT + minutes(1), value=10, app="42", attempt_id="h-recent",
+                  scheduled_for=RECENT_SLOT)  # fmt: skip
+    store.append_many([one.model_copy(update={"collection_run_id": "run-recent"})])
+    recent_only.writer.land_internal(
+        Table.EXPECTED_TARGETS, "dispatch", "tick-recent", RECENT_SLOT,
+        [ledger_row(SOURCE, "concurrent_players", SLOT.value, "sample_now", "42", RECENT_SLOT)],
+    )  # fmt: skip
+    recent_only.load_everything()
+    stepwise = tmp_path / "stepwise.duckdb"
+    copy_to_duckdb(recent_only, stepwise)
+    build(stepwise)
+    assert query(stepwise, OLD_COUNT) == [(0,)]
+
+    # The old batches arrive. A plain incremental run does not reach them; the late-data
+    # rebuild, told the day they reach back to, does.
+    everything = historical_world()
+    copy_to_duckdb_raw(everything, stepwise)
+    build(stepwise)
+    assert query(stepwise, OLD_COUNT) == [(0,)]
+    build(stepwise, rebuild_from={"samples": "2026-06-15 00:00:00"})
+    assert query(stepwise, OLD_COUNT) == [(2,)]
+
+    direct = tmp_path / "direct.duckdb"
+    copy_to_duckdb(everything, direct)
+    build(direct, "--full-refresh")
+
+    def logical(path: Path) -> dict[str, list[tuple[Any, ...]]]:
+        # Everything but the load bookkeeping, which differs between the two worlds.
+        return {
+            table: sorted(query(path, f"select * from {table}"), key=repr)
+            for table in (
+                "ms_marts.resolved_sample_slots",
+                "ms_marts.sample_coverage_daily",
+                "ms_marts.source_health_daily",
+            )
+        }
+
+    assert logical(stepwise) == logical(direct)
+    build(stepwise, "--full-refresh")
+    assert logical(stepwise) == logical(direct)
+    assert [row[0][:10] for row in query(direct, ALL_SLOTS)] == [
+        "2026-06-15", "2026-09-20", "2026-10-08"
+    ]  # fmt: skip
+
+
+def copy_to_duckdb_raw(w: World, path: Path) -> None:
+    """Refresh every raw table in place, leaving what dbt built where it is."""
+    connection = duckdb.connect(str(path))
+    try:
+        for name, fields in table_schemas().items():
+            dataset, table = name.split(".")
+            connection.execute(f"delete from {name}")
+            rows = w.warehouse.all_rows(TableRef(dataset, table))
+            if rows:
+                marks = ", ".join("?" for _ in fields)
+                connection.executemany(
+                    f"insert into {name} values ({marks})",
+                    [[_cell(row[f["name"]], f) for f in fields] for row in rows],
+                )
+    finally:
+        connection.close()
+
+
+def test_an_empty_warehouse_full_refreshes_to_empty_tables(dbt_ready: None, tmp_path: Path) -> None:
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(world(lambda: AS_OF), path)
+    log = build(path, "--full-refresh", selector="daily")
+    assert "ERROR=0" in log
+    assert query(path, "select count(*) from ms_marts.resolved_sample_slots") == [(0,)]
+    assert query(path, "select count(*) from ms_staging.stg_period_observations") == [(0,)]
+
+
+def test_the_history_boundary_can_be_stated_explicitly_for_a_deliberate_replay(
+    dbt_ready: None, tmp_path: Path
+) -> None:
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(historical_world(), path)
+    variables = json.dumps(
+        {"run_as_of": f"{naive(AS_OF):%Y-%m-%d %H:%M:%S}", "history_start": "2026-09-01 00:00:00"}
+    )
+    _dbt("build", "--target", "offline", "--selector", "hourly", "--full-refresh",
+         "--vars", variables, database=path)  # fmt: skip
+    assert [row[0][:10] for row in query(path, ALL_SLOTS)] == ["2026-09-20", "2026-10-08"]
+
+
+def test_no_fixed_history_date_remains_and_the_guards_are_still_in_place() -> None:
+    project = yaml.safe_load((PROJECT / "dbt_project.yml").read_text())
+    assert project["vars"]["history_start"] is None
+    for path in [*PROJECT.glob("models/**/*.sql"), *PROJECT.glob("macros/*.sql"),
+                 *PROJECT.glob("tests/*.sql"), PROJECT / "dbt_project.yml"]:  # fmt: skip
+        assert not re.search(r"20\d\d-\d\d-\d\d", path.read_text()), path.name
+    window = (PROJECT / "macros" / "window.sql").read_text()
+    # The boundary is read from partition metadata, which needs no partition filter.
+    assert "INFORMATION_SCHEMA.PARTITIONS" in window and "total_rows > 0" in window
+    for group in ("samples", "periods", "records", "runs"):
+        assert f"'{group}':" in window
+    # The raw tables still refuse an unbounded read, and every dbt job is still limited.
+    assert (
+        "require_partition_filter = true" in (REPO / "infra" / "prod" / "bigquery.tf").read_text()
+    )
+    prod = yaml.safe_load((PROJECT / "profiles.yml").read_text())["metaspike_warehouse"]["outputs"]
+    assert prod["prod"]["maximum_bytes_billed"] == 1024**3
