@@ -24,7 +24,12 @@ from metaspike.jobs.baseline_jobs import features, parity
 from metaspike.jobs.catalogue_job import Fetcher, collect_catalogue
 from metaspike.jobs.collect import collect_samples, collect_wikimedia
 from metaspike.jobs.dispatch import CloudRunJobs, dispatch
-from metaspike.jobs.runtime import ConfigurationError, Runtime, runtime_from_environment
+from metaspike.jobs.runtime import (
+    BUCKETS,
+    ConfigurationError,
+    Runtime,
+    runtime_from_environment,
+)
 from metaspike.jobs.smoke import MODES, SmokeFailed, smoke
 from metaspike.jobs.targets import load_targets
 from metaspike.jobs.warehouse_job import warehouse
@@ -143,6 +148,9 @@ def _run(args: argparse.Namespace) -> int:
     return handler(runtime)
 
 
+_EXPECTATION = {"allowed": True, "denied": False}
+
+
 def _smoke(args: argparse.Namespace) -> int:
     try:
         runtime = runtime_from_environment("smoke")
@@ -150,9 +158,19 @@ def _smoke(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return EXIT_CONFIGURATION
     try:
-        result = smoke(runtime, args.bucket, args.allowed_prefix, args.outside_prefix, args.mode)
+        result = smoke(
+            runtime,
+            args.bucket,
+            args.allowed_prefix,
+            args.outside_prefix,
+            args.mode,
+            read_object=args.read_object,
+            expect_read=_EXPECTATION.get(args.expect_read),
+            expect_list=_EXPECTATION.get(args.expect_list),
+            strict_list=args.strict_list,
+        )
     except SmokeFailed as failure:
-        print(json.dumps({"passed": False, "reason": str(failure)}))
+        print(json.dumps({**failure.result, "reason": str(failure)}, sort_keys=True))
         return runlog.EXIT_FAILED
     print(json.dumps(result, sort_keys=True))
     return runlog.EXIT_OK
@@ -165,8 +183,26 @@ def register(commands: Any) -> None:
     parser = commands.add_parser(
         "smoke", help="check this identity's storage permissions; calls no source"
     )
-    parser.add_argument("--bucket", required=True, choices=["landing", "raw", "state", "ops"])
-    parser.add_argument("--allowed-prefix", required=True)
-    parser.add_argument("--outside-prefix", required=True)
+    parser.add_argument("--bucket", required=True, choices=list(BUCKETS))
     parser.add_argument("--mode", default="user", choices=MODES)
+    parser.add_argument("--allowed-prefix", default="", help="empty for a whole-bucket mode")
+    parser.add_argument("--outside-prefix", default=None)
+    parser.add_argument(
+        "--read-object",
+        default=None,
+        help="an existing object to read, for an identity that cannot create one",
+    )
+    parser.add_argument(
+        "--expect-read",
+        choices=["allowed", "denied"],
+        help="override the shape where another reviewed grant gives read on this bucket",
+    )
+    parser.add_argument(
+        "--expect-list",
+        choices=["allowed", "denied"],
+        help="override the shape where another reviewed grant gives listing on this bucket",
+    )
+    parser.add_argument(
+        "--strict-list", action="store_true", help="fail when listing is not as expected"
+    )
     parser.set_defaults(handler=_smoke)

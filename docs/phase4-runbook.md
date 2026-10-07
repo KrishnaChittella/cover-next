@@ -390,8 +390,8 @@ and cannot write to `/app` or `/opt/dbt`.
 
 ### Dataset access
 
-Each BigQuery dataset has one authoritative policy in Terraform: project owners own
-it, and the three warehouse-facing runtime identities hold exactly the roles listed
+Each BigQuery dataset has one authoritative policy in Terraform: BigQuery's
+`projectOwners` special group owns it, and the three warehouse-facing runtime identities hold exactly the roles listed
 in `dataset_grants`. The entries BigQuery adds on its own (the creating identity as
 owner, project editors, project viewers) are not in the policy and are removed on
 apply. `ms-deploy` manages tables through its project-level role and holds nothing at
@@ -400,11 +400,44 @@ dataset level.
 ### Running the permission check
 
 It runs as the job's own identity, by overriding one job execution's arguments. No
-impersonation is granted to anyone.
+impersonation is granted to anyone, and no grant is widened to make the check tidy.
+
+Each probe is judged against the shape of grant the identity holds, and gets one of
+four verdicts: `ALLOWED`, `EXPECTED_DENIAL`, `UNEXPECTED_FAILURE`, `UNEXPECTED_ALLOW`.
+Only the last two fail the check.
+
+| Shape | Grant | Create | Read | Overwrite | Delete | List | Cleanup |
+|---|---|---|---|---|---|---|---|
+| `user` | `objectUser` on a prefix | yes | yes | yes | yes | no | the runtime identity |
+| `creator` | `objectCreator` on a prefix | yes | no | no | no | no | an administrator, afterwards |
+| `viewer` | `objectViewer` on a prefix | no | yes | n/a | n/a | no | nothing is written |
+| `bucket_viewer` | `objectViewer` on the bucket | no | yes | n/a | n/a | yes | nothing is written |
+| `bucket_user` | `objectUser` on the bucket | yes | yes | yes | yes | yes | the runtime identity |
+
+Every prefix shape also requires a create outside the prefix to be denied.
+
+A create-only identity cannot delete what it wrote. That is what keeps landed data
+immutable, so its refused delete is an `EXPECTED_DENIAL` and the check passes. The
+object stays under `<prefix>_smoke/`, where the loader never looks, and the result
+names it. The project owner removes it afterwards with access the runtime identity
+never had:
+
+```
+gcloud storage rm gs://<PROJECT_ID>-landing/<prefix>_smoke/<run-id>.txt
+```
+
+Read is probed on an object that exists. An identity that cannot create needs one
+placed for it first (`--read-object`), because the service answers "forbidden", not
+"not found", to an identity that may not list. Listing is reported and judged but
+does not fail the check unless `--strict-list` is given. Where another reviewed
+grant independently gives read or listing on the same bucket, say so with
+`--expect-read allowed` or `--expect-list allowed`.
 
 ```
 gcloud run jobs execute ms-wikimedia --region us-central1 --project <PROJECT_ID> --wait \
-    --args=smoke,--bucket=ops,--allowed-prefix=wikimedia_pageviews/,--outside-prefix=dispatch/
+    --args=smoke,--bucket=ops,--mode=user,--allowed-prefix=wikimedia_pageviews/,--outside-prefix=dispatch/
+gcloud run jobs execute ms-dispatch --region us-central1 --project <PROJECT_ID> --wait \
+    --args=smoke,--bucket=landing,--mode=creator,--allowed-prefix=dispatch/,--outside-prefix=catalogue/
 ```
 
 ## Hard gates before Part C (unattended collection)

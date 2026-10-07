@@ -24,7 +24,19 @@ from metaspike.jobs.collect import collect_samples, collect_wikimedia
 from metaspike.jobs.commands import JOBS
 from metaspike.jobs.dispatch import dispatch, due_jobs
 from metaspike.jobs.runtime import POLICIES, Refused, production_policy, runtime_from_environment
-from metaspike.jobs.smoke import SmokeFailed, smoke
+from metaspike.jobs.smoke import (
+    ADMINISTRATOR,
+    ALLOWED,
+    EXPECTED_DENIAL,
+    NOBODY,
+    NOT_APPLICABLE,
+    RUNTIME,
+    SHAPES,
+    UNEXPECTED_ALLOW,
+    UNEXPECTED_FAILURE,
+    SmokeFailed,
+    smoke,
+)
 from metaspike.jobs.targets import (
     BOOTSTRAP_VERSION,
     TARGETS_OBJECT,
@@ -751,7 +763,7 @@ def test_features_keeps_a_state_per_target_and_parity_agrees_with_a_rebuild() ->
     assert [e["event"] for e in log if e["severity"] == "ERROR"] == ["parity_mismatch"]
 
 
-# --- smoke ---------------------------------------------------------------------------------
+# --- smoke: one test per shape of storage grant --------------------------------------------
 
 
 def identity(bucket: MemoryObjectStore, prefix: str, **options: Any) -> MemoryObjectStore:
@@ -764,42 +776,181 @@ def smoke_runtime(w: World, **buckets: MemoryObjectStore) -> Any:
     return runtime, log
 
 
-def test_smoke_proves_the_allowed_write_the_refusal_outside_and_cleans_up() -> None:
+def verdicts(result: Mapping[str, Any]) -> dict[str, str]:
+    return {name: outcome["verdict"] for name, outcome in result["probes"].items()}
+
+
+def test_smoke_shapes_are_the_least_privilege_of_each_grant() -> None:
+    assert set(SHAPES) == {"user", "creator", "viewer", "bucket_viewer", "bucket_user"}
+    creator = SHAPES["creator"]
+    # Storage Object Creator: create, and nothing else. Not read, overwrite, delete or list.
+    assert (creator.create, creator.read, creator.overwrite, creator.delete, creator.list) == (
+        True, False, False, False, False
+    )  # fmt: skip
+    assert SHAPES["user"].delete is True and SHAPES["viewer"].create is False
+    assert all(shape.bounded for name, shape in SHAPES.items() if not name.startswith("bucket_"))
+
+
+def test_an_object_user_prefix_passes_and_cleans_up_itself() -> None:
     w = at()
     runtime, log = smoke_runtime(
         w, ops=identity(w.operations, "wikimedia_pageviews/", can_list=False)
     )
     result = smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/")
-    assert result["allowed_write"] == "allowed" and result["outside_write"] == "denied"
-    assert result["list"] == "denied" and result["cleanup"] == "allowed" and result["passed"]
+    assert verdicts(result) == {
+        "create_inside": ALLOWED,
+        "create_outside": EXPECTED_DENIAL,
+        "read": ALLOWED,
+        "list": EXPECTED_DENIAL,
+        "overwrite": ALLOWED,
+        "delete": ALLOWED,
+    }
+    assert result["passed"] and result["unexpected"] == [] and result["for_review"] == []
+    assert result["cleanup"] == {
+        "actor": RUNTIME, "object": result["cleanup"]["object"], "done": True
+    }  # fmt: skip
     assert w.operations.list("") == ()  # nothing left behind
-    assert log[-1]["event"] == "smoke_result"
+    assert log[-1]["event"] == "smoke_result" and log[-1]["severity"] == "INFO"
 
 
-def test_smoke_fails_when_the_identity_can_write_where_it_must_not() -> None:
+def test_a_create_only_prefix_passes_with_its_denials_and_leaves_cleanup_to_an_administrator() -> (
+    None
+):
+    w = at()
+    creator = w.landing.view(
+        writable_prefixes=("dispatch/",), readable_prefixes=(), can_list=False, can_overwrite=False
+    )
+    runtime, log = smoke_runtime(w, landing=creator)
+    result = smoke(runtime, "landing", "dispatch/", "catalogue/", mode="creator")
+    assert verdicts(result) == {
+        "create_inside": ALLOWED,
+        "create_outside": EXPECTED_DENIAL,
+        "read": EXPECTED_DENIAL,
+        "list": EXPECTED_DENIAL,
+        "overwrite": EXPECTED_DENIAL,
+        "delete": EXPECTED_DENIAL,  # the design working, not a failure
+    }
+    assert result["passed"] and result["unexpected"] == []
+    # The object is still there, exactly as created, and the result says who removes it.
+    left = result["cleanup"]["object"]
+    assert result["cleanup"] == {"actor": ADMINISTRATOR, "object": left, "done": False}
+    assert w.landing.list("") == (left,) and "/_smoke/" in left  # never where the loader looks
+    assert w.landing.get(left).data.startswith(b"metaspike smoke")
+    assert log[-1]["severity"] == "INFO"
+    # The administrator removes it afterwards, with access the runtime identity never had.
+    w.landing.delete(left)
+    assert w.landing.list("") == ()
+
+
+@pytest.mark.parametrize(
+    ("grant", "broken"),
+    [
+        ({"can_list": False}, "delete"),  # can overwrite and delete: that is objectUser
+        ({"can_list": False, "can_overwrite": False, "readable": True}, "read"),
+    ],
+)
+def test_a_create_only_identity_that_can_do_more_fails(grant: dict[str, Any], broken: str) -> None:
+    w = at()
+    readable = ("dispatch/",) if grant.pop("readable", False) else ()
+    wider = w.landing.view(writable_prefixes=("dispatch/",), readable_prefixes=readable, **grant)
+    runtime, log = smoke_runtime(w, landing=wider)
+    with pytest.raises(SmokeFailed) as failure:
+        smoke(runtime, "landing", "dispatch/", "catalogue/", mode="creator")
+    assert broken in failure.value.result["unexpected"]
+    assert failure.value.result["probes"][broken]["verdict"] == UNEXPECTED_ALLOW
+    assert not failure.value.result["passed"] and log[-1]["severity"] == "ERROR"
+
+
+def test_a_write_outside_the_prefix_is_an_unexpected_allow_and_is_removed() -> None:
     w = at()
     runtime, _ = smoke_runtime(w, ops=w.operations)  # an identity with no prefix limit
-    with pytest.raises(SmokeFailed, match="outside the allowed prefix was not denied"):
-        smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/")
+    with pytest.raises(SmokeFailed, match="create_outside: expected denied, observed allowed") as f:
+        smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/", expect_list=True)
+    assert f.value.result["probes"]["create_outside"]["verdict"] == UNEXPECTED_ALLOW
+    assert f.value.result["probes"]["create_outside"]["removed"] == "allowed"
     assert w.operations.list("") == ()  # it removed what must not exist
 
-    denied, _ = smoke_runtime(w, ops=identity(w.operations, "features/"))
-    with pytest.raises(SmokeFailed, match="inside the allowed prefix did not succeed"):
-        smoke(denied, "ops", "wikimedia_pageviews/", "dispatch/")
 
-
-def test_smoke_expects_a_create_only_identity_to_be_unable_to_delete() -> None:
+def test_a_refused_write_that_should_have_worked_is_an_unexpected_failure() -> None:
     w = at()
-    creator = identity(w.landing, "wikimedia_pageviews/", can_list=False, can_overwrite=False)
-    runtime, _ = smoke_runtime(w, landing=creator)
-    result = smoke(runtime, "landing", "wikimedia_pageviews/", "igdb/", mode="creator")
-    assert result["cleanup"] == "denied" and result["left_for_owner"] == result["allowed_object"]
-    assert w.landing.list("") == (result["allowed_object"],)
-    assert "/_smoke/" in result["allowed_object"]  # never where the loader looks
+    wrong, _ = smoke_runtime(w, ops=identity(w.operations, "features/", can_list=False))
+    with pytest.raises(SmokeFailed, match="create_inside: expected allowed, observed denied") as f:
+        smoke(wrong, "ops", "wikimedia_pageviews/", "dispatch/")
+    probes = f.value.result["probes"]
+    assert probes["create_inside"]["verdict"] == UNEXPECTED_FAILURE
+    assert "delete" not in probes and f.value.result["cleanup"]["actor"] == NOBODY
+    assert probes["read"]["verdict"] == NOT_APPLICABLE  # nothing exists to read
 
-    deleter, _ = smoke_runtime(w, landing=identity(w.landing, "wikimedia_pageviews/"))
-    with pytest.raises(SmokeFailed, match="create-only identity was able to delete"):
-        smoke(deleter, "landing", "wikimedia_pageviews/", "igdb/", mode="creator")
-    for bad in (("ops", "a", "b/"), ("ops", "a/", "a/b/"), ("nowhere", "a/", "b/")):
+
+def test_listing_is_reported_and_only_fails_the_check_when_asked_to() -> None:
+    w = at()
+    lister = identity(w.operations, "wikimedia_pageviews/", can_list=True)
+    runtime, _ = smoke_runtime(w, ops=lister)
+    result = smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/")
+    assert result["passed"] and result["for_review"] == ["list"]
+    assert result["probes"]["list"]["verdict"] == UNEXPECTED_ALLOW
+    with pytest.raises(SmokeFailed, match="list: expected denied, observed allowed"):
+        smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/", strict_list=True)
+    # Where another reviewed grant gives listing, saying so makes it expected.
+    stated = smoke(runtime, "ops", "wikimedia_pageviews/", "dispatch/", expect_list=True)
+    assert stated["for_review"] == [] and stated["probes"]["list"]["verdict"] == ALLOWED
+
+
+def test_a_read_only_prefix_cannot_create_and_reads_an_object_placed_for_it() -> None:
+    w = at()
+    state = MemoryObjectStore()
+    state.create("catalogue/_smoke/fixture.txt", b"placed by an administrator")
+    viewer = state.view(writable_prefixes=(), readable_prefixes=("catalogue/",), can_list=False)
+    runtime, _ = smoke_runtime(w, state=viewer)
+    result = smoke(
+        runtime, "state", "catalogue/", "baseline/", mode="viewer",
+        read_object="catalogue/_smoke/fixture.txt",
+    )  # fmt: skip
+    assert verdicts(result) == {
+        "create_inside": EXPECTED_DENIAL,
+        "create_outside": EXPECTED_DENIAL,
+        "read": ALLOWED,
+        "list": EXPECTED_DENIAL,
+    }
+    assert result["passed"] and result["cleanup"] == {"actor": NOBODY, "object": None}
+    assert state.list("") == ("catalogue/_smoke/fixture.txt",)  # it wrote nothing
+    # With nothing placed, read is not probed and is not counted either way.
+    bare = smoke(runtime, "state", "catalogue/", "baseline/", mode="viewer")
+    assert bare["passed"] and bare["probes"]["read"]["verdict"] == NOT_APPLICABLE
+    # A viewer that can create is not a viewer.
+    writer, _ = smoke_runtime(w, state=identity(state, "catalogue/", can_list=False))
+    with pytest.raises(SmokeFailed) as failure:
+        smoke(writer, "state", "catalogue/", "baseline/", mode="viewer")
+    assert "create_inside" in failure.value.result["unexpected"]
+
+
+def test_whole_bucket_shapes_have_no_outside_and_list_is_expected() -> None:
+    w = at()
+    w.landing.create("igdb/_smoke/fixture.txt", b"x")
+    reader = w.landing.view(writable_prefixes=(), readable_prefixes=("",), can_list=True)
+    runtime, _ = smoke_runtime(w, landing=reader)
+    result = smoke(
+        runtime, "landing", "", mode="bucket_viewer", read_object="igdb/_smoke/fixture.txt"
+    )
+    assert verdicts(result) == {"create_inside": EXPECTED_DENIAL, "read": ALLOWED, "list": ALLOWED}
+    tokens = MemoryObjectStore()
+    owner, _ = smoke_runtime(w, tokens=tokens)
+    result = smoke(owner, "tokens", "", mode="bucket_user")
+    assert set(verdicts(result).values()) == {ALLOWED} and tokens.list("") == ()
+    assert result["cleanup"]["actor"] == RUNTIME
+
+
+def test_smoke_refuses_a_question_that_makes_no_sense() -> None:
+    w = at()
+    runtime, _ = smoke_runtime(w)
+    for arguments, options in (
+        (("ops", "a", "b/"), {}),
+        (("ops", "a/", "a/b/"), {}),
+        (("nowhere", "a/", "b/"), {}),
+        (("ops", "a/", None), {}),
+        (("ops", "", "b/"), {"mode": "bucket_user"}),
+        (("ops", "a/", "b/"), {"mode": "owner"}),
+    ):
         with pytest.raises(ValueError):
-            smoke(runtime, *bad)
+            smoke(runtime, *arguments, **options)  # type: ignore[arg-type]
+    assert w.operations.list("") == ()
