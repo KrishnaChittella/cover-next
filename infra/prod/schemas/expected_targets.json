@@ -2,7 +2,8 @@
   {
     "name": "source",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The source the target was scheduled for. Never a source that is not cleared."
   },
   {
     "name": "metric",
@@ -17,7 +18,8 @@
   {
     "name": "mode",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "sample_now or fetch_history. Only sample_now targets become sampling slots."
   },
   {
     "name": "source_native_id",
@@ -27,12 +29,14 @@
   {
     "name": "slot_start",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The slot the dispatcher intended this target to be collected in."
   },
   {
     "name": "schedule_version",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The catalogue generation (or 'bootstrap') the plan was made from."
   },
   {
     "name": "dispatch_run_id",
@@ -42,21 +46,25 @@
   {
     "name": "recorded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the intent was recorded. A later plan never rewrites an earlier row."
   },
   {
     "name": "landed_object",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
   },
   {
     "name": "content_sha256",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
   },
   {
     "name": "loaded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
   }
 ]

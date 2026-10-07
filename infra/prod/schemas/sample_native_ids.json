@@ -17,26 +17,31 @@
   {
     "name": "source_native_id",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "A target that has had at least one attempt. One row per target; repeats are harmless."
   },
   {
     "name": "first_slot_start",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The earliest slot of this target in the batch that first introduced it."
   },
   {
     "name": "landed_object",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
   },
   {
     "name": "content_sha256",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
   },
   {
     "name": "loaded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
   }
 ]

@@ -7,7 +7,8 @@
   {
     "name": "event_type",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "state_recorded or pending_changed."
   },
   {
     "name": "occurred_at",
@@ -27,7 +28,8 @@
   {
     "name": "valid_from",
     "type": "DATE",
-    "mode": "NULLABLE"
+    "mode": "NULLABLE",
+    "description": "The date the recorded state takes effect."
   },
   {
     "name": "rule_id",
@@ -42,7 +44,8 @@
   {
     "name": "detail",
     "type": "JSON",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The lifecycle record, or the pending change, as recorded."
   },
   {
     "name": "catalogue_generation",
@@ -57,16 +60,19 @@
   {
     "name": "landed_object",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
   },
   {
     "name": "content_sha256",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
   },
   {
     "name": "loaded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
   }
 ]

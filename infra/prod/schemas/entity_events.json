@@ -7,7 +7,8 @@
   {
     "name": "event_type",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "created or updated."
   },
   {
     "name": "occurred_at",
@@ -17,12 +18,14 @@
   {
     "name": "previous",
     "type": "JSON",
-    "mode": "NULLABLE"
+    "mode": "NULLABLE",
+    "description": "The entity before the change. NULL when created."
   },
   {
     "name": "entity",
     "type": "JSON",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "The entity after the change. Derived by MetaSpike; not source data."
   },
   {
     "name": "catalogue_generation",
@@ -37,16 +40,19 @@
   {
     "name": "landed_object",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
   },
   {
     "name": "content_sha256",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
   },
   {
     "name": "loaded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
   }
 ]

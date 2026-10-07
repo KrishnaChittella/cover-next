@@ -32,7 +32,8 @@
   {
     "name": "value",
     "type": "FLOAT64",
-    "mode": "NULLABLE"
+    "mode": "NULLABLE",
+    "description": "NULL is a missing period, never zero."
   },
   {
     "name": "status",
@@ -42,7 +43,8 @@
   {
     "name": "observed_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When this version of the period became known."
   },
   {
     "name": "collection_run_id",
@@ -52,21 +54,25 @@
   {
     "name": "landed_object",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "GCS object this row was loaded from."
   },
   {
     "name": "content_sha256",
     "type": "STRING",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "SHA-256 of that object."
   },
   {
     "name": "loaded_at",
     "type": "TIMESTAMP",
-    "mode": "REQUIRED"
+    "mode": "REQUIRED",
+    "description": "When the row was loaded."
   },
   {
     "name": "source_timestamp",
     "type": "TIMESTAMP",
-    "mode": "NULLABLE"
+    "mode": "NULLABLE",
+    "description": "The source's own timestamp for the observation, when it states one. Appended after the load columns: a column can only be added at the end of an existing table."
   }
 ]
