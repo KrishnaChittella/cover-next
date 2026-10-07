@@ -161,9 +161,22 @@ offline. It has not run in the cloud.
   immutable snapshots and one conditionally replaced pointer. Only bootstrap
   entities and records linked to them are in scope; broad discovery is off.
 
+Phase 4 Part C1 (job commands and gate closure) makes the seven jobs runnable and
+closes the gaps Part B left open. Nothing is scheduled.
+
+- **Seven commands and `smoke`.** Each job refuses to run unless its source's reviewed
+  policy clears the stage. The Steam collector refuses today.
+- **Completion markers** stop a normal retry from asking a source again once a result
+  is durable, without ever letting a marker stand in for a result.
+- **Expected targets.** The dispatcher records what it intended to collect, so a slot
+  nobody attempted is known to have been expected.
+- **Late data** is rebuilt into the models by the warehouse job, or the job fails.
+- **One image** with the application and dbt in separately locked environments.
+- **Dataset access** is authoritative in Terraform.
+
 See `docs/phase4-runbook.md` for the bootstrap steps, secret loading, the one-action
-stop, the Part B layout and the hard gates that must clear before unattended
-collection.
+stop, the layout, the job commands and the hard gates that must clear before
+unattended collection.
 
 ## What is implemented
 

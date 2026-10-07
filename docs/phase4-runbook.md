@@ -301,13 +301,10 @@ the refusal:
   History is walked from each generation record to the one before it.
 - The loader's receipts are read by exact name. Only the landing bucket is listed,
   and only by `ms-warehouse`, whose grant there is on the whole bucket.
-- A collector cannot find out from storage whether a slot was already sampled: it can
-  neither list nor read landing, and the warehouse sees a batch only after the hourly
-  load. Part C must give each collector a marker it can read by exact name under its
-  own operations prefix (for example `{source}/slots/{slot}.json`), or accept that a
-  retried execution samples the slot again. A repeat is harmless to the data (the
-  earliest success speaks for the slot, the other is kept as a duplicate) but costs
-  quota.
+- A collector cannot find out from landing whether a slot was already sampled: it
+  can neither list nor read there, and the warehouse sees a batch only after the next
+  load. It reads a completion marker instead, by exact name, under its own operations
+  prefix (see "Completion markers" below).
 
 ### dbt
 
@@ -318,15 +315,97 @@ uv run --project warehouse --locked dbt build --selector hourly \
 
 The default target is `offline` (DuckDB). The `prod` target is BigQuery with the job's
 own identity and a 1 GiB maximum-bytes-billed limit on every job. An incremental run
-recomputes the three whole UTC days before now; a batch that lands later than that is
-in the raw table and reaches the marts with `--full-refresh`. dbt computes no feature
-and no score.
+recomputes the three whole UTC days before now. Rows older than that are handled by
+the warehouse job (see "Late data" below), never left out. dbt computes no feature and
+no score.
 
 ### Catalogue scope
 
 Only the bootstrap entities and records tied to them by an explicit link are resolved.
 Broad catalogue discovery is switched off in code (`BROAD_DISCOVERY_ENABLED = False`)
 and stays off until the owner approves it.
+
+## Part C1: job commands
+
+Part C1 made the seven jobs runnable and added a safe permission check. Nothing runs
+unattended: the scheduler is still paused.
+
+| Command | Job | What it does |
+|---|---|---|
+| `dispatch` | `ms-dispatch` | Records what it intends to be collected, takes the tick's lease, starts the jobs that are due |
+| `collect-wikimedia` | `ms-wikimedia` | Daily pageviews for every entity with an article |
+| `collect-steam-players` | `ms-steam-players` | **Refuses**: Steam is not cleared for private collection |
+| `collect-catalogue` | `ms-catalogue` | Collects cleared catalogue sources, resolves, persists. Refuses the Steam portion |
+| `warehouse` | `ms-warehouse` | Loads landed batches, then runs dbt from the image's own dbt environment |
+| `features` | `ms-features` | Continues baseline states for a cleared sampled source. Nothing to do today |
+| `parity` | `ms-parity` | Rebuilds baseline states and compares. Nothing to do today |
+| `smoke` | any | Checks the identity's storage permissions. Calls no source |
+
+A job reads its configuration from the environment, writes a start and a finish record
+to the run log, logs one JSON object per line, and exits non-zero on failure. A job
+whose source policy does not clear the stage exits with code 5 before it builds
+anything that needs a credential. There is no policy override: the policies are the
+reviewed ones in the source modules.
+
+### Completion markers
+
+For each target and slot the order is fixed: read the marker by exact name; if a valid
+one exists, skip the source request; otherwise ask, land the result, commit the landing
+manifest, and only then create the marker, create-only. A marker holds which run and
+which landed object completed the slot, and never a value.
+
+This is not exactly-once. A run that dies after landing and before marking leaves a
+durable result and no marker, and the retry asks the source again. What is guaranteed
+is narrower: once a result is durable and marked, a normal retry does not ask again;
+and a marker can never cause a sample to be skipped, because it cannot exist before
+the batch it names. A failure or a refusal is never marked.
+
+### Expected targets
+
+The dispatcher records, for each tick, which targets it intended to be collected in
+which slot (`ms_ops.expected_targets`). dbt reconstructs expected slots from that
+ledger and joins what actually happened to it. A target that was scheduled and never
+attempted is therefore `not_sampled`; a target that was not scheduled has no expected
+slot; and a later change of eligibility adds rows for later slots without touching
+earlier ones. `not_sampled` exists only in a view and in counts. It is never a row.
+
+A source that is not cleared is never planned, so nothing about it is recorded as
+intent either.
+
+### Late data
+
+The models normally recompute three days. When the warehouse job loads rows older
+than that, it records a pending rebuild by name BEFORE it writes the batch's receipt,
+passes the day the late data reaches back to into dbt, and clears the record only
+after dbt has succeeded. A crash or a failed dbt run keeps the record and the job
+exits non-zero. No successful run leaves known late data out of the marts.
+
+### The image
+
+One image for all seven jobs. It carries two separately locked environments that do
+not import each other: the application at `/app/.venv`, and dbt with the BigQuery
+adapter at `/opt/dbt`. `metaspike warehouse` starts `/opt/dbt/bin/dbt` as a separate
+process. Both are audited and both are in the image scan. The image runs as uid 10001
+and cannot write to `/app` or `/opt/dbt`.
+
+### Dataset access
+
+Each BigQuery dataset has one authoritative policy in Terraform: project owners own
+it, and the three warehouse-facing runtime identities hold exactly the roles listed
+in `dataset_grants`. The entries BigQuery adds on its own (the creating identity as
+owner, project editors, project viewers) are not in the policy and are removed on
+apply. `ms-deploy` manages tables through its project-level role and holds nothing at
+dataset level.
+
+### Running the permission check
+
+It runs as the job's own identity, by overriding one job execution's arguments. No
+impersonation is granted to anyone.
+
+```
+gcloud run jobs execute ms-wikimedia --region us-central1 --project <PROJECT_ID> --wait \
+    --args=smoke,--bucket=ops,--allowed-prefix=wikimedia_pageviews/,--outside-prefix=dispatch/
+```
 
 ## Hard gates before Part C (unattended collection)
 
@@ -369,10 +448,9 @@ Part B added these, which are gates for the same reason:
    conditional replace and one refused overwrite against a real bucket; one load job
    and one bounded query against a real table, including a JSON column and a
    repeated column; and `dbt build` against BigQuery on an empty dataset.
-10. **dbt in the image.** The image contains no dbt. `ms-warehouse` cannot run the
-    models until an image that does is built, scanned and deployed, which changes the
-    image's size and its vulnerability surface.
-11. **Job commands.** `dispatch`, `collect-*`, `warehouse`, `features` and `parity`
-    do not exist as commands yet.
+10. **dbt in the image.** Built in Part C1: one image, two locked environments. It is
+    deployed only by a reviewed plan.
+11. **Job commands.** Built in Part C1. Each still has to run once under supervision
+    before anything is scheduled.
 12. **Broad catalogue discovery** stays off until the blocked resolver's equivalence
     results are accepted and discovery is approved.
