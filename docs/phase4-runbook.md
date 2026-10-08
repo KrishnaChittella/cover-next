@@ -499,17 +499,17 @@ needs a metric of our own (for example the age of the last success, written by t
 dispatcher). Until then freshness is covered indirectly, by dispatcher silence,
 repeated job failures and warehouse failures, and by the daily audit during a soak.
 
-### The BigQuery daily query quota (proposed; not set)
+### The BigQuery daily query quota (set on 2026-10-08)
 
-A hard gate before C2-D, the first unattended soak. Not needed for the one supervised
-tick of C2-C.
+A hard gate before C2-D, the first unattended soak. Set and read back during C2-D
+preparation: the project's limit is now 10,240 MiB a day.
 
 | | |
 |---|---|
 | Quota metric | `bigquery.googleapis.com/quota/query/usage` ("Query usage"), unit MiB |
 | Limit | `/d/project`: per day, for the whole project |
-| Today | 209,715,200 MiB (200 TiB) a day, the default; no override exists |
-| Proposed | 10,240 MiB (10 GiB) a day |
+| Default | 209,715,200 MiB (200 TiB) a day |
+| In force | 10,240 MiB (10 GiB) a day, by a consumer override |
 | Also exists | `/d/project/user`, per user per day, unlimited. Left alone |
 
 It applies to every query in the project, so once reached it also stops the owner's
@@ -517,8 +517,9 @@ own queries until the quota day rolls over. It is a temporary C2 ceiling; raisin
 needs a measured reason. It bounds a day, not a month, and is not a billing guarantee.
 Measured need is about 136 MiB for one warehouse build.
 
-Set, with the owner's login (the decrease is more than 10 percent, so `force` is
-required):
+It was set through the Service Usage API with the owner's login, because the `gcloud
+alpha` component is not installed here; the two are the same operation. The decrease
+is more than 10 percent, so `force` is required:
 
 ```
 gcloud alpha services quota update --project=<PROJECT_ID> \

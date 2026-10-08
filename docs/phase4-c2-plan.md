@@ -561,7 +561,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 |---|---|
 | Objective | First unattended operation, bounded in time by the system itself |
 | Components | No change |
-| Terraform | One applied plan: `scheduler_paused = false`. A second, prepared in advance, sets it back |
+| Terraform | One applied plan: `scheduler_paused = false`. Pausing again is not a saved plan (see "Pausing again" below): it is the one-action `gcloud` pause, reconciled by a later reviewed plan |
 | Source contact | Wikimedia only |
 | Executions | About 6 dispatcher, 1 Wikimedia, 1 or 2 warehouse. Hard ceiling 15 |
 | Cost | Negligible; measured |
@@ -569,7 +569,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 | Tests | None new |
 | Live proof | Every tick dispatched exactly once; at most one collection; no alert fired; collection stops at `armed_until` with the scheduler still running, proving the bound; then the scheduler is paused again |
 | STOP | Report after re-pausing |
-| Rollback | Pause the scheduler (one command), then the prepared plan |
+| Rollback | Pause the scheduler (one command), at once. Then disable the control record. Terraform is brought back in line afterwards through the normal reviewed plan |
 
 ### C2-E. Cost and reliability review
 
@@ -626,13 +626,41 @@ The scheduler is unpaused only by applying a reviewed plan whose sole change is
 
 1. C2-A, C2-B and C2-C are accepted in writing.
 2. The control record is armed with an expiry no later than the approved soak length.
-3. The prepared re-pause plan exists and has been reviewed.
+3. The one-action pause command is written down, with its read-back, and the operator
+   has confirmed it can be run. No saved re-pause plan is relied on.
 4. Scheduler never attempted; secret versions 0; keys 0; IAM as last audited.
 5. The measured projection for the soak is inside the cost policy.
 6. Every policy in section 8 exists and the channel is the one proven in S4.
 7. Only cleared sources have targets in the schedule.
 
 For C2-F, add: C2-D and C2-E accepted. For C2-G, add: C2-F accepted.
+
+### Pausing again
+
+An earlier version of this plan called for a re-pause plan saved in advance. That
+cannot work. A saved Terraform plan is tied to the state it was made against: one made
+while the scheduler is still paused contains no change at all, and once the unpause is
+applied the state has moved on and Terraform refuses the older plan as stale ("Saved
+plan is stale"). Confirmed locally with Terraform 1.16.4.
+
+So the stop is the command, which acts on the scheduler directly and depends on no
+plan:
+
+```
+gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=<PROJECT_ID>
+gcloud scheduler jobs describe ms-dispatch-15m --location=us-central1 --project=<PROJECT_ID> --format='value(state)'
+```
+
+It is run at the end of a soak and at once on any anomaly, and the read-back must say
+`PAUSED`. The control record is then disabled as a second barrier. Afterwards Terraform
+still believes the scheduler is running; the next normal plan, made with
+`scheduler_paused = true`, shows that one difference and is reviewed and applied like
+any other. Until then the repository variable stays `true`, so no plan can unpause by
+accident.
+
+Unpausing also turns the dispatcher-silence alert on: it is defined as enabled exactly
+while the scheduler is not paused, so an unpause plan changes two resources, the
+scheduler and that one alert policy, and nothing else.
 
 ## 20. Decisions (C2-0, final)
 
