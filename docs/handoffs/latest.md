@@ -6,254 +6,209 @@ replaces no code, test, audit or document.
 
 Previous accepted checkpoint: **PHASE 4 PART C2-C.1: COMPLETE**
 
-Current checkpoint: **PHASE 4 PART C2-D PREP: BLOCKED**
+Current checkpoint: **PHASE 4 PART C2-D PREP.1: PLAN READY**
 
-The quota is set and verified, the control template is validated, and the re-pause
-design is corrected. The block is the unpause plan: the plan workflow produced
-**9 changes, not 1**, so no approvable scheduler-only plan exists. Nothing was applied.
-The scheduler is paused, the repository variable is back to `true`, the control record
-is disabled, and no job ran.
+The deploy workflow can now make an infrastructure-only plan that reuses the image the
+jobs already run. With it, a clean unpause plan exists: **0 add, 2 change, 0 destroy**,
+on the deployed image, with exactly the two expected changes. It is saved and **not
+applied**. The scheduler is paused, the repository variable is `true`, the control
+record is disabled, and nothing ran.
 
-## Why it is blocked
+## The earlier block
 
-The plan (run `37738729342`) proposes 0 add, **9 change**, 0 destroy:
+C2-D preparation was blocked because the only way to make a plan rebuilt the image.
+Plan run `37738729342` proposed 9 changes: seven jobs moving to a freshly built digest
+(`sha256:e2d35755…`, not approved and not used), plus the two changes that an unpause
+really consists of. That plan was not applied and is left to expire.
 
-1. **Seven Cloud Run jobs**, image `sha256:a8680b2b…c754` →
-   `sha256:e2d3575550ea31f701bacd91b433574dc1b9c673543139da0081869dbe26a216`. The plan
-   workflow always builds with `--pull --no-cache` and plans with the digest it just
-   built. The build is not byte-reproducible, so a new digest appears even though the
-   application source is unchanged (HEAD differs from the deployed source only in
-   documents). This is the image-digest gate; it failed as the instruction foresaw.
-2. **`google_cloud_scheduler_job.tick`**: `paused: true -> false`. The intended change.
-3. **`google_monitoring_alert_policy.dispatcher_silent`**: `enabled: false -> true`.
-   Not a defect: the policy is defined as enabled exactly while the scheduler is not
-   paused (accepted in C2-B, asserted by a Terraform test). But it means a correct
-   unpause plan has **two** changes, not one, and the instruction's "exactly 1 change,
-   no monitoring change" cannot be met as written.
+Rulings since: the unpause is expected to change **two** resources (the scheduler, and
+the dispatcher-silence alert, which is defined as enabled exactly while the scheduler
+is not paused); the alert is not to be decoupled; and the new image is not accepted.
 
-The plan must not be applied and is left to expire (2026-10-11T06:55:00Z). Its hash,
-for the record only: `2a93e8cc0043b424c30341b69c0c49be77c3131b26394900cfd6d26981c68491`.
+## Workflow design
 
-## 1. Baseline (before any change)
+A new `workflow_dispatch` input on the deploy workflow, `reuse_deployed_image`, boolean,
+default `false`.
 
-All matched: seven jobs on `sha256:a8680b2b…c754`; scheduler PAUSED, `0 * * * *`, no
-attempt; control present and disabled; 14 executions; query quota at the default
-209,715,200 MiB with no override; 0 secret versions; 0 user-managed keys; 1,316
-observations, 14 ledger rows, 12 run rows; no IAM, schema, alert or scheduler drift;
-prod state serial 9; repository variable `SCHEDULER_PAUSED` = `true`.
+- **Default (false): unchanged.** The plan job builds with `--pull --no-cache`, smokes,
+  scans, authenticates, pushes, and plans with the digest it pushed.
+- **True: an infrastructure-only plan.** Build, smoke, scan and push are skipped. After
+  authenticating, the job runs `.github/scripts/resolve-deployed-image.sh`, which reads
+  the image from the jobs and accepts it only if:
+  1. the project has exactly the seven MetaSpike jobs, no fewer and no other;
+  2. each has one container;
+  3. all seven run the same image;
+  4. each job's `METASPIKE_IMAGE` equals the image it runs;
+  5. the image is in `us-central1-docker.pkg.dev/<project>/metaspike/metaspike`;
+  6. it is named by `@sha256:` and 64 lowercase hex characters;
+  7. the registry holds exactly that digest.
+  Any failure ends the job with an error. Nothing falls back to building or pushing.
+- A further step, "Choose the image to plan with", always runs. It takes the built
+  image in one mode and the resolved image in the other, fails if both or neither are
+  present, re-checks the repository and digest pattern, and records the origin. The
+  plan uses that step's output only, and the run summary states the image and its
+  origin.
+- The reusable verification job still runs first in both modes, so this commit's image
+  is still built and scanned by CI; it is simply not pushed or planned with.
 
-## 2. BigQuery daily query quota: set and verified
+Nobody can name an image. The script takes two arguments, the project and the region.
+The workflow has no input that carries an image or a digest.
 
-- **Before:** `bigquery.googleapis.com/quota/query/usage`, limit `1/d/{project}`,
-  effective and default 209,715,200 MiB; no override on any of the 206 BigQuery quota
-  buckets.
-- **Operation:** the `gcloud alpha` component is not installed here, so the documented
-  equivalent was used with the owner's token:
-  `POST …/v1beta1/projects/818314526181/services/bigquery.googleapis.com/consumerQuotaMetrics/bigquery.googleapis.com%2Fquota%2Fquery%2Fusage/limits/%2Fd%2Fproject/consumerOverrides?force=true`
-  with body `{"overrideValue":"10240"}`. The operation completed.
-- **Override identity:**
-  `projects/818314526181/services/bigquery.googleapis.com/consumerQuotaMetrics/bigquery.googleapis.com%2Fquota%2Fquery%2Fusage/limits/%2Fd%2Fproject/consumerOverrides/Cg1RdW90YU92ZXJyaWRl`
-- **Read back independently:** effective limit on `1/d/{project}` is **10,240 MiB**,
-  override value 10240. `1/d/{project}/{user}` is unchanged and unlimited. A diff of
-  all 206 buckets before and after shows that one bucket as the only change.
-- Re-read at the end of the checkpoint: still 10,240.
+## Files changed
 
-## 3. Rollback for the quota
+Workflow commit `55393ea84fa7605a97b058b41205e653ccda1989`:
 
-`DELETE` on the override's name above, with `?force=true`, by the owner; or
-`gcloud alpha services quota delete --service=bigquery.googleapis.com
---consumer=projects/metaspike-prod-kc --metric=bigquery.googleapis.com/quota/query/usage
---unit='1/d/{project}' --force`. The limit then returns to the default.
+- `.github/workflows/deploy.yml` — the input, the conditional steps, the resolve and
+  choose steps, the summary line
+- `.github/scripts/resolve-deployed-image.sh` — new
+- `tests/test_deploy_image_reuse.py` — new, 23 tests
+- `tests/test_cloud_foundation.py` — one expectation updated
+- `docs/phase4-runbook.md` — a paragraph on infrastructure-only plans
 
-Note: the cap now also applies to the owner's own queries in this project. Measured
-need is about 220 MiB for a daily build.
+Earlier in C2-D preparation, documents only (`a82778d`): the re-pause procedure was
+corrected and the quota recorded as set. No application code or Terraform changed in
+either commit.
 
-## 4. Control template (validated, not written)
+## Security analysis
 
-Built with the repository's `ControlRecord` model. Only `armed_until` is filled in at
-launch.
+- Same trigger: `workflow_dispatch` on `main` only. The job's `if` is unchanged, and a
+  push still cannot reach authentication.
+- Same identity: the existing restricted WIF path to `ms-deploy`. No key, no secret, no
+  new permission. The two reads it makes (job descriptions, one registry lookup) are
+  covered by roles it already holds; the run succeeded with them.
+- WIF trust is untouched. The provider pins this workflow file on `main`; the script is
+  checked out from the same commit.
+- The apply job is byte-for-byte as it was in behaviour: it downloads the plan named by
+  run id, refuses a hash mismatch, refuses an unannounced destroy, and applies that
+  plan. It does not reference the new input.
+- The mode cannot select an unreviewed or historical image: only the image all seven
+  jobs currently run is eligible, and it must still exist in the registry.
+- The mode reduces registry churn: an infrastructure-only plan pushes nothing.
 
-```
-{"version":1,"enabled":true,"armed_until":"<set at launch>","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
-```
+## Tests and CI
 
-Checked offline with an example expiry of 08:30 UTC: it permits work at 02:45, 03:00
-and 08:00, and is refused as `control_expired` at 08:30 and 09:00. Under it the
-dispatcher would issue one order for 14 targets with `max_requests` 22 and reserve 22.
-The live `dispatch/control.json` was not touched.
+`tests/test_deploy_image_reuse.py` runs the real script against a stand-in `gcloud`
+that answers from a description of the jobs and the registry:
 
-## 5. Request-cap rationale
+- resolves the one image; reads all seven jobs; makes only read calls;
+- refuses when the jobs disagree; when a job's `METASPIKE_IMAGE` differs or is unset;
+  when the image is in another repository, project, region or registry, is a tag, or
+  has a digest of the wrong length, case, alphabet or algorithm (13 cases); when the
+  registry lacks the digest or answers with another; when a job is missing, extra, or
+  has two containers; and it prints no image whenever it refuses;
+- by inspection of the workflow: the default still builds, scans and pushes and plans
+  with the built digest; the infrastructure-only path resolves after authenticating
+  and before planning; there is no fallback expression; no input can carry an image;
+  the apply job, triggers, permissions and WIF conditions are unchanged.
 
-22 outbound attempts for the day: 14 first attempts for 14 articles and up to 8
-retries, as a hard ceiling on physical HTTP requests. One job start per tick. Three
-dispatcher-started executions a day: one collector, one warehouse, and one spare for a
-possible second warehouse start. Dispatcher executions started by the scheduler are
-not counted in that three.
+Results: ruff and format clean; mypy clean (164 files); **1,160 passed, 5 deselected**,
+dbt tests included. Push CI run `37741656087` on the workflow commit: success, with
+plan, apply and identity-check skipped.
 
-## 6. Next valid soak window
-
-The 03:00 UTC tick of 8 October has passed. The next is **2026-10-09 03:00 UTC, a
-Friday** (not the Monday reconciliation day, so the window is the routine 4 days).
-
-Suggested shape, to be confirmed at launch: arm the control and apply the unpause
-between about 02:15 and 02:45 UTC (the apply workflow itself takes about 15 minutes);
-`armed_until` 08:30 UTC; scheduled ticks at 03:00 to 08:00 work, the 09:00 tick
-refuses; pause straight after. Every tick is on the same UTC day, so one day's
-counters apply. That is about 7 dispatcher executions plus 2 or 3 children, under the
-ceiling of 15.
-
-## 7. Stale re-pause plan: confirmed
-
-Tried locally with Terraform 1.16.4 and a resource that stands in for the scheduler:
-
-- a "re-pause" plan made while the value is still paused contains **no changes**;
-- after the unpause plan is applied, applying that earlier plan is refused:
-  `Error: Saved plan is stale … the state was changed by another operation after the
-  plan was created.`
-
-So a re-pause plan saved in advance is not a rollback artifact.
-
-## 8. Corrected rollback procedure
-
-The stop is the command, which acts on the scheduler directly:
-
-```
-gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc
-gcloud scheduler jobs describe ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc --format='value(state)'
-```
-
-The read-back must say `PAUSED`. It is run at the end of the soak and at once on any
-anomaly; the control record is then disabled as a second barrier. Terraform is brought
-back in line afterwards by a normal reviewed plan made with `scheduler_paused = true`.
-For understanding only, and not to be run outside an approved step:
-`gcloud scheduler jobs resume ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc`.
-
-Neither command was run. The scheduler is already paused.
-
-## 9. Durable documentation changes
-
-Commit `a82778daade478f4b06754d10aad159bf2bccd69`, documents only:
-
-- `docs/phase4-c2-plan.md`: the C2-D row and the unpause gate no longer rely on a
-  prepared re-pause plan; a new "Pausing again" passage explains why and gives the
-  command; it also states that unpausing turns the silence alert on.
-- `docs/phase4-runbook.md`: the quota section now records the quota as set.
-
-No application code, Terraform or workflow changed. Push CI for that commit passed.
-
-## 10. Repository variable
-
-`SCHEDULER_PAUSED` was `true`; set to `false` at 06:38:30 UTC for the plan run only;
-restored to `true` at 06:55:12 UTC, immediately after the run finished; read back
-`true` then and again at the end. The plan step ran with `scheduler_paused=false`. No
-apply was requested while it was false.
-
-## 11–16. The plan that was produced (not approvable)
+## The unpause plan (not applied)
 
 | | |
 |---|---|
-| Run | `37738729342`, plan only |
-| Head commit | `a82778daade478f4b06754d10aad159bf2bccd69` |
-| Candidate image | `sha256:e2d3575550ea31f701bacd91b433574dc1b9c673543139da0081869dbe26a216` |
-| Deployed image | `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754` |
-| **Digest equal?** | **No** |
-| Counts | 0 add, 9 change, 0 destroy, 0 replace |
+| Run | `37742520427`, `operation = plan`, `reuse_deployed_image = true` |
+| Head commit | `55393ea84fa7605a97b058b41205e653ccda1989` |
+| Image planned with | `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754` |
+| Image origin | reused: resolved live from all seven jobs and confirmed in the registry |
+| Plan SHA-256 | `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe` |
+| Artifact | `tfplan`, expires 2026-10-11T07:27:34Z |
+| Counts | **0 add, 2 change, 0 destroy, 0 replace** |
 | Prod state serial | 9 |
-| Artifact | `tfplan`, expires 2026-10-11T06:55:00Z |
 
-Complete diff: the seven jobs' `image` and `METASPIKE_IMAGE`; the scheduler's
-`paused: true -> false` and nothing else on it (no cron, name, target, identity or
-retry change); the silence policy's `enabled: false -> true` and nothing else on it.
-No IAM, WIF, secret, dataset, bucket, table or other monitoring change.
+Live resolution proof: in that run the steps Build, Smoke, Scan and Push were skipped;
+"Resolve the image the jobs already run" and "Choose the image to plan with" succeeded;
+the plan command received `-var "image=…@sha256:a8680b2b…c754"` and
+`-var "scheduler_paused=false"`. All 91 resources were refreshed. The same script, run
+read-only with the owner's login beforehand, returned the same digest. The plan hash
+was recomputed locally from the downloaded artifact and matches the one the run
+published.
 
-## 17–22. Final state
+Complete diff:
+
+```
+# google_cloud_scheduler_job.tick will be updated in-place
+  ~ paused = true -> false
+    (name ms-dispatch-15m; 8 unchanged attributes and 2 unchanged blocks)
+
+# google_monitoring_alert_policy.dispatcher_silent will be updated in-place
+  ~ enabled = false -> true
+    (8 unchanged attributes and 1 unchanged block)
+
+Plan: 0 to add, 2 to change, 0 to destroy.
+```
+
+No Cloud Run job, image, `METASPIKE_IMAGE`, scheduler cron, time zone, target, identity
+or retry setting, IAM, WIF, secret, quota, dataset, table, bucket or other alert policy
+changes.
+
+## Repository variable
+
+`SCHEDULER_PAUSED` was `true`; set to `false` at 07:17:26 UTC for the plan run only;
+restored to `true` at 07:27:44 UTC, immediately after the run finished; read back
+`true` then and again at the end. No apply was requested while it was false.
+
+## Final state
 
 - **Scheduler:** PAUSED, `0 * * * *`, no attempt time.
 - **Control record:** present, `enabled: false`, generation `1791432826876698`,
   unchanged.
-- **Cloud Run executions:** 14. No Cloud Run log entry of any kind since the start of
-  this checkpoint.
-- **Jobs:** all seven on `sha256:a8680b2b…c754`. Prod state serial 9, bootstrap 9:
+- **Cloud Run executions:** 14. No Cloud Run log entry since C2-D preparation began.
+- **Jobs:** all seven on `sha256:a8680b2b…c754`. Prod state serial 9 and bootstrap 9:
   nothing applied.
+- **BigQuery quota:** 10,240 MiB a day on the project limit (set in C2-D preparation by
+  a consumer override; the per-user limit is untouched).
 - **Secrets and keys:** 0 versions; 0 user-managed keys. No IAM, schema, alert or
-  scheduler drift. The silence policy is still disabled.
+  scheduler drift; the silence policy is still disabled.
 - **Sources called:** none.
-- **BigQuery quota:** 10,240 MiB a day.
 - **Git:** `main` level with origin, clean. The portfolio repository was not touched.
 
-## 23. Launch sequence for the soak (not executed)
+## Carried forward, unchanged
 
-1. Read-only baseline audit.
-2. Require the query quota to read 10,240 MiB.
-3. Require the scheduler PAUSED with no attempt.
-4. Require the execution count unchanged (14 today).
-5. Require all jobs on `sha256:a8680b2b…c754`.
-6. Require 0 secret versions and 0 keys.
-7. Replace the control record on its exact generation with the template above:
-   enabled, a finite six-hour `armed_until`, Wikimedia only, 22 attempts a day, 14
-   targets an execution, one start a tick, three a day.
-8. Read the control record back and verify it exactly.
-9. Apply the reviewed unpause plan by its run id and hash.
-10. Confirm the scheduler reads ENABLED.
-11. Start no dispatcher by hand.
-12. Watch the scheduler start `ms-dispatch` each hour.
-13. The window includes the 03:00 UTC collection tick.
-14. And the 04:00 UTC warehouse tick.
-15. Continue until `armed_until`.
-16. Leave the scheduler running for one more tick, to see the dispatcher refuse with
-    `control_expired`.
-17. Pause the scheduler at once with the command in section 8.
-18. Confirm PAUSED.
-19. Disable the control record on its generation.
-20. Audit executions, source requests, BigQuery, storage, alerts and security.
-21. Stop at the C2-D report.
+- Soak window: the next period tick is **2026-10-09 03:00 UTC** (a Friday; routine
+  4-day window).
+- Control template, validated and not written: enabled, a finite `armed_until`,
+  Wikimedia only, `max_requests_per_day` 22 (physical outbound attempts),
+  `max_targets_per_execution` 14, `max_job_starts_per_tick` 1,
+  `max_executions_per_day` 3, no pins.
+- The stop is the one-action command, not a saved plan:
+  `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc`,
+  read back with `gcloud scheduler jobs describe … --format='value(state)'` → `PAUSED`.
+- Ceilings for the soak: at most 22 outbound attempts to Wikimedia; one child start a
+  tick and three a day; at most 15 new executions in all.
 
-No collector, warehouse or dispatcher is started by hand. Ceilings: at most 22 outbound
-attempts to Wikimedia; at most one child start a tick and three a day; at most 15 new
-executions in all, and if that would be passed the scheduler is paused and the soak
-stops. On anything unexpected: pause with `gcloud` at once, disable the control record,
-retry nothing by hand, keep the evidence, report blocked.
+## Warnings
 
-## 24. Warnings and open questions
-
-1. **How an infrastructure-only plan pins the deployed image** is unsolved, and it will
-   recur for every plan that is not an application release. Recommended: give the
-   deploy workflow's plan operation an optional input naming an existing digest; when
-   it is given, the workflow verifies that digest is in the registry and plans with it
-   instead of the one it just built. That is a workflow change with tests, and needs
-   its own approval. A build that is byte-reproducible would also work but is a larger
-   and less certain change.
-2. **The unpause plan will have two changes**, the scheduler and the silence alert,
-   unless the alert is decoupled from the variable. Decoupling would leave the system
-   unattended without its silence alert, so the recommendation is to accept two.
-   During a six-hour soak the alert needs three hours without a successful dispatcher
-   to fire; when the scheduler is paused by command at the end, the policy stays
-   enabled until Terraform is reconciled and **would fire about three hours after the
-   pause** unless the reconciling plan is applied sooner. That should be planned for.
-3. **The quota is now live** and limits the owner's ad hoc queries too.
-4. Each plan run leaves an image in the registry. Three undeployed images are there
-   now, one of which must never be deployed (`sha256:1b373a41…`).
-5. Local Terraform is one patch behind CI, so plans are checked from the plan run's
-   rendered output and their hash.
+1. **The plan expires 2026-10-11T07:27:34Z** and is valid only while prod state stays
+   at serial 9. Any other apply before it makes it stale.
+2. **After the soak the silence alert stays enabled** until Terraform is reconciled.
+   Pausing by command leaves the policy on; with no dispatcher succeeding it would
+   fire about three hours after the pause unless the reconciling plan (made with
+   `scheduler_paused = true`, infrastructure-only) is applied first.
+3. **How the soak is launched and watched** if the owner's machine may be offline is
+   undecided, as ruled. The apply needs someone to start a workflow run and to write
+   the control record shortly before 03:00 UTC, and to pause afterwards.
+4. The registry holds three undeployed images from earlier plan runs, one of which must
+   never be deployed (`sha256:1b373a41…`) and one that was explicitly not accepted
+   (`sha256:e2d35755…`). This run added none.
+5. Local Terraform is one patch behind CI, so the plan was checked from the plan run's
+   rendered output and its hash.
 6. Still open from earlier: the deferred freshness alert; the missed-tick review before
    any sampled source; the branch-protection decision before any secret-backed source.
 
-## 25. Exact next approval required
+## Exact next approval required
 
-Decide how the unpause plan is to be made, then it can be prepared again:
+The C2-D launch itself, which needs, together:
 
-- **A (recommended):** approve a small workflow change that lets a plan reuse an
-  existing image digest, and accept that the unpause plan changes two resources (the
-  scheduler and the silence alert). Expected plan: 0 add, 2 change, 0 destroy.
-- **B:** keep the workflow as it is and accept a plan that also moves the jobs to a
-  freshly built image of the same source. Not recommended: it mixes an image rollout
-  into the unpause.
-- **C:** unpause by the `gcloud` resume command, outside a reviewed plan. Not
-  recommended: it gives up the saved-plan review for the one change that starts
-  unattended operation.
+- a decision on how it is launched and supervised (warning 3);
+- the exact `armed_until` for the control record;
+- approval to apply this plan by run id and hash: run `37742520427`, SHA-256
+  `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe`, expected 0 add,
+  2 change, 0 destroy;
+- a decision on when the reconciling pause plan is made and applied after the soak
+  (warning 2).
 
-Also needed for either A or B: a decision on warning 2 (when the reconciling pause plan
-is applied after the soak).
-
-STOP. No plan was applied; the control record is disabled; the scheduler is paused;
-the soak has not started.
+STOP. The plan is not applied; the control record is not armed; the soak has not
+started.
