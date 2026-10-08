@@ -808,7 +808,8 @@ def test_deployment_is_two_manual_runs_and_applies_only_a_plan_named_by_hash() -
     # Plan: built, scanned, THEN authenticated and pushed; the pushed digest is planned.
     assert plan.index("trivy-action") < plan.index("google-github-actions/auth")
     assert plan.index("google-github-actions/auth") < plan.index("docker push")
-    assert "RepoDigests" in plan and "image=${{ steps.push.outputs.image }}" in plan
+    assert "RepoDigests" in plan and "image=${{ steps.image.outputs.image }}" in plan
+    assert "BUILT: ${{ steps.push.outputs.image }}" in plan
     assert "terraform plan" in plan and "terraform apply" not in plan  # it changes nothing
     assert "sha256sum tfplan" in plan and "GITHUB_STEP_SUMMARY" in plan
     assert "DESTRUCTIVE PLAN" in plan and "upload-artifact" in plan

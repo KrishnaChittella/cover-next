@@ -99,6 +99,20 @@ A deployment is always two manual runs of the deploy workflow:
 
 `operation = identity-check` (the default) only proves federation works.
 
+**An infrastructure-only plan.** A plan normally builds, scans and pushes a new image
+and plans with it, so every plan also moves the seven jobs to that image. That is right
+for an application release and wrong for a change to infrastructure alone: the build is
+not byte-identical from run to run, so even with no source change the jobs would be
+moved to a different digest.
+
+Run the plan with `reuse_deployed_image` for an infrastructure-only change. It then
+builds and pushes nothing, and plans with the image the jobs already run. That image
+is read from the jobs, not chosen: all seven must run the same immutable digest, each
+job's own `METASPIKE_IMAGE` must say the same, it must be in MetaSpike's repository,
+and the registry must hold it. If any of that fails the plan fails; it never falls
+back to a new image. There is no way to name an image to deploy. Rolling out an image
+stays its own reviewed plan.
+
 The image registry is created by the bootstrap root, because the production root
 cannot plan without an image digest and an image cannot be pushed to a registry that
 does not exist.

@@ -13,6 +13,9 @@
 # HOW A DEPLOYMENT HAPPENS (always by hand, always two runs)
 #   1. operation = plan    builds, scans and pushes the image by digest, plans, and
 #                          publishes the plan with its SHA-256. Changes nothing.
+#                          With reuse_deployed_image it builds and pushes nothing: it
+#                          plans with the one image all seven jobs already run, so an
+#                          infrastructure change is not mixed with an image rollout.
 #   2. operation = apply   applies exactly that plan: it must be given the run id and
 #                          the SHA-256 of the plan that was read. Nothing is re-planned.
 #   operation = identity-check proves federation works and changes nothing at all.
@@ -40,6 +43,10 @@ on:
         default: ""
       allow_destroy:
         description: "apply only: the reviewed plan destroys or replaces resources, and that is intended"
+        type: boolean
+        default: false
+      reuse_deployed_image:
+        description: "plan only: an infrastructure-only plan. Plan with the image all seven jobs already run; build and push nothing"
         type: boolean
         default: false
 
@@ -98,6 +105,12 @@ jobs:
           test "${account}" = "${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}"
 
   # Builds and pushes the image, then plans. It changes no infrastructure.
+  #
+  # An infrastructure-only plan (reuse_deployed_image) skips the build and the push and
+  # plans with the image the jobs already run. That image is read from the jobs, never
+  # chosen by whoever starts the run, and if it cannot be established the job fails:
+  # there is no falling back to a new image. The verify job above has still built and
+  # scanned this commit's image either way.
   plan:
     # `needs` means a failed or cancelled verification skips this job: no credential
     # is ever issued. The `if` means a push never starts it at all.
@@ -114,12 +127,15 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Build
+        if: ${{ !inputs.reuse_deployed_image }}
         run: docker build --pull --no-cache --tag candidate .
       - name: Smoke
+        if: ${{ !inputs.reuse_deployed_image }}
         run: |
           docker run --rm candidate --help
           test "$(docker run --rm --entrypoint id candidate -u)" != "0"
       - name: Scan before anything is pushed
+        if: ${{ !inputs.reuse_deployed_image }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: candidate
@@ -134,6 +150,7 @@ jobs:
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
       - name: Push and record the digest
         id: push
+        if: ${{ !inputs.reuse_deployed_image }}
         run: |
           repository="${REGION}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/metaspike/metaspike"
           gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
@@ -141,6 +158,33 @@ jobs:
           docker push "${repository}:${GITHUB_SHA}"
           digest="$(docker inspect --format '{{index .RepoDigests 0}}' "${repository}:${GITHUB_SHA}")"
           echo "image=${digest}" >> "$GITHUB_OUTPUT"
+      - name: Resolve the image the jobs already run
+        id: deployed
+        if: ${{ inputs.reuse_deployed_image }}
+        run: |
+          image="$(.github/scripts/resolve-deployed-image.sh '${{ vars.GCP_PROJECT_ID }}' "${REGION}")"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+      # Exactly one of the two steps above ran. This names which, and refuses anything
+      # that is not an immutable digest in MetaSpike's own repository.
+      - name: Choose the image to plan with
+        id: image
+        env:
+          REUSE: ${{ inputs.reuse_deployed_image }}
+          BUILT: ${{ steps.push.outputs.image }}
+          DEPLOYED: ${{ steps.deployed.outputs.image }}
+        run: |
+          if [ "${REUSE}" = "true" ]; then
+            image="${DEPLOYED}"; origin="reused: the image all seven jobs already run"
+            test -z "${BUILT}" || { echo "::error::an image was built in an infrastructure-only plan"; exit 1; }
+          else
+            image="${BUILT}"; origin="built and pushed by this run"
+            test -z "${DEPLOYED}" || { echo "::error::a deployed image was resolved in an application plan"; exit 1; }
+          fi
+          repository="${REGION}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/metaspike/metaspike"
+          [[ "${image}" =~ ^${repository}@sha256:[0-9a-f]{64}$ ]] || {
+            echo "::error::no acceptable image to plan with (${origin})"; exit 1; }
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "origin=${origin}" >> "$GITHUB_OUTPUT"
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
@@ -151,7 +195,7 @@ jobs:
           terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
           terraform plan -input=false -out=tfplan \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
-            -var "image=${{ steps.push.outputs.image }}" \
+            -var "image=${{ steps.image.outputs.image }}" \
             -var "notification_channel=${{ vars.GCP_NOTIFICATION_CHANNEL }}" \
             -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}"
           terraform show -no-color tfplan > plan.txt
@@ -171,7 +215,8 @@ jobs:
               echo "## Plan: nothing is destroyed or replaced"
             fi
             echo
-            echo "- image: \`${{ steps.push.outputs.image }}\`"
+            echo "- image: \`${{ steps.image.outputs.image }}\`"
+            echo "- image origin: **${{ steps.image.outputs.origin }}**"
             echo "- plan run id: \`${GITHUB_RUN_ID}\`"
             echo "- plan SHA-256: \`$(cat tfplan.sha256)\`"
             echo
