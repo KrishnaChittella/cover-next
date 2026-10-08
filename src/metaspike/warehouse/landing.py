@@ -180,7 +180,8 @@ TABLES: dict[Table, TableSpec] = {
             "slot_start",
             None,
             "source metric granularity mode source_native_id slot_start schedule_version "
-            "dispatch_run_id recorded_at",
+            "dispatch_run_id recorded_at tier due_at due_reason policy_status disposition "
+            "work_order_id",
         ),
         # Written by the loader only: every source-native id that has ever had an attempt.
         _spec(

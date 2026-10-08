@@ -66,5 +66,41 @@
     "type": "TIMESTAMP",
     "mode": "REQUIRED",
     "description": "When the row was loaded."
+  },
+  {
+    "name": "tier",
+    "type": "INT64",
+    "mode": "NULLABLE",
+    "description": "Monitoring tier in force when the target was due, 0 (surge) to 4 (long tail). Null on rows written before tiers existed."
+  },
+  {
+    "name": "due_at",
+    "type": "TIMESTAMP",
+    "mode": "NULLABLE",
+    "description": "The tick on which the target became due. A deferred target keeps its original value."
+  },
+  {
+    "name": "due_reason",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Why it was due: its schedule entry or a named pin."
+  },
+  {
+    "name": "policy_status",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "The source's policy clearance and policy version when the row was written."
+  },
+  {
+    "name": "disposition",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "What the dispatcher did: planned, deferred, skipped or expired, and why. Never a sample state; NOT_SAMPLED is derived."
+  },
+  {
+    "name": "work_order_id",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "The work order that carried the target, when it was planned."
   }
 ]

@@ -184,6 +184,12 @@ supervision against the real services, and one real Wikimedia collection (14 art
 its own: the scheduler is paused and no secret has a value. See
 `docs/phase4-c1-implementation-report.md` for what was built and proven.
 
+Part C2-A (unattended scheduling, offline) is built and not switched on: a control
+record that fails closed, a partitioned schedule read only where work can be due,
+bounded dispatch with work orders, source health and a circuit breaker, steady-state
+Wikimedia collection, and a scale simulation at up to 50,000 catalogued entities.
+Tiering is shadow only. Nothing is deployed; see `docs/phase4-c2-plan.md`.
+
 ## What is implemented
 
 An end-to-end, locally runnable pipeline. One command:

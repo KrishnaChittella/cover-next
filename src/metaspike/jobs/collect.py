@@ -10,15 +10,20 @@ landing manifest is committed create the marker. A crash can cost a repeated req
 It cannot cause a sample to be skipped.
 """
 
+import contextlib
+import hashlib
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from pydantic import AwareDatetime, ValidationError
 
 from metaspike.catalogue.eligibility import SamplingTarget
 from metaspike.catalogue.persistence import CatalogueRepository
 from metaspike.catalogue.seed import bootstrap_catalogue
 from metaspike.domain.games import Catalogue, SourceIdentifier
+from metaspike.domain.model import FrozenModel
 from metaspike.domain.observations import Observation
 from metaspike.domain.samples import SampleAttempt, SampleReading, SampleStatus
 from metaspike.domain.signals import SignalKey, SourceErrorCode
@@ -27,14 +32,26 @@ from metaspike.domain.timeseries import Granularity, TimeWindow
 from metaspike.jobs.runtime import Runtime
 from metaspike.pipeline.normalize import latest_due_period
 from metaspike.pipeline.sampling import _attempt
+from metaspike.scheduling.config import PRODUCTION, SourceCaps
+from metaspike.scheduling.health import Outcome
+from metaspike.scheduling.workorder import ClaimRefused, OrderReceipt, WorkOrder, claim, complete
 from metaspike.sources.base import SamplingAdapter, SourceAdapter, SourceError, SourceMode
 from metaspike.sources.wikimedia import DAILY_PAGEVIEWS
 from metaspike.sources.wikimedia import SOURCE_ID as WIKIMEDIA
-from metaspike.warehouse.landing import Table, observation_rows, sample_attempt_row
+from metaspike.warehouse.landing import (
+    Table,
+    observation_rows,
+    policy_version,
+    sample_attempt_row,
+)
 from metaspike.warehouse.markers import Completion, SlotMarkers
+from metaspike.warehouse.objects import ObjectNotFound, ObjectStore, PreconditionFailed
 
+# Supervised runs only: ask for exactly this many days for every article.
 WINDOW_DAYS_ENV = "METASPIKE_WIKIMEDIA_DAYS"
-DEFAULT_WINDOW_DAYS = 90
+# "required": act only on a work order from the dispatcher.
+WORK_ORDERS_ENV = "METASPIKE_WORK_ORDERS"
+BOOTSTRAP_FORMAT = "bootstrap_marker_v1"
 # Errors that mean the source has refused us, not that one request went wrong.
 _REFUSALS = (
     SourceErrorCode.UNAUTHORIZED,
@@ -51,37 +68,155 @@ def runtime_catalogue(runtime: Runtime) -> tuple[Catalogue, str]:
     return head.state.catalogue, head.record.generation
 
 
-def collect_wikimedia(runtime: Runtime, adapter: SourceAdapter) -> Mapping[str, Any]:
-    """One supervised pass over every entity's article. Daily pageviews only."""
+def bootstrap_marker_name(source: str, source_native_id: str) -> str:
+    """A fixed name for one target's history fill. Read by exact name; never listed."""
+    target = hashlib.sha256(source_native_id.encode("utf-8")).hexdigest()[:32]
+    return f"{source}/bootstrap/{target}.json"
+
+
+class BootstrapMarker(FrozenModel):
+    """This target's history has been filled once, and where that fill is."""
+
+    format: str = BOOTSTRAP_FORMAT
+    source: str
+    source_native_id: str
+    days: int
+    data_object: str
+    content_sha256: str
+    collection_run_id: str
+    completed_at: AwareDatetime
+
+
+def bootstrapped(store: ObjectStore, source: str, source_native_id: str) -> bool:
+    """Whether a valid fill marker exists for exactly this target.
+
+    Anything else (absent, unreadable, about another target) is no marker, so a damaged
+    marker costs one more history fill and never a gap.
+    """
+    try:
+        data = store.get(bootstrap_marker_name(source, source_native_id)).data
+        marker = BootstrapMarker.model_validate_json(data)
+    except (ObjectNotFound, ValidationError):
+        return False
+    return (
+        marker.format == BOOTSTRAP_FORMAT
+        and marker.source == source
+        and marker.source_native_id == source_native_id
+    )
+
+
+def mark_bootstrapped(store: ObjectStore, marker: BootstrapMarker) -> None:
+    with contextlib.suppress(PreconditionFailed):
+        store.create(
+            bootstrap_marker_name(marker.source, marker.source_native_id),
+            marker.model_dump_json().encode("utf-8"),
+        )
+
+
+def seed_bootstrap_markers(
+    store: ObjectStore,
+    source: str,
+    source_native_ids: Sequence[str],
+    *,
+    days: int,
+    data_object: str,
+    content_sha256: str,
+    collection_run_id: str,
+    completed_at: datetime,
+) -> int:
+    """Record that targets were filled by a run that predates fill markers.
+
+    For the owner, once: the first supervised collection filled its targets before
+    this marker existed. Each marker names the batch that holds the fill.
+    """
+    for native_id in source_native_ids:
+        mark_bootstrapped(
+            store,
+            BootstrapMarker(
+                source=source,
+                source_native_id=native_id,
+                days=days,
+                data_object=data_object,
+                content_sha256=content_sha256,
+                collection_run_id=collection_run_id,
+                completed_at=completed_at,
+            ),
+        )
+    return len(source_native_ids)
+
+
+def collect_wikimedia(
+    runtime: Runtime,
+    adapter: SourceAdapter,
+    order: WorkOrder | None = None,
+    caps: SourceCaps = PRODUCTION.sources[WIKIMEDIA],
+) -> Mapping[str, Any]:
+    """One pass over the articles: daily pageviews, the smallest window that will do.
+
+    A target seen for the first time is filled once with the bootstrap window, at most
+    `max_bootstraps_per_execution` of them in a run. After that a run asks for the
+    steady window, or the reconciliation window once a week, ending at the day that
+    is due. With a work order the run collects exactly the order's targets for the
+    order's slot and window, and never more requests than the order allows.
+    """
     runtime.refuse_unless_cleared(WIKIMEDIA, SourcePurpose.DEMAND_SIGNALS)
     policy = runtime.policy_for(WIKIMEDIA)
     if adapter.mode is not SourceMode.FETCH_HISTORY:
         raise ValueError("the Wikimedia collector needs a fetch-history source")
     started = runtime.now()
-    due = latest_due_period(Granularity.DAILY, started, policy.operations.expected_publication_lag)
-    days = int(runtime.environ.get(WINDOW_DAYS_ENV, DEFAULT_WINDOW_DAYS))
-    if days < 1:
-        raise ValueError(f"{WINDOW_DAYS_ENV} must be at least 1")
-    window = TimeWindow(start=due - timedelta(days=days - 1), end=due)
+    override: int | None = None
+    if order is not None:
+        due = order.slot
+        routine = order.window_days or caps.steady_window_days
+        request_limit = order.max_requests
+        wanted: set[str] | None = {target.source_native_id for target in order.targets}
+    else:
+        lag = policy.operations.expected_publication_lag
+        due = latest_due_period(Granularity.DAILY, started, lag)
+        weekly = started.astimezone(UTC).weekday() == PRODUCTION.reconciliation_weekday
+        routine = caps.reconciliation_window_days if weekly else caps.steady_window_days
+        request_limit = caps.max_requests_per_execution
+        wanted = None
+        if WINDOW_DAYS_ENV in runtime.environ:
+            override = int(runtime.environ[WINDOW_DAYS_ENV])
+            if override < 1:
+                raise ValueError(f"{WINDOW_DAYS_ENV} must be at least 1")
     catalogue, version = runtime_catalogue(runtime)
     markers = SlotMarkers(runtime.operations, runtime.now)
     metric = DAILY_PAGEVIEWS.metric
 
     rows: list[dict[str, Any]] = []
     fetched: list[str] = []
-    skipped = failed = requests = 0
+    filled: list[str] = []
+    skipped = failed = requests = fills_deferred = 0
+    widest = 0
     halted_by: str | None = None
+    known: set[str] = set()
     for game in catalogue.games:
         identifier = game.identifier_for(WIKIMEDIA)
         if identifier is None:
             continue
         native_id = _native(identifier)
+        known.add(native_id)
+        if wanted is not None and native_id not in wanted:
+            continue
         if markers.completed(WIKIMEDIA, metric, native_id, due) is not None:
             skipped += 1
             continue
         if halted_by is not None:
             failed += 1
             continue
+        fill = override is None and not bootstrapped(runtime.operations, WIKIMEDIA, native_id)
+        if fill and len(filled) + fills_deferred >= caps.max_bootstraps_per_execution:
+            fills_deferred += 1  # its history is filled by a later run, not skipped
+            continue
+        if requests >= request_limit:
+            halted_by = "request_limit"
+            failed += 1
+            continue
+        days = override or (caps.bootstrap_window_days if fill else routine)
+        widest = max(widest, days)
+        window = TimeWindow(start=due - timedelta(days=days - 1), end=due)
         requests += 1
         try:
             observations: Sequence[Observation] = adapter.fetch(
@@ -103,8 +238,14 @@ def collect_wikimedia(runtime: Runtime, adapter: SourceAdapter) -> Mapping[str, 
         if landed:
             rows.extend(landed)
             fetched.append(native_id)
+            if fill or days >= caps.bootstrap_window_days:
+                filled.append(native_id)
         else:
             failed += 1  # the source answered with nothing: not a result, so no marker
+    unknown = 0 if wanted is None else len(wanted - known)
+    if unknown:
+        failed += unknown
+        runtime.log("order_targets_unknown", severity="WARNING", source=WIKIMEDIA, count=unknown)
 
     data_object = None
     if rows:
@@ -115,19 +256,84 @@ def collect_wikimedia(runtime: Runtime, adapter: SourceAdapter) -> Mapping[str, 
         # The batch and its manifest are durable. Only now is anything marked done.
         for native_id in fetched:
             markers.complete(manifest, metric, native_id, due, Completion.COLLECTED)
+        for native_id in filled:
+            mark_bootstrapped(
+                runtime.operations,
+                BootstrapMarker(
+                    source=WIKIMEDIA,
+                    source_native_id=native_id,
+                    days=widest,
+                    data_object=manifest.data_object,
+                    content_sha256=manifest.content_sha256,
+                    collection_run_id=runtime.run_id,
+                    completed_at=runtime.now(),
+                ),
+            )
     return {
-        "outcome": "succeeded" if not failed else "partial",
+        "outcome": "succeeded" if not failed and not fills_deferred else "partial",
         "requests_sent": requests,
         "halted_by": halted_by,
         "catalogue": version,
         "slot": due.isoformat(),
-        "window_days": days,
+        "window_days": widest,
+        "routine_window_days": override or routine,
         "targets_collected": len(fetched),
         "targets_skipped_already_done": skipped,
         "targets_failed": failed,
+        "history_filled": len(filled),
+        "history_fill_deferred": fills_deferred,
         "rows_landed": len(rows),
         "data_object": data_object,
+        "work_order": None if order is None else order.order_id,
     }
+
+
+def collect_wikimedia_job(
+    runtime: Runtime, build_adapter: Callable[[], SourceAdapter]
+) -> Mapping[str, Any]:
+    """The job's body: supervised by default, or only on a work order when required.
+
+    With `METASPIKE_WORK_ORDERS=required` the collector acts on a valid, unexpired,
+    uncompleted order addressed to it and on nothing else. Without one it builds no
+    source client and asks nothing.
+    """
+    runtime.refuse_unless_cleared(WIKIMEDIA, SourcePurpose.DEMAND_SIGNALS)
+    if runtime.environ.get(WORK_ORDERS_ENV) != "required":
+        return collect_wikimedia(runtime, build_adapter())
+    version = policy_version(runtime.policy_for(WIKIMEDIA))
+    try:
+        order = claim(runtime.operations, WIKIMEDIA, runtime.now(), version)
+    except ClaimRefused as refusal:
+        runtime.log("no_work_order", severity="WARNING", source=WIKIMEDIA, reason=refusal.reason)
+        return {
+            "outcome": "no_work_order",
+            "reason": refusal.reason,
+            "requests_sent": 0,
+            "halted_by": None,
+        }
+    summary = collect_wikimedia(runtime, build_adapter(), order)
+    if summary["halted_by"] == SourceErrorCode.RATE_LIMITED.value:
+        outcome = Outcome.RATE_LIMITED
+    elif summary["targets_failed"] and not summary["targets_collected"]:
+        outcome = Outcome.FAILED
+    elif summary["targets_failed"]:
+        outcome = Outcome.PARTIAL
+    else:
+        outcome = Outcome.SUCCEEDED
+    complete(
+        runtime.operations,
+        OrderReceipt(
+            order_id=order.order_id,
+            source=WIKIMEDIA,
+            outcome=outcome,
+            requests_sent=summary["requests_sent"],
+            targets_collected=summary["targets_collected"],
+            targets_failed=summary["targets_failed"],
+            completed_at=runtime.now(),
+            run_id=runtime.run_id,
+        ),
+    )
+    return summary
 
 
 def _native(identifier: SourceIdentifier) -> str:

@@ -1,7 +1,8 @@
 # Phase 4 Part C2: plan for safe, low-cost, unattended collection
 
-**Status: a plan for review. Nothing in it has been built, applied or run.** The
-scheduler is paused and stays paused until the activation gate in section 19.
+**Status: decisions made (section 20); C2-A is built offline (section 24); nothing is
+deployed, applied or run.** The scheduler is paused and stays paused until the
+activation gate in section 19.
 
 Part C1 proved the private pipeline works when a person runs each step
 ([phase4-c1-implementation-report.md](phase4-c1-implementation-report.md)). Part C2
@@ -37,8 +38,8 @@ Honest about how small the real workload is today:
 - Steam and IGDB are not cleared, and no secret has a value.
 - The baseline rule's change-point output is shadow only and may not promote a tier.
 
-So the real unattended workload C2 can switch on is 14 daily Wikimedia series, unless
-section 20 question 1 is answered otherwise. The tiering, caps and scale design below
+So the real unattended workload C2 can switch on is 14 daily Wikimedia series, and it
+stays 14 throughout C2 (section 20, decision 1). The tiering, caps and scale design below
 are built and proven in simulation and exercised for real only as far as cleared
 sources allow. That is a deliberate limit, not an oversight: the machinery must exist
 and be trusted before a high-frequency source is ever connected to it.
@@ -95,14 +96,23 @@ The caps are part of the policy, not advice: a tier that is full does not grow. 
 promotion into a full tier displaces the entry with the weakest claim, which moves
 down one tier.
 
-**Escalation** (one tier per evaluation unless pinned):
+The tiers and caps above are simulation defaults. They are **not approved request
+budgets**: a source's own request caps always override what a tier could hold, and no
+uncleared source gets any work.
 
-- an owner pin, with an expiry;
-- a lifecycle event from the catalogue (release, patch, season, expansion), which
-  places a game in T0 or T1 for a fixed window and is available only once a catalogue
-  source is cleared;
-- a transparent attention rule defined for tiering alone, versioned separately from
-  the baseline rules (see section 20 question 2).
+**Escalation in C2 is shadow only** (section 20, decision 2). The rule
+`tiering_rules_v0` proposes a tier from a game's latest value against its trailing
+median, with an absolute floor, and from a recent event when one is known. Missing
+history proposes the long tail: unknown is never treated as zero and never escalates.
+The proposal is recorded beside the schedule entry and changes nothing. The baseline
+change-point output is not read by it at all.
+
+The one thing that moves a target in C2 is a **pin** in the control record, for
+supervised testing only: explicit, with an expiry, a reason and a name, and inert
+after its expiry. Pins are not the product's design.
+
+Later, when it is approved, escalation would move one tier per evaluation on the
+rule's proposal, an owner pin, or a lifecycle event from a cleared catalogue source.
 
 **De-escalation:** a game holds a tier for a minimum dwell time (T0 6 h, T1 24 h, T2
 3 days, T3 7 days), then drops one tier per evaluation when its reason has lapsed.
@@ -219,7 +229,7 @@ What actually stops spend, and what only tells someone:
 | Daily execution budget kept by the dispatcher | Hard, in code |
 | Cloud Run task timeout, retry count and task count | Hard, platform |
 | `maximum_bytes_billed`, 1 GiB per query, in dbt and the adapters | Hard, per query |
-| BigQuery custom quota on query usage per day for the project | Hard, platform. Proposed at 50 GiB a day |
+| BigQuery custom quota on query usage per day for the project | Hard, platform. 10 GiB a day (section 20, decision 5) |
 | `require_partition_filter` on every raw table | Hard, per query |
 | Full refresh needs an explicit flag; the routine command never passes it | Hard, in code, with a test |
 | History fill only for an article with no fill marker, capped per run | Hard, in code |
@@ -230,9 +240,25 @@ What actually stops spend, and what only tells someone:
 
 **The Google Cloud budget is not a spending cap.** It sends email. It stops nothing.
 
-An automatic stop that pauses the scheduler when the budget alert fires is possible
-(budget, Pub/Sub, a small function). It is new infrastructure with its own identity
-and failure modes, and is left as a question in section 20.
+No automatic billing-driven stop is built in C2 (section 20, decision 4). The limits
+above are what bound spend.
+
+**The BigQuery daily quota, for C2-B.** A custom quota of 10 GiB a day on query usage
+for the project. It is a real stop, and four things about it are stated plainly:
+
+- it applies to the whole project, so it also stops the owner's own ad hoc queries for
+  the rest of that day once reached;
+- it is a temporary C2 ceiling; raising it needs a measured reason;
+- it is not a monthly billing guarantee: 10 GiB a day is about 300 GiB a month, far
+  below the 1 TiB allowance, but it bounds one day, not a bill;
+- measured need is small: the one warehouse build a day bills about 0.13 GiB.
+
+One awkward point to settle in C2-B, not improvised here: the Terraform resource that
+sets a quota override (`google_service_usage_consumer_quota_override`) exists only in
+the `google-beta` provider at the pinned version, not in `google`. The options are to
+add the beta provider for that one resource, or to set the quota once with the
+owner's login and assert it with a read-only check. Either way a test or an audit
+step must fail if the quota is missing or larger than 10 GiB.
 
 ## 8. Monitoring
 
@@ -254,12 +280,16 @@ one channel. None should fire in normal operation.
 
 ## 9. Source health
 
-One health record per source, written by that source's collector under its own `ops`
-prefix (which it already may write) and read by the dispatcher (which already may read
-all of `ops`). No new access is needed.
+One health record per source, `dispatch/health/{source}.json`, written only by the
+dispatcher. The collector reports an outcome by filing a receipt for its work order in
+its own `ops` prefix; at the start of the next tick the dispatcher folds that receipt
+into the health record, or counts the order as a failure if it expired with no
+receipt. One writer, and no new access.
 
 It holds: last attempt, last success, consecutive failures, breaker state and when it
-reopens, last rate-limit time, requests used today, and one of these states:
+reopens, cool-down, last rate-limit time and the order still awaiting an outcome. The
+day's request count is kept beside it in the dispatcher's daily counters. From these
+one of the following states is derived:
 
 | State | Meaning |
 |---|---|
@@ -278,12 +308,15 @@ view; the record is the current one.
 
 ## 10. The expected-target ledger in unattended use
 
-`ms_ops.expected_targets` gains nullable columns, appended like `source_timestamp`
-was: `tier`, `due_reason`, `next_due_at`, `dispatch_state` and `source_state`.
+`ms_ops.expected_targets` gains six nullable columns, appended like
+`source_timestamp` was: `tier`, `due_at`, `due_reason`, `policy_status`,
+`disposition` and `work_order_id`.
 
-`dispatch_state` is one of `planned`, `deferred_cap`, `skipped_breaker_open`,
-`skipped_disabled`. A row is written for every target that was due, whether or not a
-job was started for it.
+`disposition` is one of `planned`, `deferred_cap`, `deferred_collector_busy`,
+`skipped_breaker_open`, `skipped_disabled_by_control`, `expired` and
+`expired_backlog_overflow`. A row is written when something changes for a target: when
+it becomes due, and again when deferred work is finally planned or given up. A target
+that is simply still waiting gets no further row.
 
 With the schedule version already on each row, the ledger answers at any point in
 time: which target, source and metric was expected, when, at what tier and why;
@@ -462,7 +495,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 
 | | |
 |---|---|
-| Objective | Settle the questions in section 20 and accept or amend this plan |
+| Objective | Settled: the six decisions are recorded in section 20 |
 | Components | This document |
 | Terraform | None |
 | Source contact | None |
@@ -471,7 +504,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 | Security | None |
 | Tests | None |
 | Live proof | None |
-| STOP | Written decisions on every question |
+| STOP | Done |
 | Rollback | Not applicable |
 
 ### C2-A. Offline build
@@ -480,7 +513,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 |---|---|
 | Objective | Build steady-state Wikimedia, the schedule and tiers, due selection, caps, the breaker, health records, the control record, the ledger columns and on-demand warehouse runs, all offline |
 | Components | `jobs/dispatch.py`, `jobs/collect.py`, `jobs/targets.py`, `jobs/warehouse_job.py`, a new scheduling module, `warehouse/` models and selectors, the Dockerfile (setuid removal), `infra/prod` (drafted, not applied) |
-| Terraform | Drafted only: scheduler cadence as a variable, five ledger columns, alert policy changes, one work-order prefix grant, the BigQuery quota |
+| Terraform | None applied or planned. One schema file is changed in the repository (six ledger columns), because the loader and its tests read it; it reaches BigQuery only through a reviewed C2-B plan |
 | Source contact | None |
 | Executions | 0 |
 | Cost | None |
@@ -496,7 +529,7 @@ C2-H Debian 13 evaluation                ── after C2-D; its own plan
 |---|---|
 | Objective | Deploy the C2 image and infrastructure with the scheduler paused; narrow the two deploy-identity roles |
 | Components | Deploy workflow (plan, then apply of that plan); owner bootstrap plan for the role narrowing |
-| Terraform | Prod: 7 jobs changed (image), scheduler changed (cadence, still paused), 1 table changed in place (columns appended), alert policies changed and added, 1 or 2 prefix grants added, 1 quota added. Bootstrap: 2 custom roles added, 2 bindings added, 2 removed. No destroy of data |
+| Terraform | Prod: 7 jobs changed (image; `METASPIKE_WORK_ORDERS=required` on the collector), scheduler changed (hourly, still paused), 1 table changed in place (six columns appended), alert policies changed and added, 1 prefix grant added (the collector's read of its own orders), 1 quota added. Bootstrap: 2 custom roles added, 2 bindings added, 2 removed. No destroy of data. Also once, by the owner: fill markers for the 14 articles collected in C1 |
 | Source contact | None |
 | Executions | 0. S1-style smoke for any new prefix grant is a separate, approved step |
 | Cost | A new image in the registry |
@@ -601,27 +634,27 @@ The scheduler is unpaused only by applying a reviewed plan whose sole change is
 
 For C2-F, add: C2-D and C2-E accepted. For C2-G, add: C2-F accepted.
 
-## 20. Decisions needed
+## 20. Decisions (C2-0, final)
 
-1. **Wikimedia targets during the soaks.** With discovery off, the soaks collect 14
-   articles, which proves automation but measures almost nothing about cost at scale.
-   Option: approve a curated list of a few hundred English Wikipedia game articles,
-   entered as explicit catalogue links, for C2-F. Recommendation: keep 14 through
-   C2-D, decide on a larger list at C2-E.
-2. **A tiering rule.** The baseline change-point output is shadow only and may not
-   promote a tier. Escalation therefore needs either owner pins only, or a separate,
-   simple, versioned rule (for example a day at least twice the trailing 28-day
-   median with an absolute floor). Recommendation: build the rule in C2-A and run it
-   in shadow, promoting nothing, until it has been looked at against real data.
-3. **Tick interval.** A 15-minute tick with only a daily source runs the dispatcher
-   2,880 times a month for nothing. Recommendation: an hourly tick in C2, returning
-   to 15 minutes when a 15-minute source is cleared.
-4. **Automatic budget stop.** Section 7. Recommendation: not in C2; the control
-   record's expiry and the caps are the hard limits.
-5. **BigQuery daily quota.** 50 GiB a day is proposed. It is a real stop and would
-   also stop the owner's own ad hoc queries in this project for the day.
-6. **Branch protection.** Unavailable on the current GitHub plan. Accept, or change
-   plan before unattended operation.
+1. **Wikimedia targets.** The 14 proven articles throughout C2. No curated production
+   list is made to imitate scale; scale is proven offline at 1,000, 5,000, 10,000 and
+   50,000 catalogued entities. Any larger real set needs its own reviewed, supervised
+   experiment, and real expansion belongs to later catalogue work.
+2. **Tiering.** The rule is built and is shadow only. It proposes T0 to T5 and causes
+   no production escalation in C2. Temporary pins are allowed for supervised
+   validation: explicit, expiring, auditable, and inert after expiry. The baseline
+   change-point output stays shadow only.
+3. **Tick.** Hourly while Wikimedia is the only source. The interval is configuration,
+   so a later cleared source can justify 15 minutes.
+4. **Billing stop.** None is built. The scheduler pause, the expiring control record,
+   the per-source, per-tick and per-day caps, the Cloud Run timeout, the query cap and
+   the alerts are the controls. The budget alert is an alert.
+5. **BigQuery daily quota.** 10 GiB a day, as a temporary C2 ceiling (section 7).
+6. **Branch protection.** The current GitHub and federation trust model is accepted
+   for private C2 with Wikimedia only and no secret version. It is **not** approved
+   for a secret-backed source or for public deployment: before the first Steam, IGDB
+   or other secret-backed unattended source, or the final public deployment, the
+   repository and deploy protection decision is reopened.
 
 ## 21. Projected cost for the Wikimedia-only steady state
 
@@ -668,3 +701,122 @@ product is still ahead:
 - integration with the website, and a final launch soak.
 
 There is one public release, at the end of that list.
+
+## 24. C2-A: what was built and measured offline
+
+Built in `src/metaspike/scheduling/` and wired into the dispatcher, the Wikimedia
+collector and the warehouse job. Nothing is deployed; no cloud resource, source or
+scheduler was touched.
+
+| Module | What it is |
+|---|---|
+| `config` | Per-source and per-tick limits, in one place |
+| `tiers` | The tiers, their intervals and caps, and the shadow rule `tiering_rules_v0` |
+| `schedule` | The versioned, partitioned schedule and which partitions a tick may read |
+| `control` | The control record and its fail-closed reading |
+| `health` | Source health and the circuit breaker, as pure transitions |
+| `workorder` | Immutable orders, the pointer, claiming and receipts |
+| `planner` | Bounded planning for one source on one tick |
+| `tick` | One tick, end to end, against the operations bucket |
+| `projection` | The cost arithmetic, with measured and assumed inputs kept apart |
+| `simulation` | A day of real ticks over a synthetic catalogue |
+
+### Layout in the operations bucket
+
+All under the dispatcher's own prefix, all read by exact name:
+
+```
+dispatch/control.json                         the owner's switch
+dispatch/schedule/CURRENT                     pointer to the schedule in force
+dispatch/schedule/{version}/manifest.json     counts and the partition index
+dispatch/schedule/{version}/{partition}.json  the entries of one partition
+dispatch/plans/{tick}.json                    the tick's plan, written once
+dispatch/ticks/{tick}.json                    the tick's lease
+dispatch/orders/{source}/{order_id}.json      a work order, written once
+dispatch/orders/{source}/CURRENT              pointer to the latest order
+dispatch/health/{source}.json                 health and breaker state
+dispatch/backlog/{source}.json                deferred work, bounded
+dispatch/counters/{date}.json                 requests and executions today
+dispatch/warehouse.json                       whether a warehouse run is owed
+{source}/orders/{order_id}.json               the collector's receipt
+{source}/bootstrap/{hash}.json                history filled for one target
+```
+
+The one access this adds, for C2-B: read for a collector under
+`dispatch/orders/{its source}/`. The dispatcher already holds everything it needs.
+
+### Scale simulation
+
+The simulation runs the real tick for a simulated day at an hourly tick. Two sources
+exist only in it: `sim_sampled`, a stand-in sampled source that exercises the tiers
+(its request ceiling is a simulation value, not an approved budget), and
+`sim_uncleared`, which is never cleared. A typical catalogue has 30 percent of its
+entities monitored, of which 80 percent have an article and 60 percent a sampled id.
+
+Quiet day:
+
+| Catalogued | Monitored | Eligible targets | High frequency | Entries read, worst tick | Objects read, worst tick | Ledger rows | Executions | Requests | Peak backlog | Slowest tick | Peak memory |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 300 | 420 | 8 | 273 | 27 | 765 | 48 | 765 | 0 | 0.02 s | 1 MB |
+| 5,000 | 1,500 | 2,100 | 39 | 779 | 28 | 3,827 | 50 | 3,823 | 4 | 0.12 s | 5 MB |
+| 10,000 | 3,000 | 4,200 | 72 | 941 | 29 | 7,347 | 52 | 7,291 | 23 | 0.20 s | 10 MB |
+| 50,000 | 15,000 | 21,000 | 347 | 2,311 | 29 | 44,507 | 64 | 24,400 | 5,000 | 1.09 s | 56 MB |
+| 50,000, small eligible subset | 500 | 700 | 9 | 445 | 28 | 1,117 | 48 | 1,117 | 0 | 0.03 s | 2 MB |
+
+What the scenarios showed, at every size:
+
+- **Breadth is not cost.** From 1,000 to 50,000 catalogued the objects a tick reads go
+  from 27 to 29, and the schedule entries it reads grow about eightfold, not fiftyfold.
+  A 50,000 catalogue with 700 eligible targets behaves exactly like a 1,000 catalogue
+  with the same 700: same requests, executions, ledger rows and projected cost.
+- **Limits hold.** No tick started more than 3 jobs (the cap is 6). Requests stopped at
+  the sources' ceilings: 10,000 for Wikimedia, 600 per execution for the stand-in.
+- **Many events at once** fill the tiers to exactly 25, 75, 300 and 1,000 and start not
+  one more job than a quiet day.
+- **An outage** opens the breaker after three failed executions; work is recorded as
+  skipped and no backlog builds. **A rate limit** opens it at once, and a single probe
+  closes it after the cool-down.
+- **Six hours offline** is followed by one ordinary tick: at 50,000 it started 3 jobs
+  and planned 1,193 targets, two executions' worth. Nothing was made up for the gap.
+- **Nothing was ever listed**, and the uncleared source got no ledger row, no order and
+  no job.
+- **At 50,000 the limits bind.** With these default tiers and one execution per source
+  per tick, about 6,600 pieces of due work a day expired unsampled and the backlog sat
+  at its bound of 5,000. That is the design doing what it should, cost stays bounded
+  and the shortfall is recorded, but it also says these caps and cohort sizes are not
+  yet a tuned policy for that scale. Tuning them is later work, on measured data.
+
+### Projected cost
+
+From `projection`, using list prices. Measured inputs: the warehouse run's duration and
+billed bytes, and row sizes, from S3. Assumed inputs, to be replaced in C2-E: a
+one-minute minimum bill per execution, half a second per source request (S3 measured
+about a tenth of that), and the size of a period-only or sample-only build.
+
+| Configuration | Without allowances | With allowances | Verdict |
+|---|---|---|---|
+| **C2 as planned: 14 articles, hourly tick, one build a day** | **$1.06** | **$0.09** | within the preferred range |
+| 1,000 catalogued, quiet, with the stand-in sampled source | $3.22 | $0.09 | within the preferred range |
+| 5,000 | $3.56 | $0.09 | within the preferred range |
+| 10,000 | $4.61 | $0.09 | within the preferred range |
+| 50,000 | $10.01 | $4.37 | acceptable with scrutiny |
+| 50,000 at a 15-minute tick (illustrative only) | $13.77 | $7.38 | acceptable with scrutiny |
+
+The figure without allowances is the one to decide on: allowances belong to the
+billing account. Every row with the stand-in source describes a configuration that is
+not approved and cannot be switched on; it is there to show the shape of the cost, and
+that cost follows what is due and what the limits allow, not the size of the catalogue.
+Any configuration projected above $20 is reported as not activation-ready.
+
+In the planned configuration the dispatcher is most of the compute: 720 one-minute
+executions a month, if the one-minute minimum applies. BigQuery is about 4 GB billed a
+month.
+
+### Two things to carry into C2-B
+
+- **Fill markers for the 14 articles.** The C1 collection filled their history before
+  fill markers existed. Unless the owner writes those 14 markers once, the first C2
+  tick fetches 90 days again. The function that writes them exists and is tested;
+  running it against the real bucket is a C2-B step.
+- **The quota resource** is beta-only in Terraform (section 7).
+

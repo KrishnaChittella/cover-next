@@ -47,6 +47,8 @@ class TargetsDocument(FrozenModel):
     version: str
     generated_at: AwareDatetime
     targets: tuple[Target, ...] = ()
+    # Every entity in the catalogue this was derived from, monitored or not.
+    catalogued: int | None = None
 
     def for_source(self, source: str) -> tuple[Target, ...]:
         return tuple(target for target in self.targets if target.source == source)
@@ -89,6 +91,7 @@ def targets_for(state: CatalogueState, version: str) -> TargetsDocument:
         version=version,
         generated_at=state.generated_at,
         targets=wikimedia_targets(state.catalogue),
+        catalogued=len(state.catalogue.games),
     )
 
 
@@ -150,6 +153,12 @@ def expected_target_rows(
             "schedule_version": schedule_version,
             "dispatch_run_id": dispatch_run_id,
             "recorded_at": timestamp(recorded_at),
+            "tier": None,
+            "due_at": None,
+            "due_reason": None,
+            "policy_status": None,
+            "disposition": None,
+            "work_order_id": None,
         }
         for target in targets
     ]

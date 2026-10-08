@@ -26,6 +26,9 @@ vars:
   # An incremental run recomputes this many whole UTC days before today, which is
   # how a late-arriving batch is picked up.
   lookback_days: 3
+  # The same for models built from period observations alone. Longer, so that a
+  # routine four-day collection is ordinary work and not a late batch.
+  period_lookback_days: 7
   # "Now", as the warehouse job saw it, so the job and the models agree on the window.
   run_as_of: null
   # Set by the warehouse job when it loaded rows older than the normal window:

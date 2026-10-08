@@ -344,8 +344,8 @@ unattended: the scheduler is still paused.
 
 | Command | Job | What it does |
 |---|---|---|
-| `dispatch` | `ms-dispatch` | Records what it intends to be collected, takes the tick's lease, starts the jobs that are due |
-| `collect-wikimedia` | `ms-wikimedia` | Daily pageviews for every entity with an article |
+| `dispatch` | `ms-dispatch` | Reads the control record and stops unless it permits work; plans what is due within the source's limits, records it, writes work orders, starts the jobs (Part C2-A, below) |
+| `collect-wikimedia` | `ms-wikimedia` | Daily pageviews: history once per article, then a four-day window. Under `METASPIKE_WORK_ORDERS=required`, only what a work order names |
 | `collect-steam-players` | `ms-steam-players` | **Refuses**: Steam is not cleared for private collection |
 | `collect-catalogue` | `ms-catalogue` | Collects cleared catalogue sources, resolves, persists. Refuses the Steam portion |
 | `warehouse` | `ms-warehouse` | Loads landed batches, then runs dbt from the image's own dbt environment |
@@ -386,11 +386,50 @@ intent either.
 
 ### Late data
 
-The models normally recompute three days. When the warehouse job loads rows older
-than that, it records a pending rebuild by name BEFORE it writes the batch's receipt,
+The models normally recompute three days of sampled data and seven days of period
+data. When the warehouse job loads rows older than its group's window, it records a pending rebuild by name BEFORE it writes the batch's receipt,
 passes the day the late data reaches back to into dbt, and clears the record only
 after dbt has succeeded. A crash or a failed dbt run keeps the record and the job
 exits non-zero. No successful run leaves known late data out of the marts.
+
+### Part C2-A: unattended scheduling, built and not switched on
+
+Nothing in this section is deployed. The deployed image predates it, the scheduler is
+paused, and no control record exists, so a tick would refuse to do anything. The plan
+and its checkpoints are in [phase4-c2-plan.md](phase4-c2-plan.md).
+
+**The control record.** `dispatch/control.json` in the operations bucket, written by
+the owner. A tick does nothing unless it is present, well formed, `enabled`, and not
+past `armed_until`, and it plans a source only if the record enables that source by
+name. It can lower a limit and never raise one. When `armed_until` passes, collection
+stops whether or not the scheduler is paused.
+
+**A tick.** One tick plans itself only; there is no loop over ticks that were missed.
+It reads the schedule partitions that can be due on it and nothing else, bounds the
+work by the source's limits, defers what does not fit to a bounded backlog, and gives
+up what has expired. Every due target gets a ledger row saying what was done about it.
+The tick's plan is stored under the tick's name, so a second run of the same tick
+resumes the same plan.
+
+**Work orders.** A collector cannot be passed arguments and cannot list, so the
+dispatcher writes an immutable order and moves a small pointer to it; the collector
+reads both by exact name and files a receipt in its own prefix. An order is refused
+if it is absent, malformed, for another source or policy version, expired, or already
+completed. This needs one grant that does not exist yet: read on the operations
+bucket under `dispatch/orders/{source}/` for that source's collector.
+
+**Wikimedia in steady state.** An article's history is filled once (90 days, at most
+200 articles in a run, tracked by a marker under `wikimedia_pageviews/bootstrap/`).
+After that a run asks for four days ending at the day that is due, and for fourteen
+on Mondays. The 14 articles collected in Part C1 have no fill marker, because the
+marker did not exist then; their markers must be written once by the owner before the
+first C2 tick, or that tick would fetch 90 days again.
+
+**The warehouse job** now builds only what changed: the period models when only
+period data arrived, the sample models when sample data did, everything at 04:00 UTC,
+and nothing when nothing arrived and nothing is pending.
+
+**The image** strips the setuid and setgid bits from every program in its final stage.
 
 ### The image
 

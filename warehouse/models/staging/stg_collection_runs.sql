@@ -1,4 +1,4 @@
-{{ ms_incremental('started_at', ['run_id', 'phase'], ['hourly']) }}
+{{ ms_incremental('started_at', ['run_id', 'phase'], ['hourly', 'periods']) }}
 
 -- One row per run and phase (a run records its start and its end separately).
 select

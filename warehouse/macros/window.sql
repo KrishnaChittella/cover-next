@@ -6,7 +6,8 @@
 {%- endmacro %}
 
 {#- Where a model starts reading. An incremental run recomputes whole UTC days, back
-    `lookback_days`; a first build or a full refresh reads ALL retained history (see
+    `lookback_days`, or `period_lookback_days` for a model built from period data
+    alone (a period source is asked for a few days at a time); a first build or a full refresh reads ALL retained history (see
     ms_history_start). Every read of a raw table goes through this, so every read is
     bounded on the partition column.
 
@@ -18,7 +19,8 @@
   {%- if not incremental -%}
     {{ ms_history_start(groups) }}
   {%- else -%}
-    {%- set starts = [ms_day(ms_sub_days(ms_now(), var('lookback_days')))] -%}
+    {%- set days = var('period_lookback_days') if groups == ['periods'] else var('lookback_days') -%}
+    {%- set starts = [ms_day(ms_sub_days(ms_now(), days))] -%}
     {%- for group in groups -%}
       {%- if var('rebuild_from_' ~ group, none) -%}
         {%- do starts.append("timestamp '" ~ var('rebuild_from_' ~ group) ~ "'") -%}

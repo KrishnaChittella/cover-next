@@ -184,6 +184,8 @@ def test_only_metaspikes_own_records_can_be_landed_without_a_source_policy() -> 
         "mode": "fetch_history", "source_native_id": "en.wikipedia.org/Minecraft",
         "slot_start": "2026-10-03T00:00:00.000000Z", "schedule_version": "bootstrap",
         "dispatch_run_id": "tick-1", "recorded_at": "2026-10-05T06:00:00.000000Z",
+        "tier": 4, "due_at": "2026-10-05T03:00:00.000000Z", "due_reason": "default_long_tail",
+        "policy_status": "cleared", "disposition": "planned", "work_order_id": None,
     }  # fmt: skip
     manifest = w.writer.land_internal(Table.EXPECTED_TARGETS, "dispatch", "tick-1", NOW, [ledger])
     assert manifest.policy_version == INTERNAL_POLICY_VERSION

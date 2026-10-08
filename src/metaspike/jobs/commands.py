@@ -22,7 +22,7 @@ from metaspike.domain.source_records import SourceRecord
 from metaspike.jobs import runlog
 from metaspike.jobs.baseline_jobs import features, parity
 from metaspike.jobs.catalogue_job import Fetcher, collect_catalogue
-from metaspike.jobs.collect import collect_samples, collect_wikimedia
+from metaspike.jobs.collect import collect_samples, collect_wikimedia_job
 from metaspike.jobs.dispatch import CloudRunJobs, dispatch
 from metaspike.jobs.runtime import (
     BUCKETS,
@@ -62,8 +62,8 @@ def _dispatch(runtime: Runtime) -> int:
 
 def _collect_wikimedia(runtime: Runtime) -> int:
     def body() -> Mapping[str, Any]:
-        runtime.refuse_unless_cleared(WIKIMEDIA, SourcePurpose.DEMAND_SIGNALS)
-        return collect_wikimedia(runtime, WikimediaPageviewsAdapter(build_client()))
+        # The source client is built only if there is something to ask it.
+        return collect_wikimedia_job(runtime, lambda: WikimediaPageviewsAdapter(build_client()))
 
     return runlog.run_job(runtime, runlog.landed(runtime, WIKIMEDIA), body, source=WIKIMEDIA)
 

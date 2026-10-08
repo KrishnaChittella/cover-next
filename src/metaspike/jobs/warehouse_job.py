@@ -1,8 +1,10 @@
 """The warehouse job: load what was landed, then build the models.
 
-Late data. The models normally recompute the three whole UTC days before now. A batch
-whose rows are older than that would be loaded into the raw table and never reach the
-marts. So the loader reports each batch's earliest partition value BEFORE it writes
+Late data. The models normally recompute the whole UTC days just before now: three
+for sampled data, seven for period data, because a period source is asked for a few
+days at a time and revises recent days. A batch whose rows are older than its group's
+window would be loaded into the raw table and never reach the models. So the loader
+reports each batch's earliest partition value BEFORE it writes
 the batch's receipt, and anything earlier than the normal window is recorded as a
 pending rebuild, durably, by name. The dbt run then starts each affected group of
 models from that point instead of from the normal window. The pending record is
@@ -12,8 +14,11 @@ cleared only after dbt has succeeded, so:
     a failed dbt run keeps it and the job exits non-zero;
     no successful run leaves known late data out of the marts.
 
-If a group with pending late data is not part of the hourly selection, the run is
-widened to the daily selection, which builds everything.
+What is built. A run builds only the groups of models whose data it loaded or that
+have a rebuild pending: the period models alone when only period data arrived, the
+sample models when sample data did, everything at the daily hour, and nothing at all
+when nothing arrived and nothing is pending. A group with pending late data that the
+chosen selection does not build widens the run to the daily selection.
 """
 
 import json
@@ -32,8 +37,13 @@ from metaspike.warehouse.loader import BatchOutcome, Loader
 from metaspike.warehouse.objects import ObjectNotFound, PreconditionFailed
 
 LOOKBACK_DAYS = 3
+# Period data: a routine collection asks for four days and must not count as late.
+PERIOD_LOOKBACK_DAYS = 7
+LOOKBACK_BY_GROUP = {"periods": PERIOD_LOOKBACK_DAYS}
 PENDING_OBJECT = "warehouse/pending_rebuild.json"
-DAILY_HOUR = 3
+# The run at this UTC hour builds everything, whatever arrived. It follows the daily
+# period collection, so one run a day normally does both.
+DAILY_HOUR = 4
 SELECTOR_ENV = "METASPIKE_DBT_SELECTOR"
 LOAD_DAYS_ENV = "METASPIKE_LOAD_DAYS"
 DBT_ENV = "METASPIKE_DBT"
@@ -71,6 +81,24 @@ GROUP_OF: dict[Table, str] = {
     Table.COLLECTION_RUNS: "runs",
 }
 HOURLY_GROUPS = frozenset({"samples", "runs"})
+PERIOD_GROUPS = frozenset({"periods", "runs"})
+ALL_GROUPS = frozenset(GROUP_OF.values())
+# The groups of models each dbt selector builds.
+COVERS = {"daily": ALL_GROUPS, "hourly": HOURLY_GROUPS, "periods": PERIOD_GROUPS}
+
+
+def choose_selector(hour: int, groups: frozenset[str]) -> str | None:
+    """The smallest selection that builds every group that needs building."""
+    if hour == DAILY_HOUR:
+        return "daily"
+    if not groups:
+        return None
+    if "periods" in groups and groups <= PERIOD_GROUPS:
+        return "periods"
+    if groups <= HOURLY_GROUPS:
+        return "hourly"
+    return "daily"
+
 
 Dbt = Callable[[Sequence[str], Mapping[str, str]], int]
 
@@ -81,9 +109,10 @@ class PendingRebuild(FrozenModel):
     since: dict[str, AwareDatetime] = Field(default_factory=dict)
 
 
-def normal_window_start(now: datetime) -> datetime:
-    """Where an incremental dbt run starts reading. Must match the dbt macro."""
-    day = (now.astimezone(UTC) - timedelta(days=LOOKBACK_DAYS)).date()
+def normal_window_start(now: datetime, group: str | None = None) -> datetime:
+    """Where an incremental dbt run starts reading a group. Must match the dbt macro."""
+    days = LOOKBACK_BY_GROUP.get(group or "", LOOKBACK_DAYS)
+    day = (now.astimezone(UTC) - timedelta(days=days)).date()
     return datetime(day.year, day.month, day.day, tzinfo=UTC)
 
 
@@ -157,11 +186,11 @@ def run_dbt(arguments: Sequence[str], environment: Mapping[str, str]) -> int:
 
 def warehouse(runtime: Runtime, dbt: Dbt = run_dbt) -> Mapping[str, Any]:
     now = runtime.now()
-    window_start = normal_window_start(now)
     pending = _Pending(runtime)
 
     def before_receipt(manifest: BatchManifest, earliest: datetime) -> None:
         group = GROUP_OF.get(manifest.table)
+        window_start = normal_window_start(now, group)
         if group is not None and earliest < window_start:
             pending.note(group, earliest)
             runtime.log(
@@ -184,27 +213,45 @@ def warehouse(runtime: Runtime, dbt: Dbt = run_dbt) -> Mapping[str, Any]:
     days = int(runtime.environ.get(LOAD_DAYS_ENV, "3"))
     loaded = already = rows = 0
     incomplete: list[str] = []
+    touched: set[str] = set()
     for area, tables in sorted(AREA_TABLES.items()):
         for table in tables:
             for offset in range(days):
                 day = (now.astimezone(UTC) - timedelta(days=offset)).date().isoformat()
                 report = loader.load_day(area, table, day)
                 rows += report.rows_loaded
-                loaded += report.count(BatchOutcome.LOADED) + report.count(BatchOutcome.RECOVERED)
+                new = report.count(BatchOutcome.LOADED) + report.count(BatchOutcome.RECOVERED)
+                loaded += new
+                if new and table in GROUP_OF:
+                    touched.add(GROUP_OF[table])
                 already += report.count(BatchOutcome.ALREADY_LOADED)
                 incomplete.extend(report.incomplete)
     if incomplete:
         runtime.log("incomplete_batches", severity="WARNING", objects=incomplete[:20])
 
     taken, _ = pending.read()
-    selector = runtime.environ.get(SELECTOR_ENV) or (
-        "daily" if now.astimezone(UTC).hour == DAILY_HOUR else "hourly"
+    needed = frozenset(touched) | frozenset(taken.since)
+    selector = runtime.environ.get(SELECTOR_ENV) or choose_selector(
+        now.astimezone(UTC).hour, needed
     )
-    if selector == "hourly" and set(taken.since) - HOURLY_GROUPS:
-        selector = "daily"  # late data for models the hourly selection does not build
+    summary: dict[str, Any] = {
+        "batches_loaded": loaded,
+        "batches_already_loaded": already,
+        "rows_loaded": rows,
+        "incomplete_batches": len(incomplete),
+        "groups_loaded": sorted(touched),
+    }
+    if selector is None:
+        # Nothing arrived and nothing is pending: there is nothing a build could change.
+        return {**summary, "selector": "none", "rebuilt_from": {}}
+    if selector not in COVERS:
+        raise ValueError(f"{SELECTOR_ENV} names an unknown selector: {selector}")
+    if not frozenset(taken.since) <= COVERS[selector]:
+        selector = "daily"  # late data for models this selection does not build
     variables: dict[str, Any] = {
         "run_as_of": f"{now.astimezone(UTC):%Y-%m-%d %H:%M:%S}",
         "lookback_days": LOOKBACK_DAYS,
+        "period_lookback_days": PERIOD_LOOKBACK_DAYS,
     }
     for group, since in sorted(taken.since.items()):
         variables[f"rebuild_from_{group}"] = f"{since.astimezone(UTC):%Y-%m-%d} 00:00:00"
@@ -240,13 +287,9 @@ def warehouse(runtime: Runtime, dbt: Dbt = run_dbt) -> Mapping[str, Any]:
             pending_rebuild={g: s.isoformat() for g, s in taken.since.items()},
         )
         raise RuntimeError(f"dbt exited with {code}; pending rebuilds are kept")
-    covered = frozenset(GROUP_OF.values()) if selector == "daily" else HOURLY_GROUPS
-    pending.clear(covered, taken)
+    pending.clear(COVERS[selector], taken)
     return {
-        "batches_loaded": loaded,
-        "batches_already_loaded": already,
-        "rows_loaded": rows,
-        "incomplete_batches": len(incomplete),
+        **summary,
         "selector": selector,
         "rebuilt_from": {g: s.isoformat() for g, s in sorted(taken.since.items())},
     }

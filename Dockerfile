@@ -60,6 +60,11 @@ RUN apt-get update \
 RUN groupadd --system --gid 10001 metaspike \
     && useradd --system --uid 10001 --gid metaspike --no-create-home metaspike
 
+# No program in the image runs with more privilege than whoever starts it. The base
+# ships setuid and setgid programs (mount, umount, su, passwd and others) that no job
+# uses; with the bit removed, a flaw in one of them cannot raise uid 10001 to root.
+RUN find / -xdev -type f -perm /6000 -exec chmod a-s {} +
+
 COPY --from=build --chown=root:root /app/.venv /app/.venv
 COPY --from=build --chown=root:root /opt/dbt /opt/dbt
 

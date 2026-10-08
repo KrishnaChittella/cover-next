@@ -462,7 +462,7 @@ def test_suite_mode_reaches_only_google_auth_and_cloud_storage(
     monkeypatch.setattr("metaspike.jobs.runtime.httpx.Client", client)
     # Every way a source could be reached from the command module.
     for name in ("build_client", "build_igdb", "build_steam_players", "WikimediaPageviewsAdapter",
-                 "collect_wikimedia", "collect_samples", "collect_catalogue", "warehouse",
+                 "collect_wikimedia_job", "collect_samples", "collect_catalogue", "warehouse",
                  "features", "parity", "dispatch"):  # fmt: skip
         monkeypatch.setattr(commands, name, forbid)
     monkeypatch.setattr(runtime_module, "BigQueryWarehouse", forbid)

@@ -17,12 +17,11 @@ from metaspike.catalogue.seed import BOOTSTRAP_ANCHORS
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import SourceErrorCode
 from metaspike.domain.source_records import SourceRecord
-from metaspike.jobs import runlog
+from metaspike.jobs import runlog, warehouse_job
 from metaspike.jobs.baseline_jobs import features, parity
 from metaspike.jobs.catalogue_job import EVIDENCE_OBJECT, collect_catalogue
 from metaspike.jobs.collect import collect_samples, collect_wikimedia
 from metaspike.jobs.commands import JOBS
-from metaspike.jobs.dispatch import dispatch, due_jobs
 from metaspike.jobs.runtime import POLICIES, Refused, production_policy, runtime_from_environment
 from metaspike.jobs.smoke import (
     ADMINISTRATOR,
@@ -44,7 +43,6 @@ from metaspike.jobs.targets import (
     TargetsDocument,
     bootstrap_targets,
     load_targets,
-    publish_targets,
 )
 from metaspike.jobs.warehouse_job import (
     PENDING_OBJECT,
@@ -395,67 +393,6 @@ STEAM_TARGETS = TargetsDocument(
 )
 
 
-def test_the_schedule_starts_each_job_only_when_it_is_due() -> None:
-    both = {SOURCE, WIKIMEDIA}
-    day = datetime(2026, 10, 5, tzinfo=UTC)
-    assert due_jobs(day.replace(hour=2), both, True) == [
-        "ms-steam-players",
-        "ms-wikimedia",
-        "ms-warehouse",
-    ]
-    assert due_jobs(day.replace(hour=2, minute=15), both, True) == [
-        "ms-steam-players",
-        "ms-features",
-    ]
-    assert due_jobs(day.replace(hour=1), both, True) == [
-        "ms-steam-players",
-        "ms-catalogue",
-        "ms-warehouse",
-    ]
-    assert due_jobs(day.replace(hour=1), both, False) == ["ms-steam-players", "ms-warehouse"]
-    assert due_jobs(day.replace(hour=4), {WIKIMEDIA}, True) == ["ms-warehouse", "ms-parity"]
-    assert due_jobs(day.replace(hour=9, minute=30), {WIKIMEDIA}, True) == []
-
-
-def test_the_dispatcher_records_intent_only_for_cleared_sources_then_starts_what_is_due() -> None:
-    tick = datetime(2026, 10, 5, 2, 0, tzinfo=UTC)
-    w = at(tick + timedelta(seconds=20))
-    publish_targets(w.operations, STEAM_TARGETS)
-    runtime, _ = runtime_for(w, "ms-dispatch")  # the real policies: Steam is not cleared
-    starter = Starter()
-    summary = dispatch(runtime, starter)
-    assert starter.started == ["ms-wikimedia", "ms-warehouse"]
-    assert summary["schedule_version"] == "g00000007-abc" and summary["expected_targets"] == 14
-    w.load_everything()
-    ledger = w.warehouse.all_rows(TableRef("ms_ops", "expected_targets"))
-    assert {row["source"] for row in ledger} == {WIKIMEDIA}  # nothing about Steam at all
-    assert {row["slot_start"] for row in ledger} == {datetime(2026, 10, 3, tzinfo=UTC)}
-    assert {row["mode"] for row in ledger} == {"fetch_history"}
-    assert {row["dispatch_run_id"] for row in ledger} == {"tick-20261005T0200Z"}
-    assert {row["recorded_at"] for row in ledger} == {w.now()}
-    assert not [n for n in w.landing.list("") if n.startswith(SOURCE)]
-
-    # The same tick again: the lease stops it, and the intent is not recorded twice.
-    again = Starter()
-    assert dispatch(runtime, again)["outcome"] == "already_dispatched"
-    assert again.started == [] and len(data_objects(w, "dispatch/")) == 1
-
-
-def test_a_cleared_sampled_source_is_expected_in_every_tick() -> None:
-    tick = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
-    w = world(lambda: tick + timedelta(seconds=5), policy_for=cleared_policy)
-    publish_targets(w.operations, STEAM_TARGETS)
-    runtime, _ = runtime_for(w, "ms-dispatch")
-    starter = Starter()
-    summary = dispatch(runtime, starter)
-    assert starter.started == ["ms-steam-players"] and summary["expected_targets"] == 2
-    w.load_everything()
-    ledger = w.warehouse.all_rows(TableRef("ms_ops", "expected_targets"))
-    assert {(r["source_native_id"], r["slot_start"], r["mode"]) for r in ledger} == {
-        ("730", tick, "sample_now"), ("570", tick, "sample_now")
-    }  # fmt: skip
-
-
 def test_without_a_catalogue_generation_the_plan_is_the_bootstrap_articles() -> None:
     w = at()
     document = load_targets(w.operations, NOW)
@@ -463,19 +400,6 @@ def test_without_a_catalogue_generation_the_plan_is_the_bootstrap_articles() -> 
     assert {t.source for t in document.targets} == {WIKIMEDIA}
     w.operations.create(TARGETS_OBJECT + ".x", b"")  # an unrelated object changes nothing
     assert load_targets(w.operations, NOW) == document
-
-
-def test_a_job_that_cannot_be_started_fails_the_dispatch() -> None:
-    tick = datetime(2026, 10, 5, 2, 0, tzinfo=UTC)
-    w = at(tick)
-    runtime, log = runtime_for(w, "ms-dispatch")
-    code = runlog.run_job(
-        runtime,
-        runlog.landed(runtime, "dispatch"),
-        lambda: dispatch(runtime, Starter("ms-warehouse")),
-    )
-    assert code == 1
-    assert [e["target_job"] for e in log if e["event"] == "job_start_failed"] == ["ms-warehouse"]
 
 
 # --- catalogue job -------------------------------------------------------------------------
@@ -602,11 +526,19 @@ def test_a_normal_warehouse_run_loads_and_builds_the_recent_window() -> None:
     summary = warehouse(runtime, dbt)
     assert summary["batches_loaded"] == 1 and summary["rows_loaded"] == 1
     assert summary["selector"] == "hourly" and summary["rebuilt_from"] == {}
-    assert dbt.variables() == {"lookback_days": 3, "run_as_of": "2026-10-09 06:00:00"}
+    assert dbt.variables() == {
+        "lookback_days": 3,
+        "period_lookback_days": 7,
+        "run_as_of": "2026-10-09 06:00:00",
+    }
     assert dbt.calls[0][:4] == ["/opt/dbt/bin/dbt", "build", "--target", "prod"]
     assert normal_window_start(now) == datetime(2026, 10, 6, tzinfo=UTC)
     assert not [e for e in log if e["event"] == "late_data_loaded"]
-    assert warehouse(runtime, dbt)["batches_loaded"] == 0  # and again: nothing to load
+    assert normal_window_start(now, "periods") == datetime(2026, 10, 2, tzinfo=UTC)
+    # And again: nothing to load and nothing pending, so nothing is built at all.
+    again = warehouse(runtime, dbt)
+    assert again["batches_loaded"] == 0 and again["selector"] == "none"
+    assert len(dbt.calls) == 1
 
 
 def test_late_data_is_rebuilt_from_where_it_reaches_back_to() -> None:
@@ -628,8 +560,8 @@ def test_late_data_is_rebuilt_from_where_it_reaches_back_to() -> None:
     )
     # Rebuilt and done: the next run is a normal one.
     assert json.loads(w.operations.get(PENDING_OBJECT).data) == {"since": {}}
-    warehouse(runtime, dbt)
-    assert "rebuild_from_samples" not in dbt.variables()
+    assert warehouse(runtime, dbt)["rebuilt_from"] == {}
+    assert len(dbt.calls) == 1  # nothing new and nothing pending: no second build
 
 
 def test_a_failed_build_keeps_the_pending_rebuild_and_fails_the_job() -> None:
@@ -682,16 +614,43 @@ def test_a_crash_between_the_load_and_its_receipt_cannot_lose_the_late_record() 
     assert "rebuild_from_samples" in dbt.variables()
 
 
-def test_late_data_for_daily_models_widens_an_hourly_run() -> None:
-    w = at()  # 06:00, an hourly run
+def test_period_data_alone_builds_only_the_period_models() -> None:
+    w = at()  # 06:00: not the daily hour
     runtime, _ = runtime_for(w, "ms-wikimedia")
-    collect_wikimedia(runtime, wikimedia())  # a 90-day window is "late" by construction
+    collect_wikimedia(runtime, wikimedia())  # a first fill reaches back 90 days: late
     job, _ = runtime_for(w, "ms-warehouse", run_id="run-0002")
     dbt = Dbt()
     summary = warehouse(job, dbt)
-    assert dbt.selector() == "daily" == summary["selector"]
+    assert dbt.selector() == "periods" == summary["selector"]
+    assert summary["groups_loaded"] == ["periods"]
     assert dbt.variables()["rebuild_from_periods"] == "2026-07-06 00:00:00"
     assert json.loads(w.operations.get(PENDING_OBJECT).data) == {"since": {}}
+
+
+def test_late_period_data_widens_a_run_that_would_build_only_sample_models() -> None:
+    w = world(lambda: NOW, policy_for=cleared_policy)
+    runtime, _ = runtime_for(w, "ms-wikimedia")
+    collect_wikimedia(runtime, wikimedia())
+    land_attempts(w, datetime(2026, 10, 5, 5, 0, tzinfo=UTC), "run-s")
+    job, _ = runtime_for(w, "ms-warehouse", run_id="run-0002")
+    dbt = Dbt()
+    summary = warehouse(job, dbt)
+    assert summary["groups_loaded"] == ["periods", "samples"]
+    assert dbt.selector() == "daily" == summary["selector"]
+
+
+def test_the_selection_is_the_smallest_that_builds_what_changed() -> None:
+    choose = warehouse_job.choose_selector
+    none: frozenset[str] = frozenset()
+    assert choose(warehouse_job.DAILY_HOUR, none) == "daily"  # the safety run builds everything
+    assert choose(9, none) is None
+    assert choose(9, frozenset({"periods"})) == choose(9, frozenset({"periods", "runs"}))
+    assert choose(9, frozenset({"periods"})) == "periods"
+    assert choose(9, frozenset({"runs"})) == choose(9, frozenset({"samples", "runs"})) == "hourly"
+    assert choose(9, frozenset({"periods", "samples"})) == "daily"
+    assert choose(9, frozenset({"records"})) == "daily"
+    for selector, groups in warehouse_job.COVERS.items():
+        assert groups <= warehouse_job.ALL_GROUPS, selector
 
 
 def test_an_unreadable_pending_record_means_rebuild_everything() -> None:

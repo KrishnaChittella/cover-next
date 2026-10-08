@@ -1,7 +1,7 @@
 {{ ms_incremental(
     'period_start',
     ['source', 'metric', 'source_identifier', 'granularity', 'period_start', 'observed_at'],
-    ['daily']
+    ['daily', 'periods']
 ) }}
 
 -- One row per version of a period: what a source said a period's value was, and

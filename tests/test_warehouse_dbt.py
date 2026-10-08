@@ -245,6 +245,12 @@ def ledger_row(source: str, metric: str, granularity: str, mode: str, app: str, 
         "schedule_version": version,
         "dispatch_run_id": f"tick-{slot:%Y%m%dT%H%MZ}",
         "recorded_at": timestamp(slot),
+        "tier": 4,
+        "due_at": timestamp(slot),
+        "due_reason": "default_long_tail",
+        "policy_status": "cleared",
+        "disposition": "planned",
+        "work_order_id": None,
     }
 
 
@@ -357,9 +363,16 @@ def test_the_default_target_is_offline_and_every_bigquery_job_is_byte_limited() 
 
 def test_selectors_and_lookback_are_declared() -> None:
     selectors = yaml.safe_load((PROJECT / "selectors.yml").read_text())["selectors"]
-    assert [s["name"] for s in selectors] == ["hourly", "daily"]
+    assert [s["name"] for s in selectors] == ["hourly", "daily", "periods"]
     project = yaml.safe_load((PROJECT / "dbt_project.yml").read_text())
     assert project["vars"]["lookback_days"] == 3
+    assert project["vars"]["period_lookback_days"] == 7
+    from metaspike.jobs import warehouse_job
+
+    # The job and the models must agree on where a window starts.
+    assert project["vars"]["lookback_days"] == warehouse_job.LOOKBACK_DAYS
+    assert project["vars"]["period_lookback_days"] == warehouse_job.PERIOD_LOOKBACK_DAYS
+    assert set(warehouse_job.COVERS) == {s["name"] for s in selectors}
     assert project["flags"]["send_anonymous_usage_stats"] is False
 
 
@@ -842,3 +855,162 @@ def test_no_fixed_history_date_remains_and_the_guards_are_still_in_place() -> No
     )
     prod = yaml.safe_load((PROJECT / "profiles.yml").read_text())["metaspike_warehouse"]["outputs"]
     assert prod["prod"]["maximum_bytes_billed"] == 1024**3
+
+
+# --- C2-A: the period models look back seven days ------------------------------------------
+
+PAGEVIEWS = "wikimedia_pageviews"
+ARTICLE = "en.wikipedia.org/Minecraft"
+PERIOD_ROWS = "select cast(period_start as varchar), value from ms_staging.stg_period_observations"
+
+
+def land_days(w: World, run: str, days: Sequence[datetime], value: float, seen: datetime) -> None:
+    """One landed batch of daily pageviews for one article, as the collector writes it."""
+    w.writer.land(
+        Table.PERIOD_OBSERVATIONS,
+        PAGEVIEWS,
+        run,
+        seen,
+        [
+            {
+                "source": PAGEVIEWS,
+                "metric": "pageviews",
+                "source_identifier": ARTICLE,
+                "canonical_game_id": "game-minecraft",
+                "granularity": "daily",
+                "period_start": timestamp(day),
+                "value": value,
+                "status": "observed",
+                "observed_at": timestamp(seen),
+                "collection_run_id": run,
+                "source_timestamp": timestamp(day),
+            }
+            for day in days
+        ],
+    )
+
+
+def day(month: int, number: int) -> datetime:
+    return datetime(2026, month, number, tzinfo=UTC)
+
+
+def staged(path: Path) -> list[tuple[str, float]]:
+    return [(d[:10], v) for d, v in query(path, PERIOD_ROWS + " order by 1, 2")]
+
+
+def test_a_routine_four_day_collection_is_ordinary_work_for_the_period_models(
+    dbt_ready: None, tmp_path: Path
+) -> None:
+    from metaspike.jobs.warehouse_job import normal_window_start
+
+    # AS_OF is 9 October 06:00. Seven days back is the 2nd; three days back is the 6th.
+    assert normal_window_start(AS_OF, "periods") == day(10, 2)
+    assert normal_window_start(AS_OF, "samples") == day(10, 6) == normal_window_start(AS_OF)
+    w = world(lambda: AS_OF)
+    history = [day(9, 25) + timedelta(days=n) for n in range(9)]  # 25 Sep to 3 Oct
+    land_days(w, "run-fill", history, 100.0, AS_OF - timedelta(days=5))
+    w.load_everything("load-1")
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(w, path)
+    assert "ERROR=0" in build(path, selector="periods")
+    assert len(staged(path)) == 9
+
+    # The daily collection: four days ending at the latest day due, the 7th. Its
+    # earliest day, the 4th, is older than three days and inside seven.
+    routine = [day(10, 4) + timedelta(days=n) for n in range(4)]
+    assert routine[0] < normal_window_start(AS_OF) and routine[0] >= day(10, 2)
+    land_days(w, "run-daily", routine, 200.0, AS_OF)
+    w.load_everything("load-2")
+    copy_to_duckdb_raw(w, path)
+    log = build(path, selector="periods")  # a plain incremental run, with no rebuild point
+    assert "ERROR=0" in log and "WARN=0" in log
+    rows = staged(path)
+    assert len(rows) == 13 and ("2026-10-04", 200.0) in rows and ("2026-10-07", 200.0) in rows
+    compiled = tmp_path / "target" / "compiled" / "metaspike_warehouse" / "models" / "staging"
+    assert "interval 7 day" in (compiled / "stg_period_observations.sql").read_text()
+    build(path, selector="periods")  # and again: the same thirteen rows
+    assert staged(path) == rows
+
+    # The period selection builds the period models and the run log, and nothing else.
+    built_now = {name for (name,) in query(
+        path, "select table_name from information_schema.tables where table_schema = 'ms_staging'"
+    )}  # fmt: skip
+    assert built_now == {"stg_period_observations", "stg_collection_runs"}
+    assert query(path, "select count(*) from information_schema.tables "
+                       "where table_schema = 'ms_marts'") == [(0,)]  # fmt: skip
+
+
+def test_older_period_data_is_still_late_and_is_rebuilt_from_where_it_reaches(
+    dbt_ready: None, tmp_path: Path
+) -> None:
+    w = world(lambda: AS_OF)
+    land_days(w, "run-recent", [day(10, 5), day(10, 6), day(10, 7)], 100.0, AS_OF)
+    w.load_everything("load-1")
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(w, path)
+    build(path, selector="periods")
+    before = staged(path)
+    # A revision of a day eight days back, and a day far older: both beyond seven days.
+    land_days(w, "run-late", [day(10, 1), day(9, 10)], 999.0, AS_OF + timedelta(minutes=1))
+    w.load_everything("load-2")
+    copy_to_duckdb_raw(w, path)
+    build(path, selector="periods")
+    assert staged(path) == before  # a plain incremental run does not reach them
+    # The warehouse job passes the day the late rows reach back to; nothing is refreshed.
+    build(path, selector="periods", rebuild_from={"periods": "2026-09-10 00:00:00"})
+    late = staged(path)
+    assert late == sorted([*before, ("2026-09-10", 999.0), ("2026-10-01", 999.0)])
+
+    # A full refresh reads all retained history and arrives at exactly the same rows.
+    build(path, "--full-refresh", selector="periods")
+    assert staged(path) == late
+    compiled = tmp_path / "target" / "compiled" / "metaspike_warehouse" / "models" / "staging"
+    refreshed = (compiled / "stg_period_observations.sql").read_text()
+    assert "timestamp '2026-09-10 00:00:00'" in refreshed  # read from the data, not written down
+    assert "interval 7 day" not in refreshed
+
+
+def test_the_sample_models_keep_their_three_day_lookback(dbt_ready: None, tmp_path: Path) -> None:
+    w = loaded_world(generated_attempts(apps=2, slots=4), batches=1)
+    path = tmp_path / "warehouse.duckdb"
+    copy_to_duckdb(w, path)
+    build(path, selector="daily")
+    build(path, selector="daily")  # incremental this time
+    compiled = tmp_path / "target" / "compiled" / "metaspike_warehouse" / "models"
+    for model in ("staging/stg_sample_attempts", "staging/stg_expected_targets",
+                  "staging/stg_collection_runs", "staging/stg_source_records",
+                  "marts/resolved_sample_slots"):  # fmt: skip
+        text = (compiled / f"{model}.sql").read_text()
+        assert "interval 3 day" in text and "interval 7 day" not in text, model
+    period = (compiled / "staging" / "stg_period_observations.sql").read_text()
+    assert "interval 7 day" in period and "interval 3 day" not in period
+
+
+def test_the_job_treats_four_days_as_routine_and_anything_older_as_late() -> None:
+    from metaspike.jobs.warehouse_job import PENDING_OBJECT, warehouse
+    from tests.warehouse_support import runtime_for
+
+    w = world(lambda: AS_OF)
+    land_days(w, "run-daily", [day(10, 4) + timedelta(days=n) for n in range(4)], 1.0, AS_OF)
+    runtime, log = runtime_for(w, "ms-warehouse")
+    calls: list[Sequence[str]] = []
+
+    def dbt(arguments: Sequence[str], environment: Any) -> int:
+        calls.append(arguments)
+        return 0
+
+    summary = warehouse(runtime, dbt)
+    assert summary["selector"] == "periods" and summary["rebuilt_from"] == {}
+    assert not [e for e in log if e["event"] == "late_data_loaded"]
+    variables = json.loads(calls[0][calls[0].index("--vars") + 1])
+    assert variables["period_lookback_days"] == 7 and variables["lookback_days"] == 3
+    assert not [k for k in variables if k.startswith("rebuild_from_")]
+    assert "--full-refresh" not in calls[0]  # a routine run never refreshes
+
+    land_days(w, "run-late", [day(10, 1)], 2.0, AS_OF)  # eight days back
+    summary = warehouse(runtime, dbt)
+    assert summary["rebuilt_from"] == {"periods": day(10, 1).isoformat()}
+    assert [e["table"] for e in log if e["event"] == "late_data_loaded"] == ["period_observations"]
+    variables = json.loads(calls[1][calls[1].index("--vars") + 1])
+    assert variables["rebuild_from_periods"] == "2026-10-01 00:00:00"
+    assert json.loads(w.operations.get(PENDING_OBJECT).data) == {"since": {}}

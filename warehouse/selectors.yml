@@ -12,3 +12,8 @@ selectors:
           value: hourly
         - method: tag
           value: daily
+  - name: periods
+    description: Period observations and the run log, with their tests. Used when only period data arrived.
+    definition:
+      method: tag
+      value: periods
