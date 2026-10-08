@@ -4,161 +4,237 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Current checkpoint: **PHASE 4 PART C2-B: COMPLETE**
+Previous accepted checkpoint: **PHASE 4 PART C2-B: COMPLETE**
 
-Both plans applied cleanly, all post-apply audits pass, and the 14 fill markers are
-written and verified. The scheduler is still paused with no attempt, no control record
-exists, and nothing ran or called a source. C2 automation is not active.
+Current checkpoint: **PHASE 4 PART C2-C: BLOCKED (incomplete, not failed)**
 
-## Plan A (owner, bootstrap IAM)
+## Read this first
 
-- **Pre-apply state:** HEAD = origin = `ab5807841706b99287badb3ea1385d0ef172bd7d`, tree
-  clean; scheduler PAUSED and never attempted; 10 executions; all jobs on
-  `sha256:6810b096…28f0`; 0 secret versions; 0 keys; no `dispatch/control.json`; no
-  bootstrap marker; retained data unchanged; bootstrap state serial 8, prod serial 7.
-- **Hash:** recomputed
-  `8e95988e97e4ad2d4c0a92a979467d4c5d9b630eae0b0ba05884b247705691ea`, exact match.
-  Re-inspected: 4 add, 0 change, 2 destroy, only the six approved resources.
-- **Apply:** `Apply complete! Resources: 4 added, 0 changed, 2 destroyed.` No new plan
-  was run.
-- **Bootstrap state:** serial 8 → 9; managed resources 59 → 61.
+The instruction to publish said C2-C was already finished. **It was not.** When that
+instruction arrived, only the first half of the supervised tick had run:
 
-### Live ms-deploy roles
+- done: the 03:00 UTC dispatcher tick, and the Wikimedia collection it started;
+- **not done:** the 04:00 UTC dispatcher tick, the warehouse run it should start, the
+  BigQuery/dbt/ledger-load proof, and the deliberate disabling of the control record.
 
-- **Project:** `roles/run.admin`, `roles/cloudscheduler.admin`,
-  `roles/monitoring.alertPolicyEditor`, `roles/monitoring.notificationChannelViewer`,
-  `msSecretContainerAdmin`, `msDeployBigQueryConfig`, `msDeployBucketConfig`,
-  `msDeployLogMetrics`.
-- **Removed:** `roles/monitoring.editor`, `roles/logging.configWriter`.
-- **Unchanged:** `roles/iam.serviceAccountUser` on the eight runtime and scheduler
-  identities, `roles/artifactregistry.writer` on `metaspike`,
-  `roles/storage.objectUser` on the Terraform state bucket.
-- **`msDeployLogMetrics`** (GA), exactly: `logging.logMetrics.create`, `.delete`,
-  `.get`, `.list`, `.update`.
+Nothing in the first half failed. The checkpoint is reported as BLOCKED because the
+completion gate cannot be met with half the path unexecuted, and because the
+instruction forbade any further run or any change to the control record. Nothing has
+been invented to fill the gap: every section below marked "not run" or "not measured"
+is exactly that.
 
-## Plan B (production)
+**One state needs a decision.** The control record is still `enabled: true` and is
+armed until **2026-10-08T05:00:00Z**. It was not disabled, because the instruction
+said not to alter it. The scheduler is PAUSED and has never fired, so nothing will
+start the dispatcher on its own, and the record expires by itself at 05:00 UTC. Until
+then a dispatcher started by hand would be permitted to work within the record's caps.
 
-- **Hash:** the artifact from deploy-workflow run `37715238212` was downloaded again
-  and hashes to `39da6f5194159bd36923f904616d02fac4fc4fcf30c8a02711c2f0d22ae5eee0`,
-  exact match. Source commit `ab58078`, artifact not expired, prod state serial 7.
-- The plan binary could not be decoded locally (created by Terraform 1.16.5; the local
-  binary is 1.16.4). Its contents were re-checked from the plan run's own rendered
-  output: 5 created, 10 updated in place, `paused` nowhere in the diff, and only the
-  old and the approved image digests.
-- **Apply:** run `37718468463`:
-  `Apply complete! Resources: 5 added, 10 changed, 0 destroyed.` No permission error,
-  so the narrowed roles are proven sufficient to create and update alert policies.
-- **Prod state:** serial 7 → 8; managed resources 86 → 91.
-- **Added (5):** alert policies `warehouse_failed`, `source_rate_limited`,
-  `execution_volume`, `landing_storage`; the object grant for `ms-wikimedia`.
-- **Changed in place (10):** the seven Cloud Run jobs, `ms_ops.expected_targets`, the
-  scheduler, the dispatcher-silence policy.
+Last read-only check: 2026-10-08 03:27:54 UTC.
 
-## Deployed image
+## Baseline before C2-C (all verified)
 
-All seven jobs are at generation 5 on
-`us-central1-docker.pkg.dev/metaspike-prod-kc/metaspike/metaspike@sha256:f452c80108ac0ab8fd8d7e2d4b9d0da931686ed2ed6d3454f683b016c943e100`,
-in both `image` and `METASPIKE_IMAGE`. Args, identities, memory, timeouts and retries
-are unchanged, with 0 secret references. Only `ms-wikimedia` carries
-`METASPIKE_WORK_ORDERS=required`.
+- Deployed image on all seven jobs:
+  `sha256:f452c80108ac0ab8fd8d7e2d4b9d0da931686ed2ed6d3454f683b016c943e100`. Only
+  `ms-wikimedia` carries `METASPIKE_WORK_ORDERS=required`.
+- Git HEAD was one handoff-only commit ahead of `ab58078`; the only difference was
+  `docs/handoffs/latest.md`.
+- Scheduler `0 * * * *`, PAUSED, no attempt time. 10 Cloud Run executions.
+- 0 secret versions; 0 user-managed keys; no IAM, schema, alert or scheduler drift.
+- `dispatch/control.json` absent; nothing under `dispatch/`; no work order.
+- 14 bootstrap markers present. Retained history unchanged (1,260 observations).
+- Configuration confirmed from the deployed source: period hour 3 UTC; hourly tick;
+  Wikimedia the only configured source; work-order lifetime 50 minutes; steady window
+  4 days; reconciliation weekday Monday (the test day was a Thursday); warehouse daily
+  hour 4; shadow tiers not applied.
+- Timing gate: the first dispatcher was launched at about 03:14 UTC, inside the
+  03:00 to 03:30 window.
 
-Hardening, verified on this exact digest: uid 10001; `/app` and `/opt/dbt` not
-writable; 0 setuid or setgid files; the two Python environments isolated; Debian 12
-base; 53 HIGH / 2 CRITICAL findings with 0 fixable.
+## Control record
 
-## Work-order grant
+Created once, create-only (`if-generation-match=0`), from the repository's
+`ControlRecord` model, at 03:14:17 UTC.
 
-`ms-wikimedia` on `metaspike-prod-kc-ops`: `roles/storage.objectViewer` with the
-condition
-`resource.name.startsWith("projects/_/buckets/metaspike-prod-kc-ops/objects/dispatch/orders/wikimedia_pageviews/")`,
-beside its existing `objectUser` on `wikimedia_pageviews/`. No broader `dispatch/`
-prefix, no write or delete there, and being conditional it gives no listing.
-`ms-dispatch` keeps `objectUser` on `dispatch/` and its whole-bucket viewer. Not
-exercised live yet; C2-C is the real proof.
+```
+{"version":1,"enabled":true,"armed_until":"2026-10-08T05:00:00Z","max_job_starts_per_tick":1,"max_executions_per_day":2,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":14,"max_targets_per_execution":14}},"pins":[]}
+```
 
-## expected_targets schema
+- SHA-256 `d54226c706d6ca80bd670e93c4b6e315306eb722451cebb06ad19ec62378d607`, 238 bytes.
+- Generation `1791429257847245`, metageneration 1.
+- Read back by exact name before any execution and verified: enabled, not expired,
+  Wikimedia only, request cap 14, target cap 14, one job start per tick, two
+  dispatcher-started executions a day, no pins.
+- **Current state: unchanged and still enabled.** The planned disabling was not done.
 
-Six columns appended, all NULLABLE: `tier` (INT64; BigQuery reports it as INTEGER),
-`due_at` (TIMESTAMP), `due_reason`, `policy_status`, `disposition`, `work_order_id`
-(STRING). The twelve original columns are unchanged. Still partitioned by day on
-`slot_start`, clustered on `source, metric, source_native_id`, partition filter
-required. 0 rows; creation time unchanged, so the update was in place. No staging
-change.
+## First dispatcher execution (03:00 UTC tick) — succeeded
 
-## Scheduler
+- Execution `ms-dispatch-8ltv9`, run id `20261008T031812Z-ms-dispatch-8ltv9`, started
+  by hand with no command or environment override. Identity `ms-dispatch`, args
+  `['dispatch']`, 1 vCPU, 512Mi. One task attempt, exit 0.
+- Tick `2026-10-08T03:00:00+00:00`. Control accepted.
+- Schedule generated (none existed): version `s9939a2accd9a17c152bc`, from the
+  bootstrap targets; catalogued 14, monitored 14, eligible 14, high frequency 0; one
+  period cohort, `wikimedia_pageviews/period/c00`, with 14 entries, all tier 4 with no
+  shadow proposal.
+- Partitions read: 1. Expected targets: 14. Dispositions: `planned` 14.
+- One work order: `34e4f8be49cf8a61e3709cc9c36cc478`.
+- Jobs started: `ms-wikimedia` only. Executions counted today: 1. Requests counted
+  for Wikimedia: 14.
+- Source state: `wikimedia_pageviews` healthy.
 
-Schedule `0 * * * *`, state PAUSED, no attempt time, same resource name
-`ms-dispatch-15m`, updated and not recreated.
+Persisted state after it, all under the dispatcher's prefix in the operations bucket:
+the schedule pointer, manifest and partition; the tick plan
+`plans/tick-20261008T0300Z.json`; the lease `ticks/tick-20261008T0300Z.json`;
+counters for 2026-10-08; health (order pending, expiring 03:50); an empty backlog;
+`warehouse.json` with `due_since` 03:00 and `last_started` null; the order and the
+`CURRENT` pointer.
 
-## Monitoring
+The ledger batch landed at
+`dispatch/expected_targets/dt=2026-10-08/tick-20261008T0300Z/` with 14 rows. Every row
+carries `tier` 4, `due_at` 03:00, `due_reason` `default_long_tail`, `policy_status`
+`cleared:2026-10-04:c363edef976a`, `disposition` `planned`, and `work_order_id` equal
+to the order above; slot `2026-10-06`. No row mentions `NOT_SAMPLED`.
 
-Eight policies, all on the proven notification channel:
+## Work order
 
-| Policy | State | Condition |
+- Immutable object
+  `dispatch/orders/wikimedia_pageviews/34e4f8be49cf8a61e3709cc9c36cc478.json`, format
+  `work_order_v1`: source `wikimedia_pageviews`, metric `pageviews`, daily,
+  fetch-history, slot `2026-10-06`, `window_days` 4, tick 03:00, expires 03:50,
+  schedule version `s9939a2accd9a17c152bc`, policy version `2026-10-04:c363edef976a`,
+  14 targets, `max_targets` 14, `max_requests` 22, not a probe.
+- Pointer `…/CURRENT` names that order; its recorded hash
+  (`b6d356dbed0c7f9460731eba71feffdaaadee33b18d52c86b51d3a96d8cde2a4`) matches the
+  order's bytes.
+
+## Wikimedia child execution — succeeded
+
+- Execution `ms-wikimedia-mld5x`, run id `20261008T031955Z-ms-wikimedia-mld5x`.
+  **Created by `ms-dispatch`**, not by the owner. Identity `ms-wikimedia`, args
+  `['collect-wikimedia']`, same image, 1 vCPU, 512Mi. One task attempt, exit 0.
+- The collector claimed the order by exact name, so the new work-order read grant
+  works live.
+- Requests sent 14 (the cap); targets collected 14, failed 0, skipped 0.
+- Window 4 days; `history_filled` 0; `history_fill_deferred` 0. **No 90-day refetch.**
+- Rows landed 56: 14 articles by 4 days, 2026-10-03 to 2026-10-06. No duplicate keys,
+  no negative values (range 398 to 11,710), all `observed`. The manifest matches the
+  data object on hash
+  (`e92021bc5bf4c8c54a2f348a6e73763821365f4a4d6bf8d68956df5b5e850be2`), bytes (23,488)
+  and rows.
+- 14 completion markers written for slot 2026-10-06.
+- Receipt `wikimedia_pageviews/orders/34e4f8be49cf8a61e3709cc9c36cc478.json`: outcome
+  `succeeded`, 14 requests, 14 collected, 0 failed, completed 03:19:59 UTC.
+- Bootstrap markers still 14; none was added.
+- Source contact: there is no packet-level egress logging. That only Wikimedia was
+  contacted rests on the command's code path, the request count, and the absence of
+  any secret version.
+- Retry count, throttling and response bytes are not logged by the job: not measured.
+
+## Second dispatcher execution (04:00 UTC tick) — NOT RUN
+
+It had not been started when the stop instruction arrived (03:27 UTC). No lease or
+plan exists for the 04:00 tick. The first order's receipt has therefore not been
+folded into source health, and `warehouse.json` still says a warehouse run is owed
+since 03:00.
+
+## Warehouse child execution — NOT RUN
+
+Consequently none of the warehouse proofs exist:
+
+- the 56 new observations are landed and **not loaded**;
+- the 14 ledger rows are landed and **not loaded**: `ms_ops.expected_targets` has not
+  yet received a row through BigQuery;
+- that a four-day overlap is not classified late under the seven-day window is
+  **not proven live** (it is proven offline and against DuckDB only);
+- dbt has not run on the new image against BigQuery;
+- history-regression, duplicate-key and plausibility checks in the warehouse were
+  **not performed** for the new data.
+
+BigQuery job counts, bytes processed and billed, and slot time for C2-C: **none; not
+measured**, because no BigQuery job ran.
+
+## Timing
+
+| | `ms-dispatch-8ltv9` | `ms-wikimedia-mld5x` |
 |---|---|---|
-| Warehouse load or build failed | new, enabled | `ms_warehouse_failed` > 0 in 1 h |
-| A source keeps rate limiting | new, enabled | `ms_source_rate_limited` > 2 in 1 h, all jobs |
-| Unusually many job executions | new, enabled | completed executions > 60 in 24 h |
-| Landing bucket above 5 GB | new, enabled | `storage/v2/total_bytes` > 5,000,000,000 on the landing bucket |
-| Dispatcher silence | updated, disabled | absent for 3 h |
-| Steam refusal, job failures, parity | unchanged, enabled | |
+| Created | 03:14:27 | 03:18:14 |
+| Task start | 03:15:17 | 03:18:25 |
+| First application log | 03:18:12 | 03:19:55 |
+| Application finish | 03:18:14 | 03:19:59 |
+| Platform completion | 03:18:17 | 03:20:04 |
+| Wall, creation to completion | 3 min 51 s | 1 min 50 s |
+| Platform-reported duration | 3 min 0.4 s | 1 min 39.1 s |
+| Application work | about 2.1 s | about 4.3 s |
+| Delay from creation to first log | about 3 min 45 s | about 1 min 41 s |
+| Task attempts | 1 | 1 |
 
-The five log metrics are unchanged; `ms_slot_not_observed` has no policy. No freshness
-policy was created (deferred: it cannot be expressed reliably with built-in metrics).
-No incident is open and no test alert was sent. The S4 synthetic incident closed by
-itself at 20:14 UTC on 7 October.
+The long delay before the first log line is still there with the 1.08 GB image, and
+was longest on the dispatcher. `billable_instance_time` was **not read** for these
+executions, so nothing is concluded about whether that delay is billed.
 
-## Fill markers
+## Cost
 
-- **Pre-write reconciliation:** re-read from the warehouse and the bucket just before
-  writing. All 14 articles have exactly 90 rows, 2026-07-08 to 2026-10-05, in one
-  batch; the canonical id matches the target; the data object's hash recomputed to
-  `8dc374978744de6bf90672fd015b7e71b0e51b653474d23ed36b94af78779570`, equal to its
-  manifest; each regenerated payload matches the reviewed hash and size; no marker
-  existed.
-- **Write:** 14 of 14 written under `wikimedia_pageviews/bootstrap/` in the operations
-  bucket, each by exact name with `if-generation-match=0`. No wildcard, no overwrite,
-  no source call.
-- **Verification:** by exact-name read all 14 verify: payload SHA-256 exact,
-  `source_native_id` exact, `days` 90, `data_object`, `content_sha256` and
-  `collection_run_id` matching the S3 batch, `completed_at` equal to the manifest's
-  time, metageneration 1. The operations bucket gained exactly 14 objects, all under
-  that prefix.
-- One deliberate repeat write of the first marker was made after verification to
-  confirm the precondition. It was refused with 412 and the object's generation is
-  unchanged. That attempt was not in the instructions.
+- Cloud Run: two executions, durations above. Billable time not measured.
+- BigQuery: nothing ran.
+- Cloud Storage added: 12 objects (16,408 bytes) of dispatcher state; 1 receipt (253
+  bytes); 14 completion markers (about 7 KB); 12 landing objects (about 36 KB: one
+  observation batch, one ledger batch and four run-log parts, each with a manifest).
+  The control record is one of the 12 state objects.
+- Wikimedia: 14 requests. Response bytes not measured.
+- No cost projection is updated from half a checkpoint.
 
-## Retained data
+## Alerts and security
 
-Unchanged: 1,260 observation rows and 4 run rows; landing bucket identical (6
-objects); existing completion markers and receipts untouched; dataset access, the
-other buckets' IAM, service accounts, secrets and the WIF condition unchanged.
+Checked read-only at 03:27 UTC, or by the pre-run audit where stated:
 
-## Final state
+- Scheduler PAUSED, schedule `0 * * * *`, no attempt time: confirmed at 03:27.
+- Cloud Run executions: **12** (10 before, plus one dispatcher and one collector).
+- Secret versions 0, keys 0, IAM and job templates unchanged: confirmed by the pre-run
+  audit at 03:14. **Not re-audited after the two executions.**
+- Alert incidents, and Secret Manager access logs, for the C2-C window: **not
+  checked**. The planned post-run alert and security audit did not take place.
 
-- **BigQuery quota:** unchanged, 209,715,200 MiB a day, no override. 10 GiB a day
-  (10,240 MiB) remains a hard gate before C2-D.
-- **Control record:** absent; nothing exists under `dispatch/`. No work order exists.
-- **Executions:** 10. The only Cloud Run log entries since the apply are the seven
-  `UpdateJob` audit records.
-- **Secrets and keys:** 0 versions on all three secrets; 0 user-managed keys.
-- **Security regression:** the union of ms-deploy's project roles holds no
-  application-data permission, no secret version access or add, no key or token
-  creation, no project IAM or role editing, no notification-channel change, and no
-  log sinks, exclusions or log buckets. No Owner or Editor role.
-- **Git:** `main` at `ab58078`, level with origin, clean. The portfolio repository was
+## Final state as left
+
+- Control record: present, **enabled**, expiring 05:00 UTC. Not disabled.
+- Scheduler: PAUSED.
+- Executions: 12. New in C2-C: 2 of the planned 4.
+- Landed and unloaded: 56 observations, 14 ledger rows, run-log rows for both
+  executions.
+- Dispatcher state retained as legitimate automation records; nothing was deleted.
+- BigQuery quota: untouched by this work.
+- No code, Terraform, IAM, secret or Steam/IGDB change. The portfolio repository was
   not touched.
+- A local shell wait for 04:00 UTC was left running in the background. It performs no
+  cloud action; nothing will be done when it ends.
 
 ## Warnings
 
-- Local Terraform is one patch version behind CI, so saved production plans cannot be
-  decoded locally; the plan run's rendered output and the hash are relied on.
-- The registry holds one image that must never be deployed (`sha256:1b373a41…`).
-- The scheduler's name still says 15m while it is hourly, as accepted.
-- Still open: the quota gate (before C2-D); the deferred freshness alert; the
-  missed-tick review before any sampled source; the branch-protection decision before
-  any secret-backed source.
+1. **The control record is still enabled** until 05:00 UTC (see the top).
+2. **A warehouse run is owed.** The dispatcher's state says so since 03:00. If the
+   dispatcher is next run on a later day, it will start the warehouse then; the landed
+   batches wait safely in the bucket in the meantime.
+3. **The order's receipt is not yet folded.** The dispatcher's health record still
+   shows the order as pending. The receipt exists, so the next dispatcher tick will
+   fold it as a success; it will not be mistaken for a lost run.
+4. **Late-data caution for a delayed second half.** The warehouse loads landing folders
+   for the last three days. If the second half is run more than two days after
+   2026-10-08, the batches under `dt=2026-10-08` fall outside what a routine run
+   loads, and the run would need the load window widened by its existing setting.
+5. Half of the C2-C completion gate is unmet. Nothing here should be read as proof of
+   the warehouse, ledger-load or dbt paths.
 
-## Next approval required
+## Exact next approval required
 
-STOP. C2-C (one supervised end-to-end tick) had not begun when this was written.
+One of:
+
+- **Resume C2-C today:** before 05:00 UTC, run exactly one normal `ms-dispatch`
+  execution just after 04:00 UTC (expected to start only `ms-warehouse`), wait for
+  that warehouse run, perform the warehouse, ledger, alert and security audits, then
+  disable the control record by generation-matched replacement. This is the path the
+  original C2-C instruction described.
+- **Stop here:** authorise disabling the control record now (one generation-matched
+  replacement with `enabled: false`), and schedule the second half as a fresh,
+  separately approved step with a new bounded control record.
+
+Until one is chosen: no job is run, the control record is left as it is, and the
+scheduler stays paused. C2-D has not begun.
