@@ -31,6 +31,9 @@ locals {
       timeout     = "900s"
       max_retries = 1
       secrets     = {}
+      # Acts only on a work order from the dispatcher. Without a valid one it builds
+      # no source client and asks nothing.
+      environment = { METASPIKE_WORK_ORDERS = "required" }
     }
     "ms-catalogue" = {
       args        = ["collect-catalogue"]
@@ -128,6 +131,15 @@ resource "google_cloud_run_v2_job" "this" {
           value = var.image
         }
 
+        # Settings one job has and the others do not. Plain values, never a secret.
+        dynamic "env" {
+          for_each = lookup(each.value, "environment", {})
+          content {
+            name  = env.key
+            value = env.value
+          }
+        }
+
         # A reference to a secret, resolved by Cloud Run when the task starts. The value
         # is never in this configuration, the state, or the image. A reference exists
         # only for a secret whose exact version number has been supplied; until then the
@@ -179,16 +191,19 @@ resource "google_cloud_run_v2_job_iam_member" "dispatch_runs" {
 }
 
 # --- The single trigger ---------------------------------------------------------------
-# One scheduler job for the whole system. The dispatcher decides what is due; a daily
-# source is not called 96 times a day because the dispatcher wakes 96 times a day.
-# Pausing this one job stops all collection.
+# One scheduler job for the whole system. The dispatcher decides what is due. The tick
+# is hourly while the only cleared source is daily; a source that needs a faster tick
+# has to justify one. Pausing this one job stops all collection.
+#
+# The job keeps the name it was created with. Renaming it would destroy and recreate
+# the one trigger in the system, which is not worth a tidier name.
 
 resource "google_cloud_scheduler_job" "tick" {
   project     = var.project_id
   region      = var.region
   name        = "ms-dispatch-15m"
-  description = "Starts the dispatcher every 15 minutes. Pause to stop all collection."
-  schedule    = "*/15 * * * *"
+  description = "Starts the dispatcher every hour. Pause to stop all collection."
+  schedule    = "0 * * * *"
   time_zone   = "Etc/UTC"
   paused      = var.scheduler_paused
 

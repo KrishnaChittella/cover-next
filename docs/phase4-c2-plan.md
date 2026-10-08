@@ -271,12 +271,12 @@ step must fail if the quota is missing or larger than 10 GiB.
 | Repeated job failures | Keep | More than one failed execution of a job in an hour |
 | Parity mismatch | Keep | Dormant until parity runs on real state (Part D) |
 | Dispatcher silence | **Change** | Threshold becomes three tick intervals (three hours at an hourly tick), enabled only while the scheduler is running |
-| Source freshness | **New, ALERT** | No successful `ms-wikimedia` execution in 36 hours |
-| Executions per day | **New, ALERT** | Above the daily budget in section 6 |
+| Source freshness | **Deferred** | "No success in 36 hours" cannot be expressed reliably with built-in metrics (25-hour window limit); it needs a metric of our own. Covered indirectly meanwhile |
+| Executions per day | **New, ALERT** | More than 60 in 24 hours over every job; the plan is about 26 and the code's ceiling is 120 |
 | Landing bucket size | **New, ALERT** | Above 5 GB |
 
-Every alert auto-closes when its condition clears. That is seven active policies and
-one channel. None should fire in normal operation.
+Every alert auto-closes when its condition clears. That is eight policies (seven
+active while the scheduler is paused) and one channel. None should fire in normal operation.
 
 ## 9. Source health
 

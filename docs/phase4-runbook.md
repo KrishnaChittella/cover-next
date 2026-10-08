@@ -27,7 +27,7 @@ infrastructure for the one public release that comes later.
 ## Architecture in one picture
 
 ```
-Cloud Scheduler (one job, every 15 minutes, starts PAUSED)
+Cloud Scheduler (one job, hourly from Part C2-B, starts PAUSED)
    -> ms-dispatch        decides what is due; holds NO source secret
         -> ms-steam-players   15-minute samples      (Steam key)
         -> ms-wikimedia       once a day             (no secret)
@@ -431,6 +431,82 @@ and nothing when nothing arrived and nothing is pending.
 
 **The image** strips the setuid and setgid bits from every program in its final stage.
 
+### Part C2-B: what the deployment changes, and what stays off
+
+Prepared as two saved plans and applied only when each is approved by its hash.
+
+- **All seven jobs** move to the image built from the C2-A source. Only
+  `ms-wikimedia` gains `METASPIKE_WORK_ORDERS=required`. No other job's behaviour is
+  switched on by sharing the image: Steam still refuses, and nothing gives an
+  uncleared collector a work order to read.
+- **One object grant** is added: `ms-wikimedia` may read, by exact name, under
+  `dispatch/orders/wikimedia_pageviews/` in the operations bucket. It cannot list,
+  write or delete there, and cannot read anything else under `dispatch/`.
+- **`ms_ops.expected_targets`** gains six nullable columns, in place.
+- **The scheduler** becomes hourly (`0 * * * *`) and stays paused. It keeps the name
+  `ms-dispatch-15m`: renaming would destroy and recreate the one trigger.
+- **Alerts.** New: any warehouse failure in an hour; three or more rate limits in an
+  hour; more than 60 executions in a day; landing bucket above 5 GB. Changed:
+  dispatcher silence is three hours and is still off while the scheduler is paused.
+  `ms_slot_not_observed` stays a metric with no alert.
+- **`ms-deploy`** exchanges `roles/monitoring.editor` and `roles/logging.configWriter`
+  for `roles/monitoring.alertPolicyEditor`, `roles/monitoring.notificationChannelViewer`
+  and a custom role, `msDeployLogMetrics`, that holds the five log-metric permissions.
+  It can no longer change or delete the notification channel, or create a log sink,
+  an exclusion or a log bucket.
+
+No control record is created. Its absence is the deliberate state after C2-B: a
+dispatcher started by accident refuses to do anything.
+
+**Not built: a Wikimedia freshness alert.** "No successful collection in 36 hours"
+cannot be said reliably with Cloud Monitoring's own metrics: an alignment window in
+an alerting policy is at most 25 hours, and an absence condition short enough to be
+valid would fire every day against a job that succeeds once a day. Saying it properly
+needs a metric of our own (for example the age of the last success, written by the
+dispatcher). Until then freshness is covered indirectly, by dispatcher silence,
+repeated job failures and warehouse failures, and by the daily audit during a soak.
+
+### The BigQuery daily query quota (proposed; not set)
+
+A hard gate before C2-D, the first unattended soak. Not needed for the one supervised
+tick of C2-C.
+
+| | |
+|---|---|
+| Quota metric | `bigquery.googleapis.com/quota/query/usage` ("Query usage"), unit MiB |
+| Limit | `/d/project`: per day, for the whole project |
+| Today | 209,715,200 MiB (200 TiB) a day, the default; no override exists |
+| Proposed | 10,240 MiB (10 GiB) a day |
+| Also exists | `/d/project/user`, per user per day, unlimited. Left alone |
+
+It applies to every query in the project, so once reached it also stops the owner's
+own queries until the quota day rolls over. It is a temporary C2 ceiling; raising it
+needs a measured reason. It bounds a day, not a month, and is not a billing guarantee.
+Measured need is about 136 MiB for one warehouse build.
+
+Set, with the owner's login (the decrease is more than 10 percent, so `force` is
+required):
+
+```
+gcloud alpha services quota update --project=<PROJECT_ID> \
+    --service=bigquery.googleapis.com --consumer=projects/<PROJECT_ID> \
+    --metric=bigquery.googleapis.com/quota/query/usage --unit='1/d/{project}' \
+    --value=10240 --force
+```
+
+which is `POST …/consumerQuotaMetrics/bigquery.googleapis.com%2Fquota%2Fquery%2Fusage/limits/%2Fd%2Fproject/consumerOverrides?force=true`
+with body `{"overrideValue": "10240"}` on the Service Usage v1beta1 API.
+
+Read back: `gcloud alpha services quota list --service=bigquery.googleapis.com
+--consumer=projects/<PROJECT_ID> --filter='metric:quota/query/usage'` and require an
+effective limit of 10240 on `/d/project`. Remove: `gcloud alpha services quota delete`
+with the same service, consumer, metric and unit, and `--force`; the limit returns to
+the default.
+
+It is set by hand, not by Terraform: the resource that manages a quota override
+exists only in the `google-beta` provider, and one resource does not justify a second
+provider. The daily audit during a soak must therefore check it.
+
 ### The image
 
 One image for all seven jobs. It carries two separately locked environments that do
@@ -576,6 +652,17 @@ carried by [phase4-c2-plan.md](phase4-c2-plan.md).
     window and cadence, so that a routine run does not refetch 90 days and trigger a
     90-day rebuild of the period models every time. The collector already takes the
     window from `METASPIKE_WIKIMEDIA_DAYS`; what is missing is the decision.
+
+15. **Missed ticks, before any sampled source.** A tick that is missed, or that takes
+    its lease and then fails to start a job, is not retried. For Wikimedia that is
+    accepted: the overlapping period window repairs a missed day on the next run. A
+    sampled observation that was not taken cannot be reconstructed. Before any sampled
+    or high-frequency source is activated, missed-tick recovery must be reviewed.
+16. **BigQuery daily query quota.** 10 GiB a day must be set and read back before
+    C2-D, the first unattended soak (see "The BigQuery daily query quota").
+17. **Fill markers for the 14 articles.** Written once by the owner, by exact name and
+    create-only, before the first C2 tick. Without them that tick fetches 90 days
+    again.
 
 Part B added these, which are gates for the same reason:
 

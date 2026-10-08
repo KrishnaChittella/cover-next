@@ -46,11 +46,26 @@ locals {
   # BigQuery and Cloud Storage are not here either. Their predefined admin roles carry
   # the data itself (rows, objects, query jobs), which deploying never needs, so each
   # is replaced by a custom role below that holds configuration and IAM only.
+  #
+  # Monitoring and Logging are narrowed the same way. Alert policies have a predefined
+  # role of their own, and reading the notification channel they point at has another.
+  # Log-based metrics have none, so they get a custom role below.
   deploy_roles = [
     "roles/cloudscheduler.admin",
-    "roles/logging.configWriter",
-    "roles/monitoring.editor",
+    "roles/monitoring.alertPolicyEditor",
+    "roles/monitoring.notificationChannelViewer",
     "roles/run.admin",
+  ]
+
+  # What the pinned provider calls for a log-based metric: create, read, update,
+  # delete. No sink, no exclusion, no log bucket: nothing that could move, drop or
+  # hide a log.
+  deploy_log_metric_permissions = [
+    "logging.logMetrics.create",
+    "logging.logMetrics.delete",
+    "logging.logMetrics.get",
+    "logging.logMetrics.list",
+    "logging.logMetrics.update",
   ]
 
   # What the pinned provider calls for a dataset, a table and a dataset policy: read,
@@ -200,6 +215,22 @@ resource "google_project_iam_custom_role" "deploy_storage" {
 resource "google_project_iam_member" "deploy_storage" {
   project = var.project_id
   role    = google_project_iam_custom_role.deploy_storage.id
+  member  = "serviceAccount:${google_service_account.deploy.email}"
+}
+
+resource "google_project_iam_custom_role" "deploy_log_metrics" {
+  project     = var.project_id
+  role_id     = "msDeployLogMetrics"
+  title       = "MetaSpike deploy: log-based metrics"
+  description = "Log-based metrics as infrastructure. No sinks, exclusions or log buckets."
+  permissions = local.deploy_log_metric_permissions
+
+  depends_on = [google_project_service.enabled]
+}
+
+resource "google_project_iam_member" "deploy_log_metrics" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.deploy_log_metrics.id
   member  = "serviceAccount:${google_service_account.deploy.email}"
 }
 

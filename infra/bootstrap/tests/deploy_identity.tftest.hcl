@@ -22,8 +22,8 @@ run "the_deploy_identity_holds_no_data_role" {
   assert {
     condition = join(" ", sort(keys(google_project_iam_member.deploy))) == join(" ", [
       "roles/cloudscheduler.admin",
-      "roles/logging.configWriter",
-      "roles/monitoring.editor",
+      "roles/monitoring.alertPolicyEditor",
+      "roles/monitoring.notificationChannelViewer",
       "roles/run.admin",
     ])
     error_message = "The predefined project roles of ms-deploy are exactly the four reviewed ones."
@@ -42,7 +42,7 @@ run "the_deploy_identity_holds_no_data_role" {
   assert {
     condition = alltrue([
       for role in keys(google_project_iam_member.deploy) :
-      !contains(["roles/owner", "roles/editor", "roles/resourcemanager.projectIamAdmin", "roles/iam.serviceAccountTokenCreator", "roles/iam.serviceAccountKeyAdmin", "roles/iam.serviceAccountUser", "roles/secretmanager.admin", "roles/secretmanager.secretAccessor", "roles/bigquery.dataOwner", "roles/bigquery.dataEditor", "roles/bigquery.dataViewer", "roles/bigquery.jobUser", "roles/bigquery.user", "roles/storage.objectAdmin", "roles/storage.objectUser", "roles/storage.objectViewer"], role)
+      !contains(["roles/owner", "roles/editor", "roles/resourcemanager.projectIamAdmin", "roles/iam.serviceAccountTokenCreator", "roles/iam.serviceAccountKeyAdmin", "roles/iam.serviceAccountUser", "roles/secretmanager.admin", "roles/secretmanager.secretAccessor", "roles/monitoring.editor", "roles/monitoring.admin", "roles/logging.configWriter", "roles/logging.admin", "roles/bigquery.dataOwner", "roles/bigquery.dataEditor", "roles/bigquery.dataViewer", "roles/bigquery.jobUser", "roles/bigquery.user", "roles/storage.objectAdmin", "roles/storage.objectUser", "roles/storage.objectViewer"], role)
     ])
     error_message = "ms-deploy must not hold a basic, impersonation, secret or data role on the project."
   }
@@ -127,3 +127,32 @@ run "the_secret_role_still_cannot_read_or_add_a_value" {
     error_message = "ms-deploy must never read or add a secret version."
   }
 }
+
+run "the_log_metric_role_is_log_metrics_only" {
+  command = plan
+
+  assert {
+    condition = join(" ", sort(tolist(google_project_iam_custom_role.deploy_log_metrics.permissions))) == join(" ", [
+      "logging.logMetrics.create",
+      "logging.logMetrics.delete",
+      "logging.logMetrics.get",
+      "logging.logMetrics.list",
+      "logging.logMetrics.update",
+    ])
+    error_message = "The log-metric deploy role holds exactly the reviewed permissions."
+  }
+
+  assert {
+    condition = alltrue([
+      for p in google_project_iam_custom_role.deploy_log_metrics.permissions :
+      startswith(p, "logging.logMetrics.")
+    ])
+    error_message = "No sink, exclusion, log bucket or log read belongs in this role."
+  }
+
+  assert {
+    condition     = google_project_iam_custom_role.deploy_log_metrics.role_id == "msDeployLogMetrics"
+    error_message = "The log-metric role is the named custom role."
+  }
+}
+

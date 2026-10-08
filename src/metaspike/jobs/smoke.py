@@ -381,6 +381,8 @@ PROFILES: dict[str, tuple[ProbeSet, ...]] = {
         ("landing", "wikimedia_pageviews/", "creator"),
         ("raw", "wikimedia_pageviews/", "creator"),
         ("state", "catalogue/", "viewer"),
+        # Its work orders and their pointer: read by exact name, nothing more.
+        ("ops", "dispatch/orders/wikimedia_pageviews/", "viewer"),
     ),
     "ms-catalogue": _sets(
         ("landing", "igdb/", "creator"),

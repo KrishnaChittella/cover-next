@@ -111,14 +111,14 @@ def run_suite(cloud: Cloud, profile: str, run_id: str = RUN, identity: str | Non
 
 def test_there_are_exactly_seven_profiles_one_per_runtime_job() -> None:
     assert sorted(PROFILES) == sorted(JOBS)
-    assert sum(len(sets) for sets in PROFILES.values()) == 25
-    assert {len(PROFILES[job]) for job in JOBS} == {2, 3, 4, 8}
+    assert sum(len(sets) for sets in PROFILES.values()) == 26
+    assert {len(PROFILES[job]) for job in JOBS} == {2, 3, 4, 5, 8}
     assert {commands.JOBS[c][0] for c in commands.JOBS} == set(PROFILES)
 
 
 def test_every_declared_storage_grant_is_probed_by_its_own_identity_and_nothing_else_is() -> None:
     declared = declared_grants()
-    assert len(declared) == 26
+    assert len(declared) == 27
     covered: set[tuple[str, str, str, str]] = set()
     for identity, bucket, role, prefix in declared:
         shape = _SHAPE_OF[(role, prefix != "")]
@@ -234,7 +234,7 @@ def test_the_run_id_is_in_every_object_name_and_never_where_a_loader_reads() -> 
                 (probe_set.bucket, outside_object(RUN, profile, probe_set)),
                 (probe_set.bucket, fixture_object(RUN, profile, probe_set)),
             ]
-    assert len(located) == len(set(located)) == 75  # no two probes share an object
+    assert len(located) == len(set(located)) == 78  # no two probes share an object
     names = [name for _, name in located]
     for name in names:
         assert f"/_smoke/{RUN}/" in f"/{name}" and name.endswith(".txt")
@@ -481,7 +481,7 @@ def test_suite_mode_reaches_only_google_auth_and_cloud_storage(
 
     assert cli.main(["smoke", "--suite", "ms-wikimedia", "--run-id", RUN]) == 0
     document = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert document["overall"] == "PASS" and document["probe_sets_completed"] == 4
+    assert document["overall"] == "PASS" and document["probe_sets_completed"] == 5
     assert set(google.hosts) == {"metadata.google.internal", "storage.googleapis.com"}
     assert google.hosts.count("metadata.google.internal") == 1  # one token, then storage only
     assert built == ["client"]  # one HTTP client: no second one for any source
@@ -541,6 +541,6 @@ def test_probe_sets_know_which_of_them_need_a_fixture() -> None:
     assert not ProbeSet("landing", "dispatch/", "creator").needs_fixture
     needing = {p: len(fixtures_for(RUN, p)) for p in PROFILES}
     assert needing == {
-        "ms-dispatch": 0, "ms-steam-players": 1, "ms-wikimedia": 1, "ms-catalogue": 0,
+        "ms-dispatch": 0, "ms-steam-players": 1, "ms-wikimedia": 2, "ms-catalogue": 0,
         "ms-warehouse": 2, "ms-features": 0, "ms-parity": 1,
     }  # fmt: skip

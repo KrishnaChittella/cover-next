@@ -261,12 +261,18 @@ def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
         "job_failures",
         "steam_refused",
         "parity_mismatch",
+        "warehouse_failed",
+        "source_rate_limited",
+        "execution_volume",
+        "landing_storage",
     }
-    # These two read a counter created in this root. Each names the resource itself in
+    # These read a counter created in this root. Each names the resource itself in
     # its filter, so Terraform orders the metric before the alert without a depends_on.
     for policy, metric in (
         ("steam_refused", "ms_steam_refused_403"),
         ("parity_mismatch", "ms_baseline_parity_mismatch"),
+        ("warehouse_failed", "ms_warehouse_failed"),
+        ("source_rate_limited", "ms_source_rate_limited"),
     ):
         assert f'google_logging_metric.counter["{metric}"].name' in policies[policy], policy
         assert "logging.googleapis.com/user/${google_logging_metric.counter" in policies[policy]
@@ -274,8 +280,15 @@ def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
     for body in policies.values():
         for user_metric in re.findall(r"logging\.googleapis\.com/user/(\S+?)\\\"", body):
             assert user_metric.startswith("${google_logging_metric.counter["), user_metric
-    # The other two read Cloud Run's own built-in metric and depend on nothing here.
-    for policy in ("dispatcher_silent", "job_failures"):
+    # A per-slot event is not an alert: its metric exists and no policy reads it.
+    assert "ms_slot_not_observed" in monitoring
+    assert not [name for name, body in policies.items() if "ms_slot_not_observed" in body]
+    # Every policy goes to the one proven channel, and none carries a channel of its own.
+    for name, body in policies.items():
+        assert "notification_channels = [var.notification_channel]" in body, name
+    assert "google_monitoring_notification_channel" not in terraform(PROD)
+    # These read Cloud Run's own built-in metric and depend on nothing here.
+    for policy in ("dispatcher_silent", "job_failures", "execution_volume"):
         assert "run.googleapis.com/job/completed_execution_count" in policies[policy]
         assert "google_logging_metric" not in policies[policy]
     assert "time_sleep" not in monitoring and "hashicorp/time" not in terraform(PROD)
@@ -288,8 +301,8 @@ def test_the_deploy_identity_may_act_only_as_the_named_runtime_identities() -> N
     project_roles = set(re.findall(r'"(roles/[A-Za-z.]+)"', deploy_roles.group(1)))
     assert project_roles == {
         "roles/cloudscheduler.admin",
-        "roles/logging.configWriter",
-        "roles/monitoring.editor",
+        "roles/monitoring.alertPolicyEditor",
+        "roles/monitoring.notificationChannelViewer",
         "roles/run.admin",
     }
     # No project-level "act as any service account", for ms-deploy or anyone.
@@ -441,7 +454,7 @@ def test_collectors_can_write_only_their_own_paths() -> None:
     # Completion markers need no grant of their own: each collector already holds
     # read and write by exact name under its own operations prefix, and nobody was
     # given a listing for them.
-    assert len(table) == 26
+    assert len(table) == 27
     # No runtime identity is given a role that can delete landed data or administer a bucket.
     roles = {row[2] for row in table}
     assert roles <= {
@@ -477,7 +490,8 @@ def test_only_the_scheduler_starts_the_dispatcher_and_only_the_dispatcher_starts
     assert 'if name != "ms-dispatch"' in jobs  # the dispatcher cannot start itself
     assert jobs.count("roles/run.invoker") == 2
     assert jobs.count('resource "google_cloud_scheduler_job"') == 1  # ONE trigger
-    assert 'schedule    = "*/15 * * * *"' in jobs and "paused      = var.scheduler_paused" in jobs
+    assert 'schedule    = "0 * * * *"' in jobs and "paused      = var.scheduler_paused" in jobs
+    assert "*/15" not in code(jobs)
     paused = re.search(
         r'variable "scheduler_paused" \{(.*?)\n\}', read(PROD / "variables.tf"), re.S
     )
@@ -885,3 +899,177 @@ def test_the_runbook_says_what_an_operator_must_know(name: str) -> None:
     ):
         assert statement in runbook, statement
     assert "every Cloud Run Job invocation bills at least one minute" not in runbook
+
+
+# --- Part C2-B: what the deployment may and may not change ------------------------------
+
+
+def test_the_wikimedia_collector_alone_may_read_its_own_work_orders_and_only_read() -> None:
+    table = [row for row in grants(read(PROD / "storage.tf"), "object_grants") if len(row) == 4]
+    orders = [row for row in table if "dispatch/" in row[3] and row[0] != "ms-dispatch"]
+    wanted = ("ms-wikimedia", "ops", "roles/storage.objectViewer")
+    assert [tuple(row) for row in orders] == [(*wanted, "dispatch/orders/wikimedia_pageviews/")]
+    from metaspike.scheduling.workorder import order_object, pointer_object
+
+    # The grant covers exactly what the implementation reads, and nothing beside it.
+    prefix = orders[0][3]
+    assert pointer_object("wikimedia_pageviews").startswith(prefix)
+    assert order_object("wikimedia_pageviews", "0" * 32).startswith(prefix)
+    for elsewhere in ("dispatch/control.json", "dispatch/health/wikimedia_pageviews.json",
+                      "dispatch/orders/steam_current_players/CURRENT",
+                      "dispatch/schedule/CURRENT", "dispatch/plans/tick.json"):  # fmt: skip
+        assert not elsewhere.startswith(prefix), elsewhere
+    # No uncleared collector is given an order to read.
+    assert not [row for row in table if "orders" in row[3] and row[0] != "ms-wikimedia"]
+    # The dispatcher already writes there: its existing grant covers the whole area.
+    assert ("ms-dispatch", "ops", "roles/storage.objectUser", "dispatch/") in [
+        tuple(row) for row in table
+    ]
+
+
+def test_only_the_wikimedia_job_is_put_under_work_orders() -> None:
+    jobs = code(read(PROD / "jobs.tf"))
+    assert jobs.count("METASPIKE_WORK_ORDERS") == 1
+    block = re.search(r'"ms-wikimedia" = \{(.*?)\n    \}', jobs, re.S)
+    assert block and 'environment = { METASPIKE_WORK_ORDERS = "required" }' in block.group(1)
+    for name in ("ms-steam-players", "ms-catalogue", "ms-dispatch", "ms-warehouse",
+                 "ms-features", "ms-parity"):  # fmt: skip
+        other = re.search(rf'"{name}" = \{{(.*?)\n    \}}', jobs, re.S)
+        assert other and "environment" not in other.group(1), name
+    # A plain setting is a value, never a secret reference.
+    extra = re.search(
+        r'for_each = lookup\(each.value, "environment", \{\}\)(.*?)\n        \}', jobs, re.S
+    )
+    assert extra and "value_source" not in extra.group(1)
+
+
+def test_the_scheduler_is_hourly_stays_paused_and_keeps_its_name() -> None:
+    jobs = code(read(PROD / "jobs.tf"))
+    tick = re.search(r'resource "google_cloud_scheduler_job" "tick" \{(.*?)\n\}', jobs, re.S)
+    assert tick
+    assert 'schedule    = "0 * * * *"' in tick.group(1)
+    assert 'time_zone   = "Etc/UTC"' in tick.group(1)
+    assert "paused      = var.scheduler_paused" in tick.group(1)
+    assert 'name        = "ms-dispatch-15m"' in tick.group(1)  # a rename would recreate it
+    variables = read(PROD / "variables.tf")
+    paused = re.search(r'variable "scheduler_paused" \{(.*?)\n\}', variables, re.S)
+    assert paused and "default     = true" in paused.group(1)
+    deploy = read(REPO / ".github" / "workflows" / "deploy.yml")
+    assert "scheduler_paused=false" not in deploy.replace(" ", "")
+    from metaspike.scheduling.config import PRODUCTION
+
+    assert PRODUCTION.tick_minutes == 60
+
+
+def test_the_alert_thresholds_are_exactly_the_reviewed_ones() -> None:
+    monitoring = read(PROD / "monitoring.tf")
+    policies = dict(
+        re.findall(
+            r'resource "google_monitoring_alert_policy" "(\w+)" \{(.*?)\n\}\n', monitoring, re.S
+        )
+    )
+
+    def setting(policy: str, name: str) -> str:
+        found = re.search(rf'{name}\s*=\s*"?([^"\n]+)"?', policies[policy])
+        assert found, (policy, name)
+        return found.group(1)
+
+    expected = {
+        "warehouse_failed": ("0", "3600s"),
+        "source_rate_limited": ("2", "3600s"),  # more than two: three or more
+        "execution_volume": ("60", "86400s"),
+        "landing_storage": ("5000000000", "3600s"),
+        "job_failures": ("1", "3600s"),
+        "steam_refused": ("0", "900s"),
+        "parity_mismatch": ("0", "3600s"),
+    }
+    for policy, (threshold, window) in expected.items():
+        assert setting(policy, "threshold_value") == threshold, policy
+        assert setting(policy, "alignment_period") == window, policy
+        assert setting(policy, "comparison") == "COMPARISON_GT", policy
+    # An alignment window in an alerting policy may not exceed 25 hours.
+    for policy in policies:
+        assert int(setting(policy, "alignment_period").rstrip("s")) <= 90_000, policy
+    silent = policies["dispatcher_silent"]
+    assert 'duration = "10800s"' in silent and 'alignment_period   = "3600s"' in silent
+    assert "enabled      = !var.scheduler_paused" in silent  # off while the scheduler is paused
+    assert "3 hours" in silent and "45 minutes" not in monitoring
+    assert [n for n, body in policies.items() if "enabled" in body] == ["dispatcher_silent"]
+    assert "storage.googleapis.com/storage/v2/total_bytes" in policies["landing_storage"]
+    assert 'google_storage_bucket.data["landing"].name' in policies["landing_storage"]
+    # The freshness alert that cannot be expressed is recorded, not approximated.
+    assert "freshness" not in policies and "36 hours" in monitoring
+
+
+def test_the_ledger_table_gains_exactly_six_nullable_columns_and_nothing_else_moves() -> None:
+    schema = json.loads(read(PROD / "schemas" / "expected_targets.json"))
+    names = [column["name"] for column in schema]
+    assert names == [
+        "source", "metric", "granularity", "mode", "source_native_id", "slot_start",
+        "schedule_version", "dispatch_run_id", "recorded_at", "landed_object",
+        "content_sha256", "loaded_at",
+        "tier", "due_at", "due_reason", "policy_status", "disposition", "work_order_id",
+    ]  # fmt: skip
+    added = {c["name"]: (c["type"], c["mode"]) for c in schema[12:]}
+    assert added == {
+        "tier": ("INT64", "NULLABLE"),
+        "due_at": ("TIMESTAMP", "NULLABLE"),
+        "due_reason": ("STRING", "NULLABLE"),
+        "policy_status": ("STRING", "NULLABLE"),
+        "disposition": ("STRING", "NULLABLE"),
+        "work_order_id": ("STRING", "NULLABLE"),
+    }
+    assert all(c["mode"] == "REQUIRED" for c in schema[:12])  # what existed is untouched
+    bigquery = read(PROD / "bigquery.tf")
+    ledger = re.search(r"expected_targets = \{(.*?)\}", bigquery, re.S)
+    assert ledger and 'partition = "slot_start"' in ledger.group(1)
+    assert 'cluster   = ["source", "metric", "source_native_id"]' in ledger.group(1)
+    assert "deletion_protection = true" in bigquery
+    assert "require_partition_filter = true" in bigquery
+    # The staging model is not widened: the new columns are read from the raw table.
+    staging = read(REPO / "warehouse" / "models" / "staging" / "stg_expected_targets.sql")
+    for column in added:
+        assert column not in staging, column
+
+
+def test_the_deploy_identity_manages_alerts_and_log_metrics_and_nothing_else_there() -> None:
+    bootstrap = code(read(BOOTSTRAP / "main.tf"))
+    for root in (BOOTSTRAP, PROD):
+        for role in ("roles/monitoring.editor", "roles/monitoring.admin",
+                     "roles/logging.configWriter", "roles/logging.admin"):  # fmt: skip
+            assert role not in code(terraform(root)), (root.name, role)
+    block = re.search(r"deploy_log_metric_permissions = \[(.*?)\]", bootstrap, re.S)
+    assert block
+    permissions = set(re.findall(r'"(logging\.[A-Za-z.]+)"', block.group(1)))
+    assert permissions == {
+        "logging.logMetrics.create",
+        "logging.logMetrics.delete",
+        "logging.logMetrics.get",
+        "logging.logMetrics.list",
+        "logging.logMetrics.update",
+    }
+    custom = re.search(
+        r'resource "google_project_iam_custom_role" "deploy_log_metrics" \{(.*?)\n\}',
+        bootstrap,
+        re.S,
+    )
+    assert custom and 'role_id     = "msDeployLogMetrics"' in custom.group(1)
+    assert "permissions = local.deploy_log_metric_permissions" in custom.group(1)
+    member = re.search(
+        r'resource "google_project_iam_member" "deploy_log_metrics" \{(.*?)\n\}', bootstrap, re.S
+    )
+    assert member and "google_service_account.deploy.email" in member.group(1)
+    # The channel is read, never changed: it belongs to the bootstrap root.
+    assert "roles/monitoring.notificationChannelViewer" in bootstrap
+    assert "notificationChannelEditor" not in bootstrap
+
+
+def test_c2b_adds_no_secret_no_identity_and_no_control_record() -> None:
+    prod = code(terraform(PROD))
+    assert set(re.findall(r'identity\s*=\s*"(ms-[a-z-]+)"', prod)) | {"ms-scheduler"} == IDENTITIES
+    assert "google_secret_manager_secret_version" not in prod
+    assert 'google_service_account"' not in prod  # identities are created in bootstrap only
+    # The control record is the owner's to write. Nothing in Terraform creates it.
+    for root in (BOOTSTRAP, PROD):
+        assert "google_storage_bucket_object" not in terraform(root)
+        assert "control.json" not in terraform(root)

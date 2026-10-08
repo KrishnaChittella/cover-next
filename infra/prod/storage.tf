@@ -82,6 +82,9 @@ locals {
     ["ms-wikimedia", "raw", "roles/storage.objectCreator", "wikimedia_pageviews/"],
     ["ms-wikimedia", "ops", "roles/storage.objectUser", "wikimedia_pageviews/"],
     ["ms-wikimedia", "state", "roles/storage.objectViewer", "catalogue/"],
+    # Its own work orders and the pointer to the latest, written by the dispatcher.
+    # Read only, by exact name, and nothing else under dispatch/.
+    ["ms-wikimedia", "ops", "roles/storage.objectViewer", "dispatch/orders/wikimedia_pageviews/"],
 
     # Catalogue: IGDB and Steam app list, the token cache, and catalogue state.
     ["ms-catalogue", "landing", "roles/storage.objectCreator", "igdb/"],
