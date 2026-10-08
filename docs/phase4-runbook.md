@@ -418,6 +418,39 @@ if it is absent, malformed, for another source or policy version, expired, or al
 completed. This needs one grant that does not exist yet: read on the operations
 bucket under `dispatch/orders/{source}/` for that source's collector.
 
+**A request is an outbound attempt (Part C2-C.1).** Every request budget counts
+physical HTTP requests handed to the transport, a retry included. It does not count
+targets, fetches or successful answers.
+
+- The budget is taken in the shared HTTP client, immediately before each send and
+  below the retry loop. A retry policy cannot send an attempt the budget does not
+  have: retries stop at the policy's limit or at the budget, whichever comes first.
+- `max_requests_per_day` in the control record, and in the source's configuration, is
+  a hard ceiling on outbound attempts for the day. `max_requests` on a work order is a
+  hard ceiling on the attempts that order may cause.
+- The dispatcher gives an order room for retries only inside what is left of the day,
+  and **reserves the whole of the order's budget** against the day when it issues it.
+  The day's counter is therefore what has been reserved, not what was sent. Unused
+  retry room is not handed back until the next day. That wastes a little and cannot
+  overspend: the orders of a day can never add up to more than its ceiling.
+- A cap of 14 with 14 targets means 14 attempts and no retry. If one target needs a
+  retry, a later target is not asked. Whether a soak should carry retry room is a
+  choice made when its control record is written.
+- **Running out of budget is ours, not the source's.** It is logged as
+  `request_budget_exhausted`, never as a refusal or a rate limit, so it does not feed
+  the rate-limit metric. Targets not reached are reported as deferred by the budget in
+  the run summary and the order's receipt. The run is partial, not failed, and the
+  circuit breaker does not move. No observation is made up for a target that was not
+  asked: in the warehouse its slot is simply expected and not sampled.
+- A real 429 is still a rate limit and still opens the breaker, including when it
+  arrives on the last attempt the budget had.
+- The supervised run of Part C2-C predates this. Its order carried 22 for 14 targets
+  under a day's cap of 14; it sent 14 with no retry, so nothing was exceeded. Its
+  receipt has no attempt fields and still reads.
+
+The sampled-source collector is not wired to a budget yet. It is inactive; wiring it
+is part of activating any sampled source.
+
 **Wikimedia in steady state.** An article's history is filled once (90 days, at most
 200 articles in a run, tracked by a marker under `wikimedia_pageviews/bootstrap/`).
 After that a run asks for four days ending at the day that is due, and for fourteen
@@ -663,6 +696,8 @@ carried by [phase4-c2-plan.md](phase4-c2-plan.md).
 17. **Fill markers for the 14 articles.** Written once by the owner, by exact name and
     create-only, before the first C2 tick. Without them that tick fetches 90 days
     again.
+18. **Outbound request budgets (Part C2-C.1).** The image that enforces request budgets
+    on physical attempts must be deployed before C2-D, the first unattended soak.
 
 Part B added these, which are gates for the same reason:
 

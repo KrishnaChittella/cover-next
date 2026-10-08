@@ -34,7 +34,7 @@ from metaspike.domain.source_policy import (
 )
 from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
 from metaspike.sources.base import SourceError, SourceMode
-from metaspike.sources.http import LimitedHttpClient, build_http_client
+from metaspike.sources.http import AttemptBudget, LimitedHttpClient, build_http_client
 from metaspike.sources.http import RetryConfig as RetryConfig
 from metaspike.sources.limiter import Clock, RateLimiter
 
@@ -150,13 +150,19 @@ class WikimediaPageviewsAdapter:
         client: httpx.Client | LimitedHttpClient,
         retry: RetryConfig | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        budget: AttemptBudget | None = None,
     ) -> None:
         """Take a limited client, or a bare transport that is wrapped in this source's limits."""
         if isinstance(client, LimitedHttpClient):
             self._http = client
         else:
             limiter = RateLimiter(WIKIMEDIA_PAGEVIEWS_POLICY.operations, clock=Clock(sleep))
-            self._http = LimitedHttpClient(client, limiter, retry)
+            self._http = LimitedHttpClient(client, limiter, retry, budget=budget)
+
+    @property
+    def budget(self) -> AttemptBudget:
+        """The outbound attempts this adapter has sent and may still send."""
+        return self._http.budget
 
     @property
     def source(self) -> str:

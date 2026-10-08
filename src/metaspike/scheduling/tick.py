@@ -69,6 +69,8 @@ class WarehouseState(FrozenModel):
 
 class Counters(FrozenModel):
     day: str
+    # Outbound attempts RESERVED per source today: the sum of the budgets of the
+    # orders issued. Never more than the day's ceiling, whatever was actually sent.
     requests: Mapping[str, int] = Field(default_factory=dict)
     executions: int = 0
 
@@ -326,8 +328,14 @@ def _plan(env: TickEnvironment, tick: datetime, record: ControlRecord, now: date
                 weekly = tick.weekday() == config.reconciliation_weekday
                 window = caps.reconciliation_window_days if weekly else caps.steady_window_days
             identifier = order_id(source, tick, manifest.version)
+            # Outbound attempts the order may cause: room for retries, but never more
+            # than the execution ceiling or what is left of the day. The strictest
+            # wins. It is at least one per target, because targets were bounded by the
+            # same remainder.
             budget = min(
-                caps.max_requests_per_execution, int(len(plan.planned) * RETRY_ALLOWANCE) + 1
+                caps.max_requests_per_execution,
+                int(len(plan.planned) * RETRY_ALLOWANCE) + 1,
+                left,
             )
             expires = tick + timedelta(minutes=caps.order_ttl_minutes)
             orders.append(
@@ -358,7 +366,9 @@ def _plan(env: TickEnvironment, tick: datetime, record: ControlRecord, now: date
                     probe=plan.probe,
                 )
             )
-            requests[source] = requests.get(source, 0) + len(plan.planned)
+            # The whole budget is reserved now, used or not. Unused retry room is not
+            # returned today: safe, simple, and it can only make the day stricter.
+            requests[source] = requests.get(source, 0) + budget
             jobs.append(caps.collector_job)
             starts_left -= 1
             health = health.model_copy(

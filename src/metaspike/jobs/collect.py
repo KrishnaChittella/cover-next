@@ -36,6 +36,7 @@ from metaspike.scheduling.config import PRODUCTION, SourceCaps
 from metaspike.scheduling.health import Outcome
 from metaspike.scheduling.workorder import ClaimRefused, OrderReceipt, WorkOrder, claim, complete
 from metaspike.sources.base import SamplingAdapter, SourceAdapter, SourceError, SourceMode
+from metaspike.sources.http import AttemptBudget, RequestBudgetExhausted
 from metaspike.sources.wikimedia import DAILY_PAGEVIEWS
 from metaspike.sources.wikimedia import SOURCE_ID as WIKIMEDIA
 from metaspike.warehouse.landing import (
@@ -52,6 +53,9 @@ WINDOW_DAYS_ENV = "METASPIKE_WIKIMEDIA_DAYS"
 # "required": act only on a work order from the dispatcher.
 WORK_ORDERS_ENV = "METASPIKE_WORK_ORDERS"
 BOOTSTRAP_FORMAT = "bootstrap_marker_v1"
+# Why a run stopped asking when the stop was ours: the attempt budget was spent. Also
+# the name of the log event. Deliberately not a source error code.
+BUDGET_EXHAUSTED = "request_budget_exhausted"
 # Errors that mean the source has refused us, not that one request went wrong.
 _REFUSALS = (
     SourceErrorCode.UNAUTHORIZED,
@@ -157,7 +161,14 @@ def collect_wikimedia(
     `max_bootstraps_per_execution` of them in a run. After that a run asks for the
     steady window, or the reconciliation window once a week, ending at the day that
     is due. With a work order the run collects exactly the order's targets for the
-    order's slot and window, and never more requests than the order allows.
+    order's slot and window.
+
+    The request limit is a limit on OUTBOUND ATTEMPTS: every physical HTTP request,
+    each retry included. It is enforced where the request is sent, so a retry cannot
+    exceed it. When it is spent the run stops asking; the targets it did not reach are
+    reported as deferred by the budget. That is our own backpressure, not a refusal by
+    the source: it is never logged or reported as a rate limit, and no observation is
+    made up for a target that was not asked.
     """
     runtime.refuse_unless_cleared(WIKIMEDIA, SourcePurpose.DEMAND_SIGNALS)
     policy = runtime.policy_for(WIKIMEDIA)
@@ -184,11 +195,17 @@ def collect_wikimedia(
     catalogue, version = runtime_catalogue(runtime)
     markers = SlotMarkers(runtime.operations, runtime.now)
     metric = DAILY_PAGEVIEWS.metric
+    # The adapter's own budget, where its transport sends. A stand-in with no transport
+    # has none; it is charged one attempt for each fetch instead.
+    shared: AttemptBudget | None = getattr(adapter, "budget", None)
+    budget = shared if shared is not None else AttemptBudget()
+    budget.restrict(request_limit)
+    sent_before = budget.used
 
     rows: list[dict[str, Any]] = []
     fetched: list[str] = []
     filled: list[str] = []
-    skipped = failed = requests = fills_deferred = 0
+    skipped = failed = attempted = fills_deferred = budget_deferred = 0
     widest = 0
     halted_by: str | None = None
     known: set[str] = set()
@@ -203,6 +220,9 @@ def collect_wikimedia(
         if markers.completed(WIKIMEDIA, metric, native_id, due) is not None:
             skipped += 1
             continue
+        if halted_by == BUDGET_EXHAUSTED:
+            budget_deferred += 1  # not asked: our budget, not the source's answer
+            continue
         if halted_by is not None:
             failed += 1
             continue
@@ -210,18 +230,56 @@ def collect_wikimedia(
         if fill and len(filled) + fills_deferred >= caps.max_bootstraps_per_execution:
             fills_deferred += 1  # its history is filled by a later run, not skipped
             continue
-        if requests >= request_limit:
-            halted_by = "request_limit"
-            failed += 1
+        if budget.exhausted:
+            halted_by = BUDGET_EXHAUSTED
+            budget_deferred += 1
+            runtime.log(
+                BUDGET_EXHAUSTED,
+                severity="WARNING",
+                source=WIKIMEDIA,
+                request_budget=budget.limit,
+                outbound_attempts=budget.used - sent_before,
+            )
             continue
         days = override or (caps.bootstrap_window_days if fill else routine)
         widest = max(widest, days)
         window = TimeWindow(start=due - timedelta(days=days - 1), end=due)
-        requests += 1
+        attempted += 1
         try:
+            if shared is None:
+                budget.take(native_id)
             observations: Sequence[Observation] = adapter.fetch(
                 game, identifier, DAILY_PAGEVIEWS, window, runtime.now()
             )
+        except RequestBudgetExhausted as spent:
+            # The budget ran out inside this fetch. If an attempt had been sent and
+            # failed, that failure is real and is recorded as what it was; the retry
+            # that was not sent is ours. If nothing was sent, the target was not asked.
+            halted_by = BUDGET_EXHAUSTED
+            if spent.after is None:
+                attempted -= 1
+                budget_deferred += 1
+            else:
+                failed += 1
+                refused = spent.after.code in _REFUSALS
+                runtime.log(
+                    "source_refused" if refused else "source_failed",
+                    severity="WARNING",
+                    source=WIKIMEDIA,
+                    error_code=spent.after.code.value,
+                    target=native_id,
+                    retry_not_sent=BUDGET_EXHAUSTED,
+                )
+                if refused:
+                    halted_by = spent.after.code.value  # a real refusal outranks our cap
+            runtime.log(
+                BUDGET_EXHAUSTED,
+                severity="WARNING",
+                source=WIKIMEDIA,
+                request_budget=budget.limit,
+                outbound_attempts=budget.used - sent_before,
+            )
+            continue
         except SourceError as error:
             failed += 1
             runtime.log(
@@ -269,9 +327,18 @@ def collect_wikimedia(
                     completed_at=runtime.now(),
                 ),
             )
+    outbound = budget.used - sent_before
+    complete_run = not failed and not fills_deferred and not budget_deferred
     return {
-        "outcome": "succeeded" if not failed and not fills_deferred else "partial",
-        "requests_sent": requests,
+        "outcome": "succeeded" if complete_run else "partial",
+        # Outbound attempts: every physical request sent, retries included.
+        "requests_sent": outbound,
+        "outbound_attempts": outbound,
+        "retry_attempts": max(0, outbound - attempted),
+        "request_budget": budget.limit,
+        "targets_intended": len(known) if wanted is None else len(wanted),
+        "targets_attempted": attempted,
+        "targets_budget_deferred": budget_deferred,
         "halted_by": halted_by,
         "catalogue": version,
         "slot": due.isoformat(),
@@ -312,11 +379,14 @@ def collect_wikimedia_job(
             "halted_by": None,
         }
     summary = collect_wikimedia(runtime, build_adapter(), order)
+    # Only what the source did decides the outcome the breaker sees. Targets our own
+    # budget kept us from asking make the run partial; they never make it a failure
+    # or a rate limit.
     if summary["halted_by"] == SourceErrorCode.RATE_LIMITED.value:
         outcome = Outcome.RATE_LIMITED
     elif summary["targets_failed"] and not summary["targets_collected"]:
         outcome = Outcome.FAILED
-    elif summary["targets_failed"]:
+    elif summary["targets_failed"] or summary["targets_budget_deferred"]:
         outcome = Outcome.PARTIAL
     else:
         outcome = Outcome.SUCCEEDED
@@ -326,11 +396,15 @@ def collect_wikimedia_job(
             order_id=order.order_id,
             source=WIKIMEDIA,
             outcome=outcome,
-            requests_sent=summary["requests_sent"],
+            requests_sent=summary["outbound_attempts"],
             targets_collected=summary["targets_collected"],
             targets_failed=summary["targets_failed"],
             completed_at=runtime.now(),
             run_id=runtime.run_id,
+            request_budget=summary["request_budget"],
+            targets_attempted=summary["targets_attempted"],
+            retry_attempts=summary["retry_attempts"],
+            targets_budget_deferred=summary["targets_budget_deferred"],
         ),
     )
     return summary

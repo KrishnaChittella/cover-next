@@ -4,6 +4,20 @@
 one retry policy. Adapters are given a `LimitedHttpClient`, never a bare client, so
 no request can leave without passing the limiter.
 
+It is also where a request budget is enforced. A budget counts OUTBOUND ATTEMPTS: one
+unit for every physical HTTP request handed to the transport, a retry included. It is
+taken immediately before the send, below the retry loop, so no retry policy can send
+an attempt the budget does not have. Four things are kept apart:
+
+    target            one game or article to collect
+    logical fetch     one adapter operation for one target
+    outbound attempt  one physical HTTP request
+    retry             a further outbound attempt for the same logical fetch
+
+Running out of budget is MetaSpike declining to send. It is not the source refusing:
+it is raised as `RequestBudgetExhausted`, which is not a `SourceError` and carries no
+source error code, so it can never be mistaken for a rate limit.
+
 This module also owns secret hygiene for outbound requests: error messages are built
 from a caller-supplied label, never from a URL (a URL can carry an API key), and
 HTTP client logging is filtered for credentials.
@@ -66,6 +80,63 @@ def build_http_client(user_agent: str) -> httpx.Client:
     )
 
 
+class RequestBudgetExhausted(Exception):
+    """MetaSpike's own attempt budget is spent, so the next request was not sent.
+
+    Local backpressure, not a source failure. `after` is the source error from the last
+    attempt that WAS sent for this logical request, when the stop came between an
+    attempt and its retry; it is None when nothing was sent for the request at all.
+    """
+
+    def __init__(self, label: str, limit: int, after: SourceError | None = None) -> None:
+        super().__init__(f"{label}: request budget of {limit} outbound attempts is spent")
+        self.limit = limit
+        self.after = after
+
+
+class AttemptBudget:
+    """How many outbound attempts may still be sent, and how many have been.
+
+    One is taken for every physical request, immediately before it is handed to the
+    transport. With no limit it only counts. A limit can be lowered and never raised.
+    """
+
+    def __init__(self, limit: int | None = None) -> None:
+        if limit is not None and limit < 0:
+            raise ValueError("a request budget cannot be negative")
+        self._limit = limit
+        self._used = 0
+
+    @property
+    def limit(self) -> int | None:
+        return self._limit
+
+    @property
+    def used(self) -> int:
+        """Outbound attempts sent so far."""
+        return self._used
+
+    @property
+    def remaining(self) -> int | None:
+        return None if self._limit is None else max(0, self._limit - self._used)
+
+    @property
+    def exhausted(self) -> bool:
+        return self._limit is not None and self._used >= self._limit
+
+    def restrict(self, limit: int) -> None:
+        """Lower the limit to `limit`. A stricter limit already in force stays."""
+        if limit < 0:
+            raise ValueError("a request budget cannot be negative")
+        self._limit = limit if self._limit is None else min(self._limit, limit)
+
+    def take(self, label: str = "request") -> None:
+        """Spend one attempt, or refuse. Refusing spends nothing and sends nothing."""
+        if self._limit is not None and self._used >= self._limit:
+            raise RequestBudgetExhausted(label, self._limit)
+        self._used += 1
+
+
 @dataclass(frozen=True)
 class RetryConfig:
     max_attempts: int = 4
@@ -91,15 +162,22 @@ class LimitedHttpClient:
         limiter: RateLimiter,
         retry: RetryConfig | None = None,
         rng: random.Random | None = None,
+        budget: AttemptBudget | None = None,
     ) -> None:
         self._client = client
         self._limiter = limiter
         self._retry = retry or RetryConfig()
         self._rng = rng or random.Random()
+        # Always present, so attempts are always counted. Unlimited unless restricted.
+        self._budget = budget or AttemptBudget()
 
     @property
     def limiter(self) -> RateLimiter:
         return self._limiter
+
+    @property
+    def budget(self) -> AttemptBudget:
+        return self._budget
 
     def request(
         self,
@@ -117,12 +195,21 @@ class LimitedHttpClient:
         Returns the response for any status that is not transient; the adapter decides
         what a 200, 401 or 404 means. Raises SourceError when attempts are exhausted
         or the quota is spent. `label` names the request in errors and logs.
+
+        Every attempt, the first and each retry, takes one unit of the request budget
+        just before it is sent. With none left nothing is sent and
+        RequestBudgetExhausted is raised: retries stop at the retry policy's limit or
+        at the budget, whichever comes first.
         """
-        error = SourceError(SourceErrorCode.NETWORK_ERROR, f"{label}: no attempt was made")
+        error: SourceError | None = None
         for attempt in range(1, self._retry.max_attempts + 1):
             retry_after: float | None = None
             try:
                 with self._limiter.slot():
+                    try:
+                        self._budget.take(label)
+                    except RequestBudgetExhausted as spent:
+                        raise RequestBudgetExhausted(label, spent.limit, after=error) from None
                     response = self._send(method, url, headers, params, content, data)
             except QuotaExhaustedError as exhausted:
                 raise SourceError(
@@ -143,9 +230,16 @@ class LimitedHttpClient:
                 else:
                     return response
             if attempt < self._retry.max_attempts:
+                if self._budget.exhausted:
+                    # A retry would be the next thing sent, and there is nothing to
+                    # send it with. Stop here, without waiting out a backoff first.
+                    limit = self._budget.limit or 0
+                    raise RequestBudgetExhausted(label, limit, after=error)
                 delay = self._retry.delay(attempt, retry_after, self._rng)
                 logger.info("%s; retrying in %.1fs (attempt %d)", error.message, delay, attempt)
                 self._limiter.back_off(delay)
+        if error is None:
+            raise SourceError(SourceErrorCode.NETWORK_ERROR, f"{label}: no attempt was made")
         raise error
 
     def _send(

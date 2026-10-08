@@ -796,7 +796,7 @@ def test_a_crash_after_planning_resumes_the_same_plan() -> None:
     assert resumed.started == ["ms-wikimedia"] and summary["expected_targets"] == 14
     assert w.operations.get("dispatch/plans/tick-20261005T0300Z.json").data == stored
     assert json.loads(w.operations.get(f"dispatch/counters/{MONDAY:%Y-%m-%d}.json").data) == {
-        "day": "2026-10-05", "requests": {WIKIMEDIA: 14}, "executions": 1
+        "day": "2026-10-05", "requests": {WIKIMEDIA: 22}, "executions": 1
     }  # fmt: skip
 
 
@@ -1192,8 +1192,10 @@ def test_an_order_bounds_requests_and_a_rate_limit_is_reported_as_one() -> None:
     runtime, _ = runtime_for(w, "ms-wikimedia", run_id="run-1")
     adapter = Pageviews()
     summary = collect_wikimedia(runtime, adapter, tight)  # type: ignore[arg-type]
-    assert summary["requests_sent"] == 3 and summary["halted_by"] == "request_limit"
-    assert summary["targets_failed"] == 11 and summary["outcome"] == "partial"
+    assert summary["requests_sent"] == 3 and summary["halted_by"] == "request_budget_exhausted"
+    # The eleven it did not reach were not asked. They are deferred, not failed.
+    assert summary["targets_failed"] == 0 and summary["targets_budget_deferred"] == 11
+    assert summary["targets_attempted"] == 3 and summary["outcome"] == "partial"
     # Unknown targets are counted as failed, never invented.
     ghost = order.model_copy(
         update={
@@ -1249,7 +1251,9 @@ def test_a_tick_does_work_in_proportion_to_what_is_due_not_to_the_catalogue(
     assert large.entries_read_per_tick_max < 10 * small.entries_read_per_tick_max
     assert large.object_reads_per_tick_max <= small.object_reads_per_tick_max + 4
     # Requests are bounded by the sources' limits, whatever the breadth.
-    assert large.requests[WIKIMEDIA] == 10_000  # the day's ceiling, exactly
+    # The day's ceiling bounds what is RESERVED, retry room included, so what is
+    # actually asked stays under it.
+    assert 6_000 < large.requests[WIKIMEDIA] <= 10_000
     assert large.requests[SIM_SAMPLED] <= 24 * 600
     assert large.executions["ms-wikimedia"] <= 24 and large.backlog_max <= 6000
     assert large.slowest_tick_seconds < 10 and large.peak_memory_mb < 400

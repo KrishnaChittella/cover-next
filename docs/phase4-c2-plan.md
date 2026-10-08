@@ -189,8 +189,8 @@ changes them:
 | Job starts per tick | 6 |
 | Executions of one collector per tick | 1 |
 | Targets per collector execution | 600 |
-| Source requests per execution | targets × 1.5, hard stop at 1,000 |
-| Source requests per day, Wikimedia | 10,000 |
+| Outbound attempts per execution (physical requests, retries included) | targets × 1.5 where the day's remainder allows, hard stop at 1,000 |
+| Outbound attempts per day, Wikimedia | 10,000, reserved order by order (Part C2-C.1) |
 | In-run retries per request | 2, with backoff, honouring `Retry-After` |
 | Platform retries | 1 for collectors and warehouse, 0 for the dispatcher (as deployed) |
 | Task timeout | As deployed: dispatcher 300 s, Wikimedia 900 s, warehouse 1,800 s |
@@ -819,4 +819,26 @@ month.
   tick fetches 90 days again. The function that writes them exists and is tested;
   running it against the real bucket is a C2-B step.
 - **The quota resource** is beta-only in Terraform (section 7).
+
+## 25. C2-C.1: request budgets are outbound attempts
+
+Found in review after the supervised tick, and fixed before any unattended soak. The
+control record capped the day at 14 requests; the order issued under it allowed 22;
+the day's counter advanced by the 14 targets; and retries were sent below the layer
+that counted. With a transient failure the attempts on the wire could have passed the
+cap unnoticed. In C2-C itself none did: 14 were sent, with no retry.
+
+Now every budget counts physical attempts, enforced where they are sent; an order's
+budget is capped by what is left of the day and reserved in full when issued; and
+running out is recorded as our own backpressure, never as the source refusing. The
+details are in the runbook under "A request is an outbound attempt".
+
+One effect on the scale simulation in section 24: because an order now reserves its
+retry room, a source at its daily ceiling is asked for fewer targets than the ceiling.
+At 50,000 catalogued entities the simulated Wikimedia day reserves all 10,000 attempts
+and asks for about 6,700 targets. The bound holds more strictly, not less; the other
+figures in that section are unchanged in kind and were not re-derived.
+
+This gates C2-D. The soak's own request cap, and so whether it carries retry room, is
+chosen when its control record is reviewed.
 

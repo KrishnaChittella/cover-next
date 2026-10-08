@@ -72,6 +72,8 @@ class WorkOrder(FrozenModel):
     policy_version: str
     targets: tuple[OrderTarget, ...] = Field(min_length=1)
     max_targets: int = Field(ge=1)
+    # The most PHYSICAL outbound HTTP attempts the collector may cause for this order,
+    # retries included. Reserved against the day's budget when the order is issued.
     max_requests: int = Field(ge=1)
     probe: bool = False
 
@@ -88,11 +90,19 @@ class OrderReceipt(FrozenModel):
     order_id: str
     source: str
     outcome: Outcome
+    # Outbound attempts: physical HTTP requests, retries included. Receipts written
+    # before attempts were counted separately recorded one per target asked here.
     requests_sent: int = Field(ge=0)
     targets_collected: int = Field(ge=0)
     targets_failed: int = Field(ge=0)
     completed_at: AwareDatetime
     run_id: str
+    # Added with the attempt budget. Absent from older receipts, which still read.
+    request_budget: int | None = Field(default=None, ge=0)
+    targets_attempted: int | None = Field(default=None, ge=0)
+    retry_attempts: int | None = Field(default=None, ge=0)
+    # Named in the order and never asked, because the order's own budget was spent.
+    targets_budget_deferred: int = Field(default=0, ge=0)
 
 
 class ClaimRefused(Exception):
