@@ -4,211 +4,207 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous accepted checkpoint: **PHASE 4 PART C2-C.1: COMPLETE**
+Previous accepted checkpoint: **PHASE 4 PART C2-D PREP.1: PLAN READY**
 
-Current checkpoint: **PHASE 4 PART C2-D PREP.1: PLAN READY**
+Current checkpoint: **PHASE 4 PART C2-D: SOAK ACTIVE**
 
-The deploy workflow can now make an infrastructure-only plan that reuses the image the
-jobs already run. With it, a clean unpause plan exists: **0 add, 2 change, 0 destroy**,
-on the deployed image, with exactly the two expected changes. It is saved and **not
-applied**. The scheduler is paused, the repository variable is `true`, the control
-record is disabled, and nothing ran.
+The first unattended soak is running. The reviewed plan was applied at 02:43 UTC, the
+scheduler fired by itself at 03:00:00 UTC, and the dispatcher it started ran the
+Wikimedia collection within every ceiling. **No local process is required for the rest
+of the soak**: the control record expires by itself at 08:30 UTC, and nothing on the
+owner's machine is running or waiting.
 
-## The earlier block
+The soak is **not complete**. The scheduler stays enabled until it is paused by hand
+(morning cleanup, below).
 
-C2-D preparation was blocked because the only way to make a plan rebuilt the image.
-Plan run `37738729342` proposed 9 changes: seven jobs moving to a freshly built digest
-(`sha256:e2d35755…`, not approved and not used), plus the two changes that an unpause
-really consists of. That plan was not applied and is left to expire.
+All times are UTC on 2026-10-09.
 
-Rulings since: the unpause is expected to change **two** resources (the scheduler, and
-the dispatcher-silence alert, which is defined as enabled exactly while the scheduler
-is not paused); the alert is not to be decoupled; and the new image is not accepted.
+## One thing to know first: an alert fired at launch
 
-## Workflow design
+The dispatcher-silence policy opened an incident at 02:44:29, seconds after the apply
+enabled it, and will have sent an email. This is not a fault in the soak: the policy
+fires when no dispatcher has succeeded in three hours, and at the moment it was
+switched on none had. A dispatcher succeeded at 03:02, so the condition has cleared
+and the incident should close by itself; it was still listed as open at 03:05. It was
+not closed or altered by hand. No other incident is open.
 
-A new `workflow_dispatch` input on the deploy workflow, `reuse_deployed_image`, boolean,
-default `false`.
+## Preflight (02:33)
 
-- **Default (false): unchanged.** The plan job builds with `--pull --no-cache`, smokes,
-  scans, authenticates, pushes, and plans with the digest it pushed.
-- **True: an infrastructure-only plan.** Build, smoke, scan and push are skipped. After
-  authenticating, the job runs `.github/scripts/resolve-deployed-image.sh`, which reads
-  the image from the jobs and accepts it only if:
-  1. the project has exactly the seven MetaSpike jobs, no fewer and no other;
-  2. each has one container;
-  3. all seven run the same image;
-  4. each job's `METASPIKE_IMAGE` equals the image it runs;
-  5. the image is in `us-central1-docker.pkg.dev/<project>/metaspike/metaspike`;
-  6. it is named by `@sha256:` and 64 lowercase hex characters;
-  7. the registry holds exactly that digest.
-  Any failure ends the job with an error. Nothing falls back to building or pushing.
-- A further step, "Choose the image to plan with", always runs. It takes the built
-  image in one mode and the resolved image in the other, fails if both or neither are
-  present, re-checks the repository and digest pattern, and records the origin. The
-  plan uses that step's output only, and the run summary states the image and its
-  origin.
-- The reusable verification job still runs first in both modes, so this commit's image
-  is still built and scanned by CI; it is simply not pushed or planned with.
+All passed, read-only:
 
-Nobody can name an image. The script takes two arguments, the project and the region.
-The workflow has no input that carries an image or a digest.
+- `main` at `675a18e`, level with origin, clean; the only change since the plan's commit
+  (`55393ea`) is this handoff file.
+- Plan run `37742520427` succeeded; its artifact was not expired (2026-10-11T07:27:34Z)
+  and, downloaded again, hashed to
+  `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe` exactly. Its
+  rendered contents: 0 add, 2 change, 0 destroy; `paused: true -> false` and
+  `enabled: false -> true`, nothing else. (The plan binary still cannot be decoded
+  locally, one Terraform patch version apart; the rendered output and the hash are what
+  was checked.)
+- Prod state serial 9. No apply since the plan.
+- Scheduler `ms-dispatch-15m`: PAUSED, `0 * * * *`, `Etc/UTC`, no attempt ever.
+- Repository variable `SCHEDULER_PAUSED` = `true` (left `true` throughout).
+- Control record present, disabled, generation `1791432826876698`.
+- 14 executions. All seven jobs on
+  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`, with every
+  `METASPIKE_IMAGE` equal to it (checked with the workflow's own resolving script).
+- BigQuery project daily query limit 10,240 MiB.
+- 0 secret versions; 0 user-managed keys.
+- Retained data intact: 1,316 observations, 14 ledger rows, 12 run rows.
 
-## Files changed
+## Control record
 
-Workflow commit `55393ea84fa7605a97b058b41205e653ccda1989`:
+Built with the repository's `ControlRecord` model and written at 02:33:30 on the exact
+previous generation:
 
-- `.github/workflows/deploy.yml` — the input, the conditional steps, the resolve and
-  choose steps, the summary line
-- `.github/scripts/resolve-deployed-image.sh` — new
-- `tests/test_deploy_image_reuse.py` — new, 23 tests
-- `tests/test_cloud_foundation.py` — one expectation updated
-- `docs/phase4-runbook.md` — a paragraph on infrastructure-only plans
+```
+{"version":1,"enabled":true,"armed_until":"2026-10-09T08:30:00Z","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
+```
 
-Earlier in C2-D preparation, documents only (`a82778d`): the re-pause procedure was
-corrected and the quota recorded as set. No application code or Terraform changed in
-either commit.
+- Old generation `1791432826876698`; **new generation `1791513212387018`**.
+- SHA-256 `bbacc1b8342d5794e274020ec510a8e77d98a3db31b8bb96a91bcffe8a2461d8`; read back
+  byte for byte identical.
+- Parsed with the repository's reader at that moment: active, no refusal.
+- Meaning: Wikimedia only (no Steam, IGDB, catalogue or sampled source; no pins); at
+  most 22 physical outbound HTTP attempts for the UTC day; at most 14 targets an
+  execution; at most one child start a tick; at most three dispatcher-started
+  executions for the UTC day; **expires 08:30 UTC**.
 
-## Security analysis
-
-- Same trigger: `workflow_dispatch` on `main` only. The job's `if` is unchanged, and a
-  push still cannot reach authentication.
-- Same identity: the existing restricted WIF path to `ms-deploy`. No key, no secret, no
-  new permission. The two reads it makes (job descriptions, one registry lookup) are
-  covered by roles it already holds; the run succeeded with them.
-- WIF trust is untouched. The provider pins this workflow file on `main`; the script is
-  checked out from the same commit.
-- The apply job is byte-for-byte as it was in behaviour: it downloads the plan named by
-  run id, refuses a hash mismatch, refuses an unannounced destroy, and applies that
-  plan. It does not reference the new input.
-- The mode cannot select an unreviewed or historical image: only the image all seven
-  jobs currently run is eligible, and it must still exist in the registry.
-- The mode reduces registry churn: an infrastructure-only plan pushes nothing.
-
-## Tests and CI
-
-`tests/test_deploy_image_reuse.py` runs the real script against a stand-in `gcloud`
-that answers from a description of the jobs and the registry:
-
-- resolves the one image; reads all seven jobs; makes only read calls;
-- refuses when the jobs disagree; when a job's `METASPIKE_IMAGE` differs or is unset;
-  when the image is in another repository, project, region or registry, is a tag, or
-  has a digest of the wrong length, case, alphabet or algorithm (13 cases); when the
-  registry lacks the digest or answers with another; when a job is missing, extra, or
-  has two containers; and it prints no image whenever it refuses;
-- by inspection of the workflow: the default still builds, scans and pushes and plans
-  with the built digest; the infrastructure-only path resolves after authenticating
-  and before planning; there is no fallback expression; no input can carry an image;
-  the apply job, triggers, permissions and WIF conditions are unchanged.
-
-Results: ruff and format clean; mypy clean (164 files); **1,160 passed, 5 deselected**,
-dbt tests included. Push CI run `37741656087` on the workflow commit: success, with
-plan, apply and identity-check skipped.
-
-## The unpause plan (not applied)
+## Apply
 
 | | |
 |---|---|
-| Run | `37742520427`, `operation = plan`, `reuse_deployed_image = true` |
-| Head commit | `55393ea84fa7605a97b058b41205e653ccda1989` |
-| Image planned with | `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754` |
-| Image origin | reused: resolved live from all seven jobs and confirmed in the registry |
+| Reviewed plan run | `37742520427` |
 | Plan SHA-256 | `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe` |
-| Artifact | `tfplan`, expires 2026-10-11T07:27:34Z |
-| Counts | **0 add, 2 change, 0 destroy, 0 replace** |
-| Prod state serial | 9 |
+| Apply run | `37875151956`, started 02:33:38, finished 02:43:35, success |
+| Result | `Apply complete! Resources: 0 added, 2 changed, 0 destroyed.` |
+| Changed | `google_cloud_scheduler_job.tick`, `google_monitoring_alert_policy.dispatcher_silent` |
+| Prod state serial | 9 → 10 |
 
-Live resolution proof: in that run the steps Build, Smoke, Scan and Push were skipped;
-"Resolve the image the jobs already run" and "Choose the image to plan with" succeeded;
-the plan command received `-var "image=…@sha256:a8680b2b…c754"` and
-`-var "scheduler_paused=false"`. All 91 resources were refreshed. The same script, run
-read-only with the owner's login beforehand, returned the same digest. The plan hash
-was recomputed locally from the downloaded artifact and matches the one the run
-published.
+No new plan was made. `allow_destroy` false.
 
-Complete diff:
+## Post-apply verification (02:44, before the 02:57 cut-off)
 
-```
-# google_cloud_scheduler_job.tick will be updated in-place
-  ~ paused = true -> false
-    (name ms-dispatch-15m; 8 unchanged attributes and 2 unchanged blocks)
+- **Scheduler:** ENABLED; schedule `0 * * * *`; time zone `Etc/UTC`; next run
+  03:00:00; same target (`…/jobs/ms-dispatch:run`), same identity (`ms-scheduler`),
+  same retry settings (retry count 1) and deadline (180 s).
+- **Monitoring:** 8 policies, all enabled; `dispatcher_silent` now enabled; the other
+  seven unchanged.
+- **Jobs:** all seven still at generation 6 on `sha256:a8680b2b…c754`. No job
+  definition changed.
+- **Control:** unchanged since arming, generation `1791513212387018`.
+- **Security:** 0 secret versions; 0 user-managed keys.
+- **Executions:** still 14. Nothing was started by hand, then or later.
 
-# google_monitoring_alert_policy.dispatcher_silent will be updated in-place
-  ~ enabled = false -> true
-    (8 unchanged attributes and 1 unchanged block)
+## The 03:00 tick: proven
 
-Plan: 0 to add, 2 to change, 0 to destroy.
-```
+**Scheduler.** Attempt at 03:00:00.98, HTTP 200 from the Cloud Run API; one attempt, no
+retry. Next run scheduled for 04:00.
 
-No Cloud Run job, image, `METASPIKE_IMAGE`, scheduler cron, time zone, target, identity
-or retry setting, IAM, WIF, secret, quota, dataset, table, bucket or other alert policy
-changes.
+**Dispatcher `ms-dispatch-cfw4f`**, run id `20261009T030219Z-ms-dispatch-cfw4f`.
+**Created by `ms-scheduler`**, not by a person. One attempt, exit 0.
 
-## Repository variable
+- Tick `2026-10-09T03:00:00Z`. The control record was accepted.
+- Schedule `s9939a2accd9a17c152bc` reused (not regenerated). 1 partition read.
+- Expected targets 14; dispositions `planned` 14. Only Wikimedia was due; no other
+  source exists in the configuration or was planned.
+- One work order, one child started: `ms-wikimedia`. Executions counted today: 1.
 
-`SCHEDULER_PAUSED` was `true`; set to `false` at 07:17:26 UTC for the plan run only;
-restored to `true` at 07:27:44 UTC, immediately after the run finished; read back
-`true` then and again at the end. No apply was requested while it was false.
+**Work order `88c3319704fe9da52b41d759f1c38e3d`**: Wikimedia pageviews, slot
+2026-10-07, `window_days` 4, **14 targets, `max_requests` 22**, expiring 03:50, not a
+probe. The day's counter shows 22 attempts reserved for Wikimedia, which is the whole
+of the day's cap.
 
-## Final state
+**Ledger.** One batch for the tick with 14 rows: tier 4, `due_at` 03:00, disposition
+`planned`, all carrying that order id. Exactly one lease exists for the tick, so a
+repeated delivery would have done nothing.
 
-- **Scheduler:** PAUSED, `0 * * * *`, no attempt time.
-- **Control record:** present, `enabled: false`, generation `1791432826876698`,
-  unchanged.
-- **Cloud Run executions:** 14. No Cloud Run log entry since C2-D preparation began.
-- **Jobs:** all seven on `sha256:a8680b2b…c754`. Prod state serial 9 and bootstrap 9:
-  nothing applied.
-- **BigQuery quota:** 10,240 MiB a day on the project limit (set in C2-D preparation by
-  a consumer override; the per-user limit is untouched).
-- **Secrets and keys:** 0 versions; 0 user-managed keys. No IAM, schema, alert or
-  scheduler drift; the silence policy is still disabled.
-- **Sources called:** none.
-- **Git:** `main` level with origin, clean. The portfolio repository was not touched.
+**Collector `ms-wikimedia-s9gg8`**, run id `20261009T030433Z-ms-wikimedia-s9gg8`.
+Created by `ms-dispatch`. One attempt, exit 0.
 
-## Carried forward, unchanged
+- **Outbound attempts 14, of a budget of 22. Retries 0.** No source error.
+- Targets intended 14, attempted 14, collected 14, failed 0, deferred by the budget 0,
+  skipped 0.
+- Window 4 days; history filled 0; no 90-day refetch. 56 rows landed (14 articles by 4
+  days, ending 2026-10-07). 14 completion markers for the slot; bootstrap markers still
+  14.
+- Receipt: `succeeded`, 14 requests, budget 22, 0 retries, completed 03:04:38. This is
+  the first receipt written with the attempt fields, and the first run of the
+  request-budget image in the cloud.
 
-- Soak window: the next period tick is **2026-10-09 03:00 UTC** (a Friday; routine
-  4-day window).
-- Control template, validated and not written: enabled, a finite `armed_until`,
-  Wikimedia only, `max_requests_per_day` 22 (physical outbound attempts),
-  `max_targets_per_execution` 14, `max_job_starts_per_tick` 1,
-  `max_executions_per_day` 3, no pins.
-- The stop is the one-action command, not a saved plan:
-  `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc`,
-  read back with `gcloud scheduler jobs describe … --format='value(state)'` → `PAUSED`.
-- Ceilings for the soak: at most 22 outbound attempts to Wikimedia; one child start a
-  tick and three a day; at most 15 new executions in all.
+No WARNING or ERROR log entry from any job. No Secret Manager access.
+
+| | `ms-dispatch-cfw4f` | `ms-wikimedia-s9gg8` |
+|---|---|---|
+| Created | 03:00:01 | 03:02:21 |
+| First application log | 03:02:19 | 03:04:33 |
+| Completed | 03:02:29 | 03:04:42 |
+
+## State at 03:05
+
+- **Executions: 16** (14 before, plus one dispatcher and one collector). The ceiling for
+  the checkpoint is 29.
+- Scheduler ENABLED, last attempt 03:00:00, next 04:00.
+- `warehouse.json`: a warehouse run is owed since 03:00, so the 04:00 tick should start
+  `ms-warehouse`.
+- Health still shows the order as pending; the 04:00 tick folds the receipt in.
+
+## What should happen with nobody watching
+
+| Time | Expected |
+|---|---|
+| 04:00 | Dispatcher folds the receipt and starts `ms-warehouse` (second of three permitted child executions) |
+| 05:00 to 08:00 | Hourly dispatcher ticks with nothing due; no child started |
+| 08:30 | The control record expires |
+| 09:00 onward | Each hourly dispatcher refuses with `control_expired`; no source request and no child job is possible |
+
+After 08:30 the source is safe whatever else happens. The dispatcher still runs once an
+hour until the scheduler is paused, which is why cleanup should not be left late.
+
+## Morning cleanup (not yet done; needs the owner)
+
+Recommended by about 13:00 UTC (08:00 CDT) or earlier. By 13:00 the execution count
+would be about 27, under the ceiling of 29; each further hour adds one.
+
+1. Verify the 04:00 warehouse tick.
+2. Verify the control record expired at 08:30.
+3. Verify at least the 09:00 dispatcher refused with `control_expired`.
+4. Pause at once:
+   `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc`
+5. Read back and require `PAUSED`:
+   `gcloud scheduler jobs describe ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc --format='value(state)'`
+6. Write the control record with `enabled: false`, on its generation.
+7. Audit the whole soak.
+8. Make a new infrastructure-only reconciliation plan with `scheduler_paused=true`
+   (the repository variable is already `true`) and `reuse_deployed_image`.
+9. Require that it only returns the scheduler to paused and disables
+   `dispatcher_silent`.
+10. Apply it only after review.
+
+Note for step 4 onward: once the scheduler is paused, the silence alert stays enabled
+until step 10 and will fire again about three hours after the last successful
+dispatcher.
+
+## On anything unexpected
+
+Pause the scheduler with the command above, confirm `PAUSED`, disable the control
+record, retry nothing by hand, keep the evidence, and report blocked.
 
 ## Warnings
 
-1. **The plan expires 2026-10-11T07:27:34Z** and is valid only while prod state stays
-   at serial 9. Any other apply before it makes it stale.
-2. **After the soak the silence alert stays enabled** until Terraform is reconciled.
-   Pausing by command leaves the policy on; with no dispatcher succeeding it would
-   fire about three hours after the pause unless the reconciling plan (made with
-   `scheduler_paused = true`, infrastructure-only) is applied first.
-3. **How the soak is launched and watched** if the owner's machine may be offline is
-   undecided, as ruled. The apply needs someone to start a workflow run and to write
-   the control record shortly before 03:00 UTC, and to pause afterwards.
-4. The registry holds three undeployed images from earlier plan runs, one of which must
-   never be deployed (`sha256:1b373a41…`) and one that was explicitly not accepted
-   (`sha256:e2d35755…`). This run added none.
-5. Local Terraform is one patch behind CI, so the plan was checked from the plan run's
-   rendered output and its hash.
-6. Still open from earlier: the deferred freshness alert; the missed-tick review before
-   any sampled source; the branch-protection decision before any secret-backed source.
+1. **The silence alert fired at launch** (top of this file). Expect one alert email
+   from about 02:44, and a recovery when it closes.
+2. **The scheduler runs hourly until paused by hand.** Nothing pauses it automatically.
+3. **The whole day's request budget is already reserved** (22 of 22). If the 03:00
+   collection had needed to be redone today, the dispatcher would have had no attempts
+   to give; that is the conservative reservation working as designed.
+4. A background wait from this session timed out and ended by itself; it performed no
+   cloud action. Nothing local is running.
+5. Still open from earlier: the deferred freshness alert; the missed-tick review before
+   any sampled source; the branch-protection decision before any secret-backed source;
+   local Terraform one patch behind CI.
 
 ## Exact next approval required
 
-The C2-D launch itself, which needs, together:
-
-- a decision on how it is launched and supervised (warning 3);
-- the exact `armed_until` for the control record;
-- approval to apply this plan by run id and hash: run `37742520427`, SHA-256
-  `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe`, expected 0 add,
-  2 change, 0 destroy;
-- a decision on when the reconciling pause plan is made and applied after the soak
-  (warning 2).
-
-STOP. The plan is not applied; the control record is not armed; the soak has not
-started.
+The C2-D completion step, when the owner returns: the cleanup sequence above, the soak
+audit, and review of the reconciliation plan before it is applied. C2-E has not begun.
