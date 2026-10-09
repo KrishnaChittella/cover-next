@@ -4,207 +4,259 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous accepted checkpoint: **PHASE 4 PART C2-D PREP.1: PLAN READY**
+Previous accepted checkpoint: **PHASE 4 PART C2-D: SOAK ACTIVE**
 
-Current checkpoint: **PHASE 4 PART C2-D: SOAK ACTIVE**
+Current checkpoint: **PHASE 4 PART C2-D: CLEANUP AUDITED — REVIEW REQUIRED**
 
-The first unattended soak is running. The reviewed plan was applied at 02:43 UTC, the
-scheduler fired by itself at 03:00:00 UTC, and the dispatcher it started ran the
-Wikimedia collection within every ceiling. **No local process is required for the rest
-of the soak**: the control record expires by itself at 08:30 UTC, and nothing on the
-owner's machine is running or waiting.
+The scheduler is paused and the control record is disabled. The soak did everything it
+was meant to do and every source and safety limit held. **One operational criterion
+failed: C2-D EXECUTION CEILING BREACHED.** The checkpoint allowed 29 executions in
+total and there are 34, because cleanup came about eight hours after the recommended
+time and the scheduler kept starting the dispatcher each hour. All five excess
+executions are dispatchers that refused with `control_expired`. C2-D is **not** marked
+complete; that ruling is for review.
 
-The soak is **not complete**. The scheduler stays enabled until it is paused by hand
-(morning cleanup, below).
+A reconciliation plan is saved and **not applied**.
+
+**Time-sensitive:** the dispatcher-silence alert is still enabled. The last successful
+dispatcher ended at 20:02 UTC, so the policy will fire at about **23:02 UTC on
+2026-10-09** unless the reconciliation plan is applied before then. It is harmless but
+will send an email.
 
 All times are UTC on 2026-10-09.
 
-## One thing to know first: an alert fired at launch
+## Pause and control
 
-The dispatcher-silence policy opened an incident at 02:44:29, seconds after the apply
-enabled it, and will have sent an email. This is not a fault in the soak: the policy
-fires when no dispatcher has succeeded in three hours, and at the moment it was
-switched on none had. A dispatcher succeeded at 03:02, so the condition has cleared
-and the incident should close by itself; it was still listed as open at 03:05. It was
-not closed or altered by hand. No other incident is open.
+- **Pause:** `gcloud scheduler jobs pause ms-dispatch-15m` issued at 20:43:46; the job
+  records the change at **20:43:48**. Read back immediately: `PAUSED`. Schedule
+  `0 * * * *`, time zone `Etc/UTC`. The last attempt was the 20:00 tick; a paused job
+  shows no next run. It was the first action taken, before any audit.
+- **Control record before:** generation `1791513212387018`, the armed record exactly as
+  written at launch (`enabled: true`, `armed_until` 2026-10-09T08:30:00Z).
+- **Expiry proof:** the repository's own reader returns `control_expired` for those
+  bytes now, permits work at 08:29:59, and returns `control_expired` at 08:30:00.
+- **Control record after:** the same record with only `enabled` set to false, written
+  on that exact generation at 20:44. **New generation `1791578645841911`**, SHA-256
+  `92460ed1e395d024f6b1c157c2bf55ce084cf8764401901557669aaa98b647e2`, read back byte for
+  byte identical.
 
-## Preflight (02:33)
+## Execution timeline
 
-All passed, read-only:
+Every Cloud Run execution of the soak. All 20 succeeded on their first attempt, with no
+task retry. Every dispatcher was created by `ms-scheduler`; the two children were
+created by `ms-dispatch`. Nothing was started by hand. The scheduler made 18 attempts,
+one per hour, each answered 200, none retried.
 
-- `main` at `675a18e`, level with origin, clean; the only change since the plan's commit
-  (`55393ea`) is this handoff file.
-- Plan run `37742520427` succeeded; its artifact was not expired (2026-10-11T07:27:34Z)
-  and, downloaded again, hashed to
-  `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe` exactly. Its
-  rendered contents: 0 add, 2 change, 0 destroy; `paused: true -> false` and
-  `enabled: false -> true`, nothing else. (The plan binary still cannot be decoded
-  locally, one Terraform patch version apart; the rendered output and the hash are what
-  was checked.)
-- Prod state serial 9. No apply since the plan.
-- Scheduler `ms-dispatch-15m`: PAUSED, `0 * * * *`, `Etc/UTC`, no attempt ever.
-- Repository variable `SCHEDULER_PAUSED` = `true` (left `true` throughout).
-- Control record present, disabled, generation `1791432826876698`.
-- 14 executions. All seven jobs on
-  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`, with every
-  `METASPIKE_IMAGE` equal to it (checked with the workflow's own resolving script).
-- BigQuery project daily query limit 10,240 MiB.
-- 0 secret versions; 0 user-managed keys.
-- Retained data intact: 1,316 observations, 14 ledger rows, 12 run rows.
+| Tick | Execution | Result | Child started |
+|---|---|---|---|
+| 03:00 | `ms-dispatch-cfw4f` | 14 planned, one work order | `ms-wikimedia-s9gg8` |
+| | `ms-wikimedia-s9gg8` | 14 attempts, 0 retries, 14 collected, 56 rows | |
+| 04:00 | `ms-dispatch-22c76` | receipt folded, nothing due, warehouse owed | `ms-warehouse-d726r` |
+| | `ms-warehouse-d726r` | 8 batches, 76 rows, dbt PASS=28 | |
+| 05:00 | `ms-dispatch-knjhv` | nothing due | none |
+| 06:00 | `ms-dispatch-xxzm7` | nothing due | none |
+| 07:00 | `ms-dispatch-xjrfl` | nothing due | none |
+| 08:00 | `ms-dispatch-q2hjs` | nothing due | none |
+| 09:00 | `ms-dispatch-lsgfb` | **refused: `control_expired`** | none |
+| 10:00 | `ms-dispatch-cmqqv` | refused: `control_expired` | none |
+| 11:00 | `ms-dispatch-8sns5` | refused: `control_expired` | none |
+| 12:00 | `ms-dispatch-zwjgx` | refused: `control_expired` | none |
+| 13:00 | `ms-dispatch-dwkz5` | refused: `control_expired` | none |
+| 14:00 | `ms-dispatch-cjtjk` | refused: `control_expired` | none |
+| 15:00 | `ms-dispatch-mfkhn` | refused: `control_expired` | none |
+| 16:00 | `ms-dispatch-f7b7m` | refused: `control_expired` | none |
+| 17:00 | `ms-dispatch-vrgkt` | refused: `control_expired` | none |
+| 18:00 | `ms-dispatch-f7qm6` | refused: `control_expired` | none |
+| 19:00 | `ms-dispatch-hklbs` | refused: `control_expired` | none |
+| 20:00 | `ms-dispatch-5ql4q` | refused: `control_expired` | none |
 
-## Control record
+Each dispatcher took between about one and four and a half minutes from creation to
+completion, almost all of it before its first log line, as in earlier runs.
 
-Built with the repository's `ControlRecord` model and written at 02:33:30 on the exact
-previous generation:
-
-```
-{"version":1,"enabled":true,"armed_until":"2026-10-09T08:30:00Z","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
-```
-
-- Old generation `1791432826876698`; **new generation `1791513212387018`**.
-- SHA-256 `bbacc1b8342d5794e274020ec510a8e77d98a3db31b8bb96a91bcffe8a2461d8`; read back
-  byte for byte identical.
-- Parsed with the repository's reader at that moment: active, no refusal.
-- Meaning: Wikimedia only (no Steam, IGDB, catalogue or sampled source; no pins); at
-  most 22 physical outbound HTTP attempts for the UTC day; at most 14 targets an
-  execution; at most one child start a tick; at most three dispatcher-started
-  executions for the UTC day; **expires 08:30 UTC**.
-
-## Apply
+## Execution ceiling: breached
 
 | | |
 |---|---|
-| Reviewed plan run | `37742520427` |
-| Plan SHA-256 | `163df18caa122253ce9086d95cdb604b4cb29ac7612ed3246dd8daf4a08a63fe` |
-| Apply run | `37875151956`, started 02:33:38, finished 02:43:35, success |
-| Result | `Apply complete! Resources: 0 added, 2 changed, 0 destroyed.` |
-| Changed | `google_cloud_scheduler_job.tick`, `google_monitoring_alert_policy.dispatcher_silent` |
-| Prod state serial | 9 → 10 |
+| Baseline before C2-D | 14 |
+| New in C2-D | 20 (18 dispatchers, 1 collector, 1 warehouse) |
+| **Absolute total** | **34** |
+| Ceiling | 29 |
+| **Exceeded by** | **5** |
 
-No new plan was made. `allow_destroy` false.
+The 15th new execution was the 15:00 dispatcher, which brought the total to exactly 29.
+The five beyond it are the dispatchers of **16:00, 17:00, 18:00, 19:00 and 20:00**.
 
-## Post-apply verification (02:44, before the 02:57 cut-off)
+Classification, kept apart from the acceptance result:
 
-- **Scheduler:** ENABLED; schedule `0 * * * *`; time zone `Etc/UTC`; next run
-  03:00:00; same target (`…/jobs/ms-dispatch:run`), same identity (`ms-scheduler`),
-  same retry settings (retry count 1) and deadline (180 s).
-- **Monitoring:** 8 policies, all enabled; `dispatcher_silent` now enabled; the other
-  seven unchanged.
-- **Jobs:** all seven still at generation 6 on `sha256:a8680b2b…c754`. No job
-  definition changed.
-- **Control:** unchanged since arming, generation `1791513212387018`.
-- **Security:** 0 secret versions; 0 user-managed keys.
-- **Executions:** still 14. Nothing was started by hand, then or later.
+- **A. Extra fail-closed dispatcher executions after expiry: yes, all five.** Each
+  logged `tick_refused` with reason `control_expired` and exited.
+- **B. Extra child or source executions: none.** There is exactly one collector and one
+  warehouse execution in the whole soak, both before 05:00.
 
-## The 03:00 tick: proven
+What the twelve refused dispatchers (09:00 to 20:00) did and did not do:
 
-**Scheduler.** Attempt at 03:00:00.98, HTTP 200 from the Cloud Run API; one attempt, no
-retry. Next run scheduled for 04:00.
+- no child job started;
+- no source request: the dispatcher holds no source client, and no collector ran;
+- no work order: the order area still holds the two orders from 8 and 9 October;
+- no tick plan and no lease after 08:00: a refused tick writes neither;
+- no expected-target ledger row: the only rows for the day are the 14 from 03:00;
+- no movement in the day's counters: still 22 attempts reserved and 2 child executions.
 
-**Dispatcher `ms-dispatch-cfw4f`**, run id `20261009T030219Z-ms-dispatch-cfw4f`.
-**Created by `ms-scheduler`**, not by a person. One attempt, exit 0.
+One thing they **did** write, and it should not be called "no data change": every
+dispatcher run, refused or not, lands its own two run-log batches (started, finished).
+That is operational record, not source data. It is what makes the refusals auditable.
 
-- Tick `2026-10-09T03:00:00Z`. The control record was accepted.
-- Schedule `s9939a2accd9a17c152bc` reused (not regenerated). 1 partition read.
-- Expected targets 14; dispositions `planned` 14. Only Wikimedia was due; no other
-  source exists in the configuration or was planned.
-- One work order, one child started: `ms-wikimedia`. Executions counted today: 1.
+**Safety impact: none.** The control expiry was the barrier, and it held for twelve
+consecutive ticks with nobody present. **Operational criterion: failed**, by five
+executions, entirely through late cleanup. The scheduler has no stop of its own.
 
-**Work order `88c3319704fe9da52b41d759f1c38e3d`**: Wikimedia pageviews, slot
-2026-10-07, `window_days` 4, **14 targets, `max_requests` 22**, expiring 03:50, not a
-probe. The day's counter shows 22 attempts reserved for Wikimedia, which is the whole
-of the day's cap.
+## The two working ticks
 
-**Ledger.** One batch for the tick with 14 rows: tier 4, `due_at` 03:00, disposition
-`planned`, all carrying that order id. Exactly one lease exists for the tick, so a
-repeated delivery would have done nothing.
+**03:00.** Tick `2026-10-09T03:00:00Z`; schedule `s9939a2accd9a17c152bc` reused; 1
+partition read; 14 targets planned; work order `88c3319704fe9da52b41d759f1c38e3d` (14
+targets, `max_requests` 22, slot 2026-10-07, 4-day window). The collector sent **14
+physical outbound attempts of a budget of 22, with 0 retries**, collected 14 of 14,
+failed 0, deferred 0 by the budget, filled no history, and landed 56 rows. Receipt
+`succeeded`.
 
-**Collector `ms-wikimedia-s9gg8`**, run id `20261009T030433Z-ms-wikimedia-s9gg8`.
-Created by `ms-dispatch`. One attempt, exit 0.
+**04:00.** The dispatcher folded that receipt (health: last success 03:04:38, breaker
+closed, nothing pending), planned nothing, issued no order, and started exactly
+`ms-warehouse`. Child executions counted for the day: 2 of the 3 allowed.
 
-- **Outbound attempts 14, of a budget of 22. Retries 0.** No source error.
-- Targets intended 14, attempted 14, collected 14, failed 0, deferred by the budget 0,
-  skipped 0.
-- Window 4 days; history filled 0; no 90-day refetch. 56 rows landed (14 articles by 4
-  days, ending 2026-10-07). 14 completion markers for the slot; bootstrap markers still
-  14.
-- Receipt: `succeeded`, 14 requests, budget 22, 0 retries, completed 03:04:38. This is
-  the first receipt written with the attempt fields, and the first run of the
-  request-budget image in the cloud.
+**Warehouse `ms-warehouse-d726r`.** 8 batches loaded and 11 already loaded, 0
+incomplete, 76 rows (56 observations, 14 ledger rows, 6 run-log rows). Selector `daily`.
+No late data (`rebuilt_from` empty, no `late_data_loaded` event, pending-rebuild record
+empty), no full refresh. dbt 1.11.15: **PASS=28, WARN=0, ERROR=0, SKIP=0**. Each new batch has a load receipt (19 receipts in all, 8 from this run), so
+each was loaded exactly once.
 
-No WARNING or ERROR log entry from any job. No Secret Manager access.
+**05:00 to 08:00.** Four dispatchers, each with nothing due, no order and no child.
 
-| | `ms-dispatch-cfw4f` | `ms-wikimedia-s9gg8` |
-|---|---|---|
-| Created | 03:00:01 | 03:02:21 |
-| First application log | 03:02:19 | 03:04:33 |
-| Completed | 03:02:29 | 03:04:42 |
+## Source and request budget
 
-## State at 03:05
-
-- **Executions: 16** (14 before, plus one dispatcher and one collector). The ceiling for
-  the checkpoint is 29.
-- Scheduler ENABLED, last attempt 03:00:00, next 04:00.
-- `warehouse.json`: a warehouse run is owed since 03:00, so the 04:00 tick should start
-  `ms-warehouse`.
-- Health still shows the order as pending; the 04:00 tick folds the receipt in.
-
-## What should happen with nobody watching
-
-| Time | Expected |
+| | Whole UTC day |
 |---|---|
-| 04:00 | Dispatcher folds the receipt and starts `ms-warehouse` (second of three permitted child executions) |
-| 05:00 to 08:00 | Hourly dispatcher ticks with nothing due; no child started |
-| 08:30 | The control record expires |
-| 09:00 onward | Each hourly dispatcher refuses with `control_expired`; no source request and no child job is possible |
+| Wikimedia physical outbound attempts | **14** (limit 22) |
+| Retries | 0 |
+| Targets attempted / collected | 14 / 14 |
+| Source errors, 429s | 0, 0 |
+| Request-budget exhaustion | none |
+| Wikimedia calls after the 03:00 collection | 0 (no collector ran again) |
+| Steam, IGDB, catalogue, sampled-source calls | 0 (those jobs did not run) |
+| Secret Manager accesses | 0 |
 
-After 08:30 the source is safe whatever else happens. The dispatcher still runs once an
-hour until the scheduler is paused, which is why cleanup should not be left late.
+The runtime audit log for the day shows BigQuery calls by `ms-warehouse` only. There is
+no packet-level egress logging; the source figures rest on the collector's own count of
+transport sends and on which jobs ran.
 
-## Morning cleanup (not yet done; needs the owner)
+## Data
 
-Recommended by about 13:00 UTC (08:00 CDT) or earlier. By 13:00 the execution count
-would be about 27, under the ceiling of 29; each further hour adds one.
+| | Before | After | Change |
+|---|---|---|---|
+| `ms_raw.period_observations` | 1,316 | 1,372 | +56 |
+| `ms_staging.stg_period_observations` | 1,316 | 1,372 | +56 |
+| `ms_ops.expected_targets` | 14 | 28 | +14 |
+| `ms_ops.collection_runs` | 12 | 20 | +8 |
 
-1. Verify the 04:00 warehouse tick.
-2. Verify the control record expired at 08:30.
-3. Verify at least the 09:00 dispatcher refused with `control_expired`.
-4. Pause at once:
-   `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc`
-5. Read back and require `PAUSED`:
-   `gcloud scheduler jobs describe ms-dispatch-15m --location=us-central1 --project=metaspike-prod-kc --format='value(state)'`
-6. Write the control record with `enabled: false`, on its generation.
-7. Audit the whole soak.
-8. Make a new infrastructure-only reconciliation plan with `scheduler_paused=true`
-   (the repository variable is already `true`) and `reuse_deployed_image`.
-9. Require that it only returns the scheduler to paused and disables
-   `dispatcher_silent`.
-10. Apply it only after review.
+- The new batch is 14 articles by 4 days, 2026-10-04 to 2026-10-07: no 90-day refetch.
+  The earlier two batches are intact.
+- Period range 2026-07-08 to 2026-10-07; 1,190 rows before 1 October: no truncation.
+- No exact duplicate keys; no duplicate within a run; no negative, null or future
+  values. 56 periods now have more than one version (the overlap, by design) and none
+  was revised.
+- The ledger rows for the day all belong to the 03:00 tick, disposition `planned`,
+  carrying the day's order id.
+- **Not loaded:** the run logs of the sixteen dispatchers from 05:00 to 20:00 (32 rows)
+  are landed and waiting. The next warehouse run loads them if it happens within three
+  days; later than that needs the job's existing wider load window.
+- Dispatcher state: backlog empty; the order pointer names the 03:00 order, whose
+  receipt exists; no pending receipt; no warehouse run owed.
 
-Note for step 4 onward: once the scheduler is paused, the silence alert stays enabled
-until step 10 and will fire again about three hours after the last successful
-dispatcher.
+BigQuery for the day, all from the one warehouse run: 70 jobs (46 top level), 247,666
+bytes processed, **230,686,720 bytes (about 220 MiB) billed**, 59,775 slot-ms, no
+error. Against the 10,240 MiB daily limit that is about 2 percent.
 
-## On anything unexpected
+Storage now: landing 102 objects (637,261 bytes); operations 106 objects (70,269 bytes).
 
-Pause the scheduler with the command above, confirm `PAUSED`, disable the control
-record, retry nothing by hand, keep the evidence, and report blocked.
+## Alerts
+
+- **Dispatcher silence:** opened 02:44:29, the moment the apply enabled it, and
+  **closed by itself at 03:07:05** after the first dispatcher succeeded. Solely the
+  start-up artifact.
+- No other incident during the soak: no job-failure, warehouse-failure, rate-limit,
+  execution-volume, storage or parity incident. (The only other incident on record is
+  the S4 synthetic one from 7 October, long closed.)
+- Completed executions for the day by the monitoring metric: 22 at the time of reading,
+  against that policy's threshold of 60.
+- The only WARNING entries from any job are the twelve `tick_refused` lines. No ERROR.
+- All 8 policies are enabled, `dispatcher_silent` included. It was not altered by hand
+  and will fire at about 23:02 UTC unless reconciled first (top of this file).
+
+## Security and infrastructure
+
+- All seven jobs at generation 6 on
+  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`, every
+  `METASPIKE_IMAGE` agreeing (checked with the resolving script).
+- 0 secret versions; 0 user-managed keys; WIF provider ACTIVE and unchanged.
+- No difference in IAM, dataset access, bucket IAM or secrets against the pre-soak
+  snapshot; the differences are the alert policy's enabled flag and the row metadata of
+  the three tables that received data.
+- BigQuery project daily query limit 10,240 MiB; per-user limit untouched.
+- Scheduler cron `0 * * * *`, time zone `Etc/UTC`.
+- Prod state serial 10. Repository variable `SCHEDULER_PAUSED` = `true`, as it has been
+  since the plan was made.
+
+## Reconciliation plan (NOT APPLIED)
+
+| | |
+|---|---|
+| Run | `37989297604`, `operation = plan`, `reuse_deployed_image = true` |
+| Head commit | `a4e9e99c8392d1d30af4e81d0e8265f9b009ade2` |
+| Image planned with | `sha256:a8680b2b…c754`, resolved from the jobs; nothing built or pushed |
+| Plan SHA-256 | `74b80a4212f4fa04c15a310b4d4c5ef421b762386f3738dda30e80673ffe1de6` |
+| Artifact | `tfplan`, expires 2026-10-12T20:56:59Z |
+| Counts | **0 add, 1 change, 0 destroy, 0 replace** |
+
+```
+# google_monitoring_alert_policy.dispatcher_silent will be updated in-place
+  ~ enabled = true -> false
+    (8 unchanged attributes and 1 unchanged block)
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+```
+
+Terraform refreshed all 91 resources, saw the scheduler already paused, and proposes no
+scheduler change. No image, job, IAM, WIF, quota, secret, dataset, table, bucket, cron,
+time-zone, identity, retry or other alert change. After the plan: scheduler PAUSED,
+state serial still 10, 34 executions, control disabled.
+
+## Recommendation (the ruling is ChatGPT's)
+
+Accept the soak's **safety and function**: collection, warehouse, quiet ticks, expiry
+and twelve unattended refusals all behaved as designed, inside every source and child
+limit. Record the **execution ceiling as failed**, by five fail-closed dispatchers, with
+cause "cleanup performed about eight hours late". Before any longer soak, close the gap
+it exposes: nothing stops the scheduler when a soak's control record expires. Options
+are an operator alarm tied to `armed_until`, or having the dispatcher pause its own
+trigger on expiry (which would need a narrow new permission and its own review).
 
 ## Warnings
 
-1. **The silence alert fired at launch** (top of this file). Expect one alert email
-   from about 02:44, and a recovery when it closes.
-2. **The scheduler runs hourly until paused by hand.** Nothing pauses it automatically.
-3. **The whole day's request budget is already reserved** (22 of 22). If the 03:00
-   collection had needed to be redone today, the dispatcher would have had no attempts
-   to give; that is the conservative reservation working as designed.
-4. A background wait from this session timed out and ended by itself; it performed no
-   cloud action. Nothing local is running.
-5. Still open from earlier: the deferred freshness alert; the missed-tick review before
+1. **The silence alert will fire at about 23:02 UTC** unless the reconciliation plan is
+   applied first.
+2. **32 run-log rows are landed and unloaded**, with a three-day routine load window.
+3. The reconciliation plan is valid only while prod state stays at serial 10.
+4. Each refused dispatcher still costs an execution and two small landed objects.
+5. Start-up delay per execution remains one to four minutes, unexplained in billing
+   terms; the cost model is for C2-E.
+6. Still open from earlier: the deferred freshness alert; the missed-tick review before
    any sampled source; the branch-protection decision before any secret-backed source;
    local Terraform one patch behind CI.
 
 ## Exact next approval required
 
-The C2-D completion step, when the owner returns: the cleanup sequence above, the soak
-audit, and review of the reconciliation plan before it is applied. C2-E has not begun.
+1. A ruling on C2-D: accepted, accepted with the ceiling recorded as failed, or failed.
+2. Approval to apply the reconciliation plan by run id and hash: run `37989297604`,
+   SHA-256 `74b80a4212f4fa04c15a310b4d4c5ef421b762386f3738dda30e80673ffe1de6`, expected
+   0 add, 1 change, 0 destroy.
+
+STOP. The reconciliation plan is not applied. C2-E has not begun.
