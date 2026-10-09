@@ -713,6 +713,13 @@ carried by [phase4-c2-plan.md](phase4-c2-plan.md).
     again.
 18. **Outbound request budgets (Part C2-C.1).** The image that enforces request budgets
     on physical attempts must be deployed before C2-D, the first unattended soak.
+19. **Stopping the scheduler when a soak expires (before C2-F).** In the first
+    unattended soak the control record expired on time and the scheduler kept starting
+    the dispatcher every hour until a person paused it, twelve refused runs later and
+    five executions over the checkpoint's ceiling. Expiry stops source work; it does
+    not stop the scheduler. No longer soak may start until a reviewed, bounded,
+    least-privilege way to end those executions exists that does not depend on the
+    owner's machine. See "C2-D closeout" in [phase4-c2-plan.md](phase4-c2-plan.md).
 
 Part B added these, which are gates for the same reason:
 

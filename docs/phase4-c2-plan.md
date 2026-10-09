@@ -870,3 +870,51 @@ figures in that section are unchanged in kind and were not re-derived.
 This gates C2-D. The soak's own request cap, and so whether it carries retry room, is
 chosen when its control record is reviewed.
 
+## 26. C2-D closeout: functional pass, execution ceiling failed
+
+The first unattended soak ran on 2026-10-09. The ruling on it is two results, and they
+are kept as two. It is not a clean pass and must not be described later as one.
+
+| | Result |
+|---|---|
+| Source safety, fail-closed expiry, collection, warehouse, request budget, security, unattended behaviour | **PASS** |
+| Execution-count ceiling | **FAIL, exceeded by five** |
+
+**What happened.** The scheduler fired by itself every hour from 03:00 UTC. The 03:00
+tick collected 14 articles with 14 outbound attempts of a budget of 22 and no retry,
+landing 56 rows. The 04:00 tick started the warehouse, which loaded 8 batches (76 rows)
+and passed dbt with 28 of 28. The 05:00 to 08:00 ticks had nothing due. The control
+record expired at 08:30.
+
+**The ceiling.** The checkpoint allowed 15 new executions on a baseline of 14, a total
+of 29. The actual total is 34. Cleanup was recommended by about 13:00 UTC and happened
+at 20:43, roughly eight hours late, and the hourly scheduler went on starting the
+dispatcher after the control record had expired. The five executions beyond the ceiling
+are the dispatchers of 16:00, 17:00, 18:00, 19:00 and 20:00.
+
+**Impact.** None on any source or child job. Twelve consecutive dispatchers, 09:00
+through 20:00, refused with `control_expired`: no child started, no source request, no
+work order, no ledger row, no movement in the day's budget. Each did land its own
+run-log record, which is how the refusals are known.
+
+**The lesson.** A control record's expiry stops source work. It does not stop the
+scheduler. An unattended soak therefore keeps spending one dispatcher execution an hour
+until a person pauses it.
+
+**Hard gate before C2-F.** A longer unattended soak may not start until there is a
+reviewed, bounded way to prevent indefinite hourly dispatcher executions after the
+control record expires. No solution is chosen here. Whatever is chosen must keep source
+safety fail-closed, must not depend on the owner's machine, must leave no indefinite
+scheduler execution after the finite soak window, must be least-privilege (no broad
+Cloud Scheduler administration), deterministic, auditable and cheap.
+
+C2-E, the review of what the soak measured, may proceed once Terraform is reconciled
+with the paused scheduler. C2-F is blocked on the gate above.
+
+**Left pending on purpose.** The run logs of the sixteen dispatchers from 05:00 to
+20:00 (32 rows) are landed and not yet loaded. They are durable operational history.
+They are not to be deleted or rewritten, and no warehouse run is made just for them:
+the next approved warehouse run loads them by the existing mechanism (its routine
+window covers three days of landing folders; a later run needs the wider window the
+job already supports).
+
