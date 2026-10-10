@@ -12,8 +12,15 @@
 # build never silently moves to a different base. The tag is kept for people; the
 # digest is what is used. To refresh: resolve the tag's current digest from the
 # registry, replace it in BOTH stages, rebuild with --pull --no-cache, and rescan.
+#
+# The digest is the trust anchor; the registry is only where the bytes are fetched
+# from. BASE_REGISTRY may name any registry that serves the official image under that
+# digest. CI tries Google's public mirror first and Docker Hub second
+# (.github/scripts/build-image.sh); a plain `docker build` uses Docker Hub.
 
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS build
+ARG BASE_REGISTRY=docker.io/library
+
+FROM ${BASE_REGISTRY}/python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3 AS build
 
 # The uv installer, taken from its official image and pinned the same way as the base:
 # tag for people, multi-architecture index digest for the build.
@@ -39,7 +46,7 @@ COPY warehouse/pyproject.toml warehouse/uv.lock /dbt/
 RUN UV_PROJECT_ENVIRONMENT=/opt/dbt uv sync --project /dbt --locked --no-dev --no-install-project
 
 
-FROM python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
+FROM ${BASE_REGISTRY}/python:3.12-slim-bookworm@sha256:54c85f3c47607a77f32adec749d3c81d1348bf25833671f512b26a9b6d778cb3
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \

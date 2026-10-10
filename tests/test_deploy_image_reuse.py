@@ -198,7 +198,9 @@ def test_the_default_plan_still_builds_scans_and_pushes_a_new_image() -> None:
     for name in ("Build", "Smoke", "Scan before anything is pushed", "Push and record the digest"):
         assert named(name)["if"] == "${{ !inputs.reuse_deployed_image }}", name
     assert "docker push" in named("Push and record the digest")["run"]
-    assert "--pull --no-cache" in named("Build")["run"]
+    assert named("Build")["run"] == ".github/scripts/build-image.sh candidate"
+    script = (REPO / ".github" / "scripts" / "build-image.sh").read_text()
+    assert "docker build --pull --no-cache" in script
     assert named("Scan before anything is pushed")["with"]["exit-code"] == "1"
     choose = named("Choose the image to plan with")
     assert choose["env"]["BUILT"] == "${{ steps.push.outputs.image }}"

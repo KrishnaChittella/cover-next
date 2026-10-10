@@ -128,7 +128,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Build
         if: ${{ !inputs.reuse_deployed_image }}
-        run: docker build --pull --no-cache --tag candidate .
+        run: .github/scripts/build-image.sh candidate
       - name: Smoke
         if: ${{ !inputs.reuse_deployed_image }}
         run: |
@@ -189,15 +189,36 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
+      # A finite soak is four repository variables, all of them or none: the month, the
+      # first and last day, and the day's execution ceiling. Terraform refuses to
+      # unpause without them and refuses them while paused. The schedule mode is never
+      # passed, so this workflow cannot unpause an unbounded schedule.
       - name: Plan
         working-directory: infra/prod
+        env:
+          SOAK_MONTH: ${{ vars.SOAK_MONTH }}
+          SOAK_START_DAY: ${{ vars.SOAK_START_DAY }}
+          SOAK_END_DAY: ${{ vars.SOAK_END_DAY }}
+          SOAK_CEILING: ${{ vars.SOAK_DAILY_EXECUTION_CEILING }}
         run: |
+          soak=()
+          if [ -n "${SOAK_MONTH}${SOAK_START_DAY}${SOAK_END_DAY}${SOAK_CEILING}" ]; then
+            for value in "${SOAK_MONTH}" "${SOAK_START_DAY}" "${SOAK_END_DAY}" "${SOAK_CEILING}"; do
+              [[ "${value}" =~ ^[1-9][0-9]?$ ]] || {
+                echo "::error::a finite soak needs SOAK_MONTH, SOAK_START_DAY, SOAK_END_DAY and SOAK_DAILY_EXECUTION_CEILING, each a whole number"; exit 1; }
+            done
+            soak=(
+              -var "soak_window={month=${SOAK_MONTH},start_day=${SOAK_START_DAY},end_day=${SOAK_END_DAY}}"
+              -var "soak_daily_execution_ceiling=${SOAK_CEILING}"
+            )
+          fi
           terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
           terraform plan -input=false -out=tfplan \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var "image=${{ steps.image.outputs.image }}" \
             -var "notification_channel=${{ vars.GCP_NOTIFICATION_CHANNEL }}" \
-            -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}"
+            -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}" \
+            "${soak[@]}"
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
           sha256sum tfplan | cut -d' ' -f1 > tfplan.sha256

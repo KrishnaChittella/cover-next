@@ -101,10 +101,12 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
-      # --pull and --no-cache: the base is pinned by digest, and the security-update
-      # layer must really run, so nothing is ever taken from a stale local cache.
+      # The script fetches the digest-pinned base from Google's public mirror, or from
+      # Docker Hub if the mirror does not serve that exact digest, proves the bytes are
+      # the pinned ones, and builds with --pull --no-cache so the security-update layer
+      # really runs and nothing is taken from a stale local cache.
       - name: Build (not pushed)
-        run: docker build --pull --no-cache --tag metaspike:ci .
+        run: .github/scripts/build-image.sh metaspike:ci
       - name: The image runs and is not root
         run: |
           docker run --rm metaspike:ci --help

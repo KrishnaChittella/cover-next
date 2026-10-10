@@ -25,7 +25,23 @@ locals {
       description = "A load or dbt run failed."
       filter      = "jsonPayload.event=\"warehouse_failed\""
     }
+    # Written by Cloud Scheduler, not by a job: the tick could not start the dispatcher.
+    "ms_scheduler_attempt_failed" = {
+      description   = "A scheduler attempt to start the dispatcher ended in an error."
+      resource_type = "cloud_scheduler_job"
+      filter        = "severity>=ERROR"
+    }
   }
+
+  # The absence alert only makes sense for a schedule with no end. A finite soak has a
+  # first tick and a last one, and silence before the one and after the other is the
+  # plan, not a fault.
+  silence_alert_on = !var.scheduler_paused && var.schedule_mode == "steady_state"
+
+  # A cost guard. Steady state: the planned day is about 26 executions and the
+  # dispatcher's own ceiling is 120, so more than 60 is not the plan. A finite soak
+  # states its own, lower figure, so that passing the soak's ceiling is seen.
+  daily_execution_threshold = local.finite_soak && var.soak_daily_execution_ceiling != null ? var.soak_daily_execution_ceiling : 60
 }
 
 resource "google_logging_metric" "counter" {
@@ -34,7 +50,7 @@ resource "google_logging_metric" "counter" {
   project     = var.project_id
   name        = each.key
   description = each.value.description
-  filter      = "resource.type=\"cloud_run_job\" AND ${each.value.filter}"
+  filter      = "resource.type=\"${lookup(each.value, "resource_type", "cloud_run_job")}\" AND ${each.value.filter}"
 
   metric_descriptor {
     metric_kind = "DELTA"
@@ -45,19 +61,67 @@ resource "google_logging_metric" "counter" {
 
 # Health that does not depend on any payload: Cloud Run's own execution counts exist
 # even when our code never starts.
-# Three missed hourly ticks. Enabled only while the scheduler runs: while it is paused
-# there is nothing to be silent about.
+# Three missed hourly ticks. Enabled only while an unbounded schedule runs: while the
+# scheduler is paused there is nothing to be silent about, and a finite soak is
+# watched by the two failure alerts below instead (see local.silence_alert_on).
 resource "google_monitoring_alert_policy" "dispatcher_silent" {
   project      = var.project_id
   display_name = "MetaSpike: dispatcher has not succeeded for 3 hours"
   combiner     = "OR"
-  enabled      = !var.scheduler_paused
+  enabled      = local.silence_alert_on
 
   conditions {
     display_name = "no successful ms-dispatch execution"
     condition_absent {
       filter   = "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"ms-dispatch\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result=\"succeeded\""
       duration = "10800s"
+      aggregations {
+        alignment_period   = "3600s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  notification_channels = [var.notification_channel]
+}
+
+# The two signals that stand in for silence, and are true failures in any mode: a tick
+# that could not start the dispatcher, and a dispatcher that started and failed. Neither
+# can fire before a soak's first tick or after its last, because nothing runs then.
+resource "google_monitoring_alert_policy" "scheduler_delivery_failed" {
+  project      = var.project_id
+  display_name = "MetaSpike: the scheduler could not start the dispatcher"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "any failed scheduler attempt in an hour"
+    condition_threshold {
+      filter          = "resource.type=\"cloud_scheduler_job\" AND metric.type=\"logging.googleapis.com/user/${google_logging_metric.counter["ms_scheduler_attempt_failed"].name}\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period   = "3600s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+    }
+  }
+
+  notification_channels = [var.notification_channel]
+}
+
+resource "google_monitoring_alert_policy" "dispatcher_failed" {
+  project      = var.project_id
+  display_name = "MetaSpike: a dispatcher execution failed"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "any failed ms-dispatch execution in an hour"
+    condition_threshold {
+      filter          = "resource.type=\"cloud_run_job\" AND resource.labels.job_name=\"ms-dispatch\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\" AND metric.labels.result=\"failed\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
       aggregations {
         alignment_period   = "3600s"
         per_series_aligner = "ALIGN_SUM"
@@ -184,19 +248,18 @@ resource "google_monitoring_alert_policy" "source_rate_limited" {
   notification_channels = [var.notification_channel]
 }
 
-# A cost guard. The planned day is about 26 executions; the dispatcher's own ceiling
-# is 120. More than 60 in a day, over every job together, is not the plan.
+# A cost guard over every job together: see local.daily_execution_threshold.
 resource "google_monitoring_alert_policy" "execution_volume" {
   project      = var.project_id
   display_name = "MetaSpike: unusually many job executions in a day"
   combiner     = "OR"
 
   conditions {
-    display_name = "more than 60 completed executions in 24 hours"
+    display_name = "more than ${local.daily_execution_threshold} completed executions in 24 hours"
     condition_threshold {
       filter          = "resource.type=\"cloud_run_job\" AND metric.type=\"run.googleapis.com/job/completed_execution_count\""
       comparison      = "COMPARISON_GT"
-      threshold_value = 60
+      threshold_value = local.daily_execution_threshold
       duration        = "0s"
       aggregations {
         alignment_period     = "86400s"

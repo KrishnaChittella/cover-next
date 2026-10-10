@@ -267,6 +267,11 @@ not settled, and cost is projected under three readings, deciding on the most
 expensive. See section 27 of `docs/phase4-c2-plan.md`. A billing export would settle it
 and has not been set up.
 
+**Ruling on that review.** Jobs are billed for the lifetime of an instance once its
+container has started, with a minimum of one minute. Time before the container starts
+is not billed; it is a reliability measurement. Projections use the one-minute minimum.
+See section 28 of `docs/phase4-c2-plan.md`.
+
 ## Budget
 
 One budget, $20 a month, with email alerts at 25, 50, 75 and 100 percent of actual
@@ -728,6 +733,28 @@ carried by [phase4-c2-plan.md](phase4-c2-plan.md).
     not stop the scheduler. No longer soak may start until a reviewed, bounded,
     least-privilege way to end those executions exists that does not depend on the
     owner's machine. See "C2-D closeout" in [phase4-c2-plan.md](phase4-c2-plan.md).
+    **Built in C2-F preparation, not yet applied:** a finite schedule. See below.
+
+### Running a finite soak
+
+The scheduler can only be unpaused through the deploy workflow with a window of days:
+
+1. Set the repository variables `SOAK_MONTH`, `SOAK_START_DAY`, `SOAK_END_DAY` and
+   `SOAK_DAILY_EXECUTION_CEILING`, and `SCHEDULER_PAUSED` to `false`.
+2. Make an infrastructure-only plan. Read the cron on the scheduler (`0 * 12-18 10 *`
+   means every hour of 12 to 18 October, UTC) and the outputs `dispatch_schedule` and
+   `soak_scheduled_ticks`.
+3. Apply the reviewed plan. Arm the control record with an `armed_until` in the same
+   year.
+4. After the window: set `SCHEDULER_PAUSED` back to `true`, delete the four soak
+   variables, plan, review and apply. Terraform refuses a paused scheduler that still
+   carries a window.
+
+The cron has no year. The window stops the hourly ticks at the end of its last day
+and nothing fires for the rest of that year, but the same dates are eligible again a
+year later. Step 4 is what removes it; the control record's `armed_until` is what
+fails closed in the meantime. It is not a one-shot schedule and must not be described
+as one. A window must lie inside one calendar month.
 
 Part B added these, which are gates for the same reason:
 

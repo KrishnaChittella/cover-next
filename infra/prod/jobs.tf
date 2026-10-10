@@ -198,14 +198,58 @@ resource "google_cloud_run_v2_job_iam_member" "dispatch_runs" {
 # The job keeps the name it was created with. Renaming it would destroy and recreate
 # the one trigger in the system, which is not worth a tidier name.
 
+locals {
+  finite_soak = !var.scheduler_paused && var.schedule_mode == "finite_soak"
+
+  soak_days = var.soak_window == null ? "" : (
+    var.soak_window.start_day == var.soak_window.end_day
+    ? tostring(var.soak_window.start_day)
+    : "${var.soak_window.start_day}-${var.soak_window.end_day}"
+  )
+
+  # Hourly on the named days of the named month while a finite soak runs; plain hourly
+  # otherwise. Paused, the schedule is always the plain one.
+  dispatch_schedule = (
+    local.finite_soak && var.soak_window != null
+    ? "0 * ${local.soak_days} ${var.soak_window.month} *"
+    : "0 * * * *"
+  )
+
+  # Known when the plan is reviewed: 24 ticks for each day of the window.
+  soak_scheduled_ticks = (
+    local.finite_soak && var.soak_window != null
+    ? 24 * (var.soak_window.end_day - var.soak_window.start_day + 1)
+    : null
+  )
+}
+
 resource "google_cloud_scheduler_job" "tick" {
   project     = var.project_id
   region      = var.region
   name        = "ms-dispatch-15m"
   description = "Starts the dispatcher every hour. Pause to stop all collection."
-  schedule    = "0 * * * *"
+  schedule    = local.dispatch_schedule
   time_zone   = "Etc/UTC"
   paused      = var.scheduler_paused
+
+  lifecycle {
+    precondition {
+      condition     = !(local.finite_soak && var.soak_window == null)
+      error_message = "Refused: unpausing in finite_soak mode needs soak_window. An unbounded hourly schedule would run until someone paused it."
+    }
+    precondition {
+      condition     = !(local.finite_soak && var.soak_daily_execution_ceiling == null)
+      error_message = "Refused: a finite soak needs soak_daily_execution_ceiling, so the volume alert can see the soak's ceiling."
+    }
+    precondition {
+      condition     = !(var.scheduler_paused && (var.soak_window != null || var.soak_daily_execution_ceiling != null))
+      error_message = "Refused: a paused scheduler carries no soak window. Reconciliation after a soak takes the window out."
+    }
+    precondition {
+      condition     = !(var.schedule_mode == "steady_state" && (var.soak_window != null || var.soak_daily_execution_ceiling != null))
+      error_message = "Refused: steady_state is the unbounded schedule and takes no soak window."
+    }
+  }
 
   attempt_deadline = "180s"
 

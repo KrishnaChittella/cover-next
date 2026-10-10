@@ -1051,6 +1051,13 @@ month. This needs reading on the pricing page before C2-F, not assuming.
 
 ### Projections
 
+> **Superseded for billing on review (see section 28).** The ruling on this review is
+> that Cloud Run jobs are billed for the lifetime of an instance once the container
+> has started, with a minimum of one minute. Time before the container starts is not
+> billed. The approved projection is therefore the **middle** column below; the
+> "conservative" column is kept as it was written and is not the approved figure. The
+> start-up measurements stand, as a reliability measurement.
+
 Three billing readings are carried, because the evidence does not choose between them:
 **low**, container time only; **middle**, a one-minute minimum; **conservative**, the
 whole execution lifetime, taken as the work plus 208 s (the p90 start-up over all 34
@@ -1249,3 +1256,152 @@ All must be true, with evidence, before a seven-day soak is launched.
 
 **C2-F: BLOCKED** pending the expiry-stop implementation (gates 1 to 3) and the
 monitoring adjustment (gate 8). No launch time is chosen.
+
+## 28. C2-F preparation: rulings on the review, and the hardening built for them
+
+The C2-E review was approved with two corrections and two choices. This section
+records them and what was built. Nothing here was applied to production, nothing was
+unpaused or armed, and no source was called. C2-F has not started and has no dates.
+
+### Billing: the approved reading
+
+Cloud Run jobs are billed at the instance-based rate for the lifetime of an instance
+once its container has started, with a minimum of one minute. So:
+
+- the time between an execution being created and its container starting (37 to 245 s
+  measured, median 134) is **not billed**. It stays in section 27 as a reliability
+  measurement: it is how late a tick's work begins;
+- an execution whose container runs 5 to 18 s is billed 60 s;
+- the approved model is section 27's middle column. The conservative column, which
+  added the start-up time, is not the approved projection.
+
+Alert policies: Google's per-condition charge begins no sooner than 2027-09-01. It is
+not in any current projection. It is a later operational consideration: with ten
+single-condition policies it will be of the order of a dollar a month when it starts.
+
+A billing export is not a gate for C2-F and was not created.
+
+### Approved projections
+
+List prices, one-minute minimum, no allowances unless stated.
+
+| Item, per month, 14 articles, hourly tick, one build a day | Measured | Billed as | Cost |
+|---|---|---|---|
+| Dispatcher, 720 executions | 9 s container time each | 60 s each, 43,200 vCPU-s | $0.80 |
+| Wikimedia collector, 30 | 9.5 s | 60 s each, 1,800 vCPU-s | $0.03 |
+| Warehouse, 30 | 119 s | 119 s each, 3,600 vCPU-s | $0.07 |
+| Pre-container provisioning | 134 s median per execution | not billed | $0 |
+| BigQuery queries | 220 MiB a day | 6.4 GiB | $0.04 |
+| Cloud Scheduler | 1 job | 1 job | $0.10 |
+| BigQuery and Cloud Storage data | megabytes | | under $0.01 |
+| Artifact Registry | at most 2.1 GB | 1.6 GB over the allowance | $0.16 |
+| **Total** | | | **about $1.20** |
+
+With the billing account's allowances the same month is about $0.16, the registry.
+
+| Configuration | Approved projection | Verdict |
+|---|---|---|
+| A. 14 articles, hourly, one build a day, per month | about $1.20 | below the preferred range |
+| B. Seven-day C2-F soak, 182 executions before any child cap | about $0.30 | negligible |
+| C. 1,000 catalogued, 300 monitored, per month | $4.28 | below the preferred range |
+| C. 5,000 catalogued | $4.69 | below the preferred range |
+| C. 10,000 catalogued | $5.76 | within the preferred range |
+| C. 50,000 catalogued | $11.55 | acceptable with scrutiny |
+
+The C rows are the same quiet-day simulations as before, with the same stand-in
+sampled source that is not approved; they are planning figures, subject to real
+measurements from more than one source, and they approve nothing. No scope was widened
+and no cadence changed. $20 a month remains a hard boundary.
+
+### The expiry stop: a finite schedule
+
+Built as approved: the scheduler's cron expression names the soak's days.
+
+- `soak_window = { month, start_day, end_day }` produces `0 * <start>-<end> <month> *`
+  in `Etc/UTC`: every hour of each named day, and nothing else. A single day produces
+  `0 * <day> <month> *`.
+- `schedule_mode` is `finite_soak` by default. In that mode Terraform refuses to
+  unpause without a window, and refuses a window while paused, so a paused scheduler
+  always carries the plain `0 * * * *`. `steady_state` is the unbounded schedule; the
+  deploy workflow never passes it, so reaching it takes a reviewed change to the
+  workflow.
+- The window must lie inside one calendar month: an end before the start, a day past
+  the month's end and a month that does not exist are all refused. February is 28 days
+  in every year, so a window never depends on the year.
+- The deploy workflow reads four repository variables, all or none: `SOAK_MONTH`,
+  `SOAK_START_DAY`, `SOAK_END_DAY`, `SOAK_DAILY_EXECUTION_CEILING`.
+- The plan shows the cron on the scheduler resource and as the output
+  `dispatch_schedule`, and the number of ticks as `soak_scheduled_ticks`.
+- No permission, identity or runtime code was added. The dispatcher cannot pause
+  anything. The control record's `armed_until` is untouched and remains an independent
+  fail-closed barrier.
+
+**The schedule is not one-shot.** Cloud Scheduler's cron has no year, and Cloud
+Scheduler has no end date. A window of days in a month is eligible again on the same
+dates the following year. What the window guarantees is that the hourly ticks stop at
+the end of its last day and that nothing fires for the rest of that year: for a
+seven-day window, 358 days of silence. What bounds a soak to its year is, together:
+
+1. `armed_until` in the control record, which carries the year and fails closed;
+2. no scheduler execution in the period after the window, which the tests walk hour by
+   hour for thirty days and then to the recurrence;
+3. the reconciliation after the soak, which sets the scheduler paused and takes the
+   window out, returning it to the normal paused configuration long before the dates
+   come round again. Terraform will not accept a paused scheduler that still carries a
+   window, so the reconciliation cannot leave it behind.
+
+The requirement this meets is: no indefinite hourly executions after the soak window.
+
+**The ceiling.** A window of `d` days holds exactly `24 x d` ticks, each one dispatcher
+execution. The dispatcher starts at most `max_executions_per_day` children in a UTC
+day, a limit the control record sets and the tick enforces. So the soak's ceiling is
+`24 x d + d x max_executions_per_day`: 168 + 7 x 3 = 189 with the cap used in C2-D.
+The final figure is fixed when the C2-F control record is reviewed, not here.
+
+### Monitoring for a finite soak
+
+- **Silence.** The absence alert is now on only for an unpaused, unbounded schedule.
+  For a finite soak it is off: it fired before the first tick and after the last in
+  C2-D, and both were the plan.
+- **What replaces it, in every mode.** Two alerts on true failures: a scheduler
+  attempt that ended in an error (the tick could not start the dispatcher), and any
+  failed dispatcher execution in an hour. Neither can fire before a soak's first tick
+  or after its last, because nothing runs then. The second also closes an older gap:
+  a dispatcher failing once an hour never reached the general "two failures of one job
+  in an hour" alert.
+- **Volume.** A finite soak states `soak_daily_execution_ceiling`, from 24 to 59, and
+  the volume alert uses it in place of 60. Terraform refuses a finite soak without it.
+  It is a daily figure because an alert window is at most 25 hours; the soak's total is
+  bounded by the tick count and the daily child cap. A rolling 24 hours can hold the
+  children of two UTC days, so the value that never fires in a correct soak is
+  `24 + 2 x max_executions_per_day`.
+- What is not alerted on: a scheduler that silently attempts nothing. The post-soak
+  audit compares the dispatcher executions with `soak_scheduled_ticks`, which is exact.
+- No failure alert was weakened or made conditional. There are now ten policies.
+
+### The base image
+
+The Dockerfile takes its base through a build argument for the registry:
+`${BASE_REGISTRY}/python:3.12-slim-bookworm@sha256:54c85f3c…8cb3`. The digest is
+unchanged and is the trust anchor; the registry is only where those bytes come from.
+`.github/scripts/build-image.sh` tries Google's public mirror, then Docker Hub. For
+each it fetches the manifest by digest, checks that the bytes hash to the pinned
+digest, and pulls by digest; it builds from the first that passes, with `--pull
+--no-cache` as before. If neither passes it fails and builds nothing. It refuses a
+Dockerfile whose stages are not all pinned to one digest. There is no credential and no
+secret, and no step of either workflow was removed: build, run, dbt and scan are as
+they were.
+
+### The 32 pending run-log rows
+
+Unchanged and untouched: landed in the folder for 2026-10-09, not loaded, and no
+warehouse run was made for them.
+
+The first approved warehouse execution of C2-F must reach that folder. The loader
+walks today and the days before it, so the setting is
+`METASPIKE_LOAD_DAYS = (UTC date of that run - 2026-10-09) + 1`: 4 on 12 October, 10 on
+18 October, 24 on 1 November. Three, the default, reaches it only until 11 October. It
+is an execution-time setting on one supervised run, made before the scheduler is
+unpaused; the dispatcher's own runs keep the default. The exact value is written into
+the launch instruction once the start date is chosen. Late-data handling then rebuilds
+the models from that day.

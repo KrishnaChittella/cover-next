@@ -258,6 +258,8 @@ def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
     )
     assert set(policies) == {
         "dispatcher_silent",
+        "scheduler_delivery_failed",
+        "dispatcher_failed",
         "job_failures",
         "steam_refused",
         "parity_mismatch",
@@ -273,6 +275,7 @@ def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
         ("parity_mismatch", "ms_baseline_parity_mismatch"),
         ("warehouse_failed", "ms_warehouse_failed"),
         ("source_rate_limited", "ms_source_rate_limited"),
+        ("scheduler_delivery_failed", "ms_scheduler_attempt_failed"),
     ):
         assert f'google_logging_metric.counter["{metric}"].name' in policies[policy], policy
         assert "logging.googleapis.com/user/${google_logging_metric.counter" in policies[policy]
@@ -288,7 +291,7 @@ def test_alerts_on_log_metrics_depend_on_those_metrics() -> None:
         assert "notification_channels = [var.notification_channel]" in body, name
     assert "google_monitoring_notification_channel" not in terraform(PROD)
     # These read Cloud Run's own built-in metric and depend on nothing here.
-    for policy in ("dispatcher_silent", "job_failures", "execution_volume"):
+    for policy in ("dispatcher_silent", "dispatcher_failed", "job_failures", "execution_volume"):
         assert "run.googleapis.com/job/completed_execution_count" in policies[policy]
         assert "google_logging_metric" not in policies[policy]
     assert "time_sleep" not in monitoring and "hashicorp/time" not in terraform(PROD)
@@ -490,7 +493,8 @@ def test_only_the_scheduler_starts_the_dispatcher_and_only_the_dispatcher_starts
     assert 'if name != "ms-dispatch"' in jobs  # the dispatcher cannot start itself
     assert jobs.count("roles/run.invoker") == 2
     assert jobs.count('resource "google_cloud_scheduler_job"') == 1  # ONE trigger
-    assert 'schedule    = "0 * * * *"' in jobs and "paused      = var.scheduler_paused" in jobs
+    assert "schedule    = local.dispatch_schedule" in jobs
+    assert "paused      = var.scheduler_paused" in jobs and jobs.count('"0 * * * *"') == 1
     assert "*/15" not in code(jobs)
     paused = re.search(
         r'variable "scheduler_paused" \{(.*?)\n\}', read(PROD / "variables.tf"), re.S
@@ -686,7 +690,7 @@ def test_pull_request_ci_has_no_cloud_credentials() -> None:
         "terraform fmt -check",
         "terraform validate",
         "pip-audit",
-        "docker build",
+        ".github/scripts/build-image.sh",
     ):
         assert step in ci, step
 
@@ -766,10 +770,13 @@ def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
 
 
 def test_the_image_scan_gate_is_strict_and_builds_are_never_from_a_stale_cache() -> None:
+    script = read(REPO / ".github" / "scripts" / "build-image.sh")
+    assert "docker build --pull --no-cache " in script and script.count("docker build ") == 1
     for name in ("ci.yml", "deploy.yml"):
         text = code(workflow(name))
-        assert "docker build --pull --no-cache " in text, name
-        assert text.count("docker build") == 1
+        # One build per workflow, through the script that fetches the pinned base.
+        assert text.count(".github/scripts/build-image.sh ") == 1, name
+        assert "docker build" not in text, name
         scan = text[text.index("trivy-action") :][:400]
         assert "severity: CRITICAL,HIGH" in scan and 'exit-code: "1"' in scan
         assert "trivyignores" not in text and ".trivyignore" not in text
@@ -835,10 +842,12 @@ def test_deployment_is_two_manual_runs_and_applies_only_a_plan_named_by_hash() -
 
 def test_the_image_is_slim_locked_unprivileged_and_carries_no_credentials() -> None:
     dockerfile = read(REPO / "Dockerfile")
-    assert dockerfile.count("FROM python:3.12-slim-bookworm") == 2
+    assert dockerfile.count("FROM ${BASE_REGISTRY}/python:3.12-slim-bookworm") == 2
     # Both stages use the official base by tag AND immutable digest, and the same one.
     bases = re.findall(
-        r"^FROM (python:3\.12-slim-bookworm@sha256:[0-9a-f]{64})\b", dockerfile, re.M
+        r"^FROM \$\{BASE_REGISTRY\}/(python:3\.12-slim-bookworm@sha256:[0-9a-f]{64})\b",
+        dockerfile,
+        re.M,
     )
     assert len(bases) == 2 and len(set(bases)) == 1
     assert not re.search(r"^FROM (?!.*@sha256:)", dockerfile, re.M)  # no mutable base
@@ -948,7 +957,9 @@ def test_the_scheduler_is_hourly_stays_paused_and_keeps_its_name() -> None:
     jobs = code(read(PROD / "jobs.tf"))
     tick = re.search(r'resource "google_cloud_scheduler_job" "tick" \{(.*?)\n\}', jobs, re.S)
     assert tick
-    assert 'schedule    = "0 * * * *"' in tick.group(1)
+    # Plain hourly unless a finite soak names its days; see tests/test_c2f_finite_soak.py.
+    assert "schedule    = local.dispatch_schedule" in tick.group(1)
+    assert ': "0 * * * *"' in jobs and jobs.count('"0 * * * *"') == 1
     assert 'time_zone   = "Etc/UTC"' in tick.group(1)
     assert "paused      = var.scheduler_paused" in tick.group(1)
     assert 'name        = "ms-dispatch-15m"' in tick.group(1)  # a rename would recreate it
@@ -978,7 +989,9 @@ def test_the_alert_thresholds_are_exactly_the_reviewed_ones() -> None:
     expected = {
         "warehouse_failed": ("0", "3600s"),
         "source_rate_limited": ("2", "3600s"),  # more than two: three or more
-        "execution_volume": ("60", "86400s"),
+        "execution_volume": ("local.daily_execution_threshold", "86400s"),
+        "scheduler_delivery_failed": ("0", "3600s"),
+        "dispatcher_failed": ("0", "3600s"),
         "landing_storage": ("5000000000", "3600s"),
         "job_failures": ("1", "3600s"),
         "steam_refused": ("0", "900s"),
@@ -993,7 +1006,17 @@ def test_the_alert_thresholds_are_exactly_the_reviewed_ones() -> None:
         assert int(setting(policy, "alignment_period").rstrip("s")) <= 90_000, policy
     silent = policies["dispatcher_silent"]
     assert 'duration = "10800s"' in silent and 'alignment_period   = "3600s"' in silent
-    assert "enabled      = !var.scheduler_paused" in silent  # off while the scheduler is paused
+    # Off while the scheduler is paused, and off for a finite soak.
+    assert "enabled      = local.silence_alert_on" in silent
+    assert (
+        'silence_alert_on = !var.scheduler_paused && var.schedule_mode == "steady_state"'
+        in monitoring
+    )
+    # The volume guard is 60 a day unless a finite soak states its own, lower ceiling.
+    assert (
+        "daily_execution_threshold = local.finite_soak && var.soak_daily_execution_ceiling != null"
+        " ? var.soak_daily_execution_ceiling : 60" in monitoring
+    )
     assert "3 hours" in silent and "45 minutes" not in monitoring
     assert [n for n, body in policies.items() if "enabled" in body] == ["dispatcher_silent"]
     assert "storage.googleapis.com/storage/v2/total_bytes" in policies["landing_storage"]

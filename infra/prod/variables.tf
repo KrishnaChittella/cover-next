@@ -35,6 +35,78 @@ variable "scheduler_paused" {
   default     = true
 }
 
+# --- The schedule ---------------------------------------------------------------------
+# Two modes, kept apart. In "finite_soak" (the default) the scheduler can only be
+# unpaused with a window of days named below, so the hourly ticks end by themselves
+# when the window does. "steady_state" is the unbounded hourly schedule; the deploy
+# workflow never passes it, so reaching it takes a reviewed change to the workflow.
+#
+# Cloud Scheduler's cron has no year. A window of days in a month is therefore not a
+# one-shot: it becomes eligible again on the same dates a year later. What bounds a
+# soak to its year is the control record's `armed_until`, and the reconciliation after
+# the soak, which pauses the scheduler and takes the window out again.
+
+variable "schedule_mode" {
+  description = "finite_soak: unpausing needs soak_window. steady_state: unbounded hourly."
+  type        = string
+  default     = "finite_soak"
+
+  validation {
+    condition     = contains(["finite_soak", "steady_state"], var.schedule_mode)
+    error_message = "schedule_mode is finite_soak or steady_state."
+  }
+}
+
+variable "soak_window" {
+  description = "The UTC days of one calendar month on which the hourly tick fires. No year: see above."
+  type = object({
+    month     = number
+    start_day = number
+    end_day   = number
+  })
+  default = null
+
+  validation {
+    condition = var.soak_window == null || try(
+      alltrue([
+        for part in [var.soak_window.month, var.soak_window.start_day, var.soak_window.end_day] :
+        floor(part) == part
+      ]) && var.soak_window.month >= 1 && var.soak_window.month <= 12 && var.soak_window.start_day >= 1,
+      false
+    )
+    error_message = "month is 1 to 12 and the days are whole numbers from 1."
+  }
+
+  validation {
+    condition     = var.soak_window == null || try(var.soak_window.end_day >= var.soak_window.start_day, false)
+    error_message = "The window ends before it starts. A window that wraps into another month is not supported."
+  }
+
+  # February is taken as 28 days in every year, so a window never depends on the year.
+  validation {
+    condition = var.soak_window == null || try(
+      var.soak_window.end_day <= [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][var.soak_window.month - 1],
+      false
+    )
+    error_message = "The window must lie inside one calendar month: end_day is past the month's last day."
+  }
+}
+
+variable "soak_daily_execution_ceiling" {
+  description = "Finite soak only: the most job executions any 24 hours may hold (24 ticks plus the bounded child jobs). Above it the volume alert fires."
+  type        = number
+  default     = null
+
+  validation {
+    condition = var.soak_daily_execution_ceiling == null || try(
+      floor(var.soak_daily_execution_ceiling) == var.soak_daily_execution_ceiling
+      && var.soak_daily_execution_ceiling >= 24 && var.soak_daily_execution_ceiling < 60,
+      false
+    )
+    error_message = "A whole number from 24 (the hourly ticks alone) to 59 (below the steady-state guard of 60)."
+  }
+}
+
 # --- Source secret versions ---------------------------------------------------------
 # A job is given a reference to a source secret only when the EXACT version to use is
 # named here. Unset (the default) means the job has no reference to that secret at
