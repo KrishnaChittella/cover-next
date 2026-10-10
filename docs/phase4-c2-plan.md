@@ -1405,3 +1405,15 @@ is an execution-time setting on one supervised run, made before the scheduler is
 unpaused; the dispatcher's own runs keep the default. The exact value is written into
 the launch instruction once the start date is chosen. Late-data handling then rebuilds
 the models from that day.
+
+### A finding from applying this: a new counter and its alert in one apply
+
+Recorded on 2026-10-10, not fixed. When a log-based metric and an alert policy that
+reads it are created in the same apply, Cloud Monitoring can refuse the policy for a
+short while ("it could take up to 10 minutes to become available") because the
+metric's descriptor has not yet been published. Terraform's ordering is correct; the
+service needs time. It happened once here, creating two of three resources, and the
+third was completed by a second reviewed plan once the descriptor was visible. A fresh
+environment would meet the same race for every such pair. The root has no wait step by
+design. Whether to add a bounded one or to accept a two-step first apply is a later
+infrastructure-hardening decision.
