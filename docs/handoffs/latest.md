@@ -4,170 +4,148 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous checkpoint: **PHASE 4 PART C2-D: CLEANUP AUDITED — REVIEW REQUIRED**
-
-Current checkpoint: **PHASE 4 PART C2-D: RULED FUNCTIONAL PASS / EXECUTION CEILING FAIL —
+Previous checkpoint: **PHASE 4 PART C2-D: RULED FUNCTIONAL PASS / EXECUTION CEILING FAIL —
 RECONCILIATION NOT YET APPLIED**
 
-The ruling is recorded in the permanent documents. **The reconciliation plan has not
-been applied.** Two attempts to apply it stopped before Terraform ran, both for the same
-external reason. Nothing changed live in either attempt. The requested headline
-("CLOSED … RECONCILIATION: APPLIED") would be untrue, so it is not used.
+Current checkpoint: **PHASE 4 PART C2-D: CLOSED — FUNCTIONAL PASS / EXECUTION CEILING FAIL**
 
-The scheduler is paused and the control record is disabled, so the system is safe. What
-is outstanding is one alert policy that is still enabled.
+The reconciliation plan applied on the single authorised retry. Terraform and the live
+system now agree: scheduler paused, silence alert disabled. C2-D is closed under the
+ruling **accepted with documented operational limit failure**. It is not a clean pass
+and is not to be described as one.
 
-**Time-sensitive:** `dispatcher_silent` is still enabled. With the scheduler paused it
-will open an incident and send an email at about **23:02 UTC on 2026-10-09** (three
-hours after the last successful dispatcher, at 20:02), unless the reconciliation is
-applied first. It is harmless.
-
-All times are UTC on 2026-10-09.
-
-## Why the reconciliation is not applied
-
-The deploy workflow runs the full verification before any cloud step, and that
-verification builds the image from scratch. Both apply runs failed in that build, pulling
-the base image from Docker Hub:
-
-`python:3.12-slim-bookworm@sha256:54c85f3c… : 429 Too Many Requests`
-
-| Apply run | Verification | Apply job | Terraform |
-|---|---|---|---|
-| `37991467940` (21:07) | image build failed, 429 | skipped | not started |
-| `37992781735` (21:20) | image build failed, 429 | skipped | not started |
-
-The push run for the previous handoff commit failed the same way at the same time. This
-is Docker Hub's rate limit on anonymous pulls from shared GitHub runner addresses, not a
-change in the repository: application and infrastructure verification passed in both
-runs.
-
-After the first failure I started the same apply once more, having confirmed that
-nothing had changed. That second start was my own judgement: the plan was untouched and
-the apply had never begun. When it failed identically I stopped. No third attempt, no
-new plan, no change to the workflow, and the alert was not altered by hand.
-
-## Pre-apply checks (21:06), all met
-
-Scheduler PAUSED (`0 * * * *`, `Etc/UTC`); control disabled; prod state serial 10;
-`SCHEDULER_PAUSED` = `true`; all seven jobs on `sha256:a8680b2b…c754`; the plan artifact
-present, unexpired (2026-10-12T20:56:59Z) and hashing exactly to
-`74b80a4212f4fa04c15a310b4d4c5ef421b762386f3738dda30e80673ffe1de6`; no infrastructure
-apply since the plan was made.
-
-The plan remains valid: state is still at serial 10.
+## Reconciliation
 
 | | |
 |---|---|
-| Plan run | `37989297604` |
+| Saved plan run | `37989297604` |
 | Plan SHA-256 | `74b80a4212f4fa04c15a310b4d4c5ef421b762386f3738dda30e80673ffe1de6` |
-| Expected | 0 add, 1 change, 0 destroy, 0 replace |
-| The one change | `google_monitoring_alert_policy.dispatcher_silent`: `enabled: true -> false` |
+| Apply run | `38015062742`, 2026-10-10, finished 02:05:24 UTC, success |
+| Result | `Apply complete! Resources: 0 added, 1 changed, 0 destroyed.` |
+| Changed | `google_monitoring_alert_policy.dispatcher_silent`: `enabled: true -> false` |
+| Prod state serial | 10 → **11** (91 managed resources, unchanged in number) |
 
-## State now (21:29)
+This time the image verification passed, so the Docker Hub rate limit that stopped the
+two earlier attempts (`37991467940`, `37992781735`) had cleared. No new plan was made,
+and nothing about the workflow, Terraform or the image was changed.
 
-- **Scheduler:** PAUSED, `0 * * * *`, `Etc/UTC`.
-- **Control record:** disabled, generation `1791578645841911`.
-- **`dispatcher_silent`:** still **enabled**. No incident is open yet.
-- **Prod state serial:** 10 (it would be 11 after the reconciliation).
-- **Executions:** 34. The failed apply runs started none.
-- **Jobs:** all seven on
-  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`.
-- **Secrets and keys:** 0 versions; 0 user-managed keys.
+**Preflight (01:55 UTC), all met:** `main` level with origin and clean; the only changes
+since the plan's commit are three documents; plan run succeeded; artifact present and
+unexpired (2026-10-12T20:56:59Z) and hashing exactly; rendered diff 0 add, 1 change,
+0 destroy with the one expected change; prod state serial 10 with no apply in between;
+scheduler PAUSED, `0 * * * *`, `Etc/UTC`; control disabled at generation
+`1791578645841911`; `SCHEDULER_PAUSED` = `true`; 34 executions; all seven jobs on the
+approved digest; 0 secret versions; 0 keys; quota 10,240 MiB; `dispatcher_silent` still
+enabled.
+
+## Verified after the apply
+
+- **Scheduler:** PAUSED, `0 * * * *`, `Etc/UTC`. Not touched by the plan.
+- **Control record:** disabled, generation `1791578645841911`, unchanged.
+- **Monitoring:** `dispatcher_silent` **disabled**. The other seven policies are
+  identical to before in every field. Still 8 policies.
+- **Cloud Run:** 34 executions; none started by the reconciliation. All seven jobs at
+  generation 6 on
+  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`, every
+  `METASPIKE_IMAGE` agreeing.
+- **Security:** 0 secret versions; 0 Secret Manager access; 0 user-managed keys; no IAM
+  difference; WIF provider ACTIVE.
 - **BigQuery quota:** 10,240 MiB a day.
-- **Repository variable:** `SCHEDULER_PAUSED` = `true`.
-- No source was called.
+- **Sources:** none called. No job has run since the scheduler was paused at 20:43:48
+  UTC on 9 October.
 
-## The ruling, as recorded
+## The silence incident
 
-**PHASE 4 PART C2-D: ACCEPTED WITH DOCUMENTED OPERATIONAL LIMIT FAILURE.** Not a clean
-pass.
+- It opened at **00:07:08 UTC on 2026-10-10**, as expected with the scheduler paused and
+  the policy still enabled. (I had estimated about 23:02; the policy's hourly alignment
+  put it an hour later.) One alert email will have been sent.
+- It was still **open at apply time**, and still listed as open a minute after the
+  policy was disabled. Disabling the policy did not close it immediately.
+- It was not closed or altered by hand. It is an artifact of an intentionally paused
+  scheduler. With the policy disabled it sends nothing further; it should lapse by the
+  platform's own auto-close. Whether it has closed can be read at the next checkpoint.
+- Earlier history: the start-up incident of 9 October (02:44:29 to 03:07:05), closed by
+  itself.
+
+## C2-D: the permanent ruling
+
+**ACCEPTED WITH DOCUMENTED OPERATIONAL LIMIT FAILURE.**
 
 | | Result |
 |---|---|
-| Source safety | PASS |
+| Functional and source safety | PASS |
 | Fail-closed control expiry | PASS |
-| Collection | PASS |
-| Warehouse | PASS |
-| Request budget | PASS |
-| Security | PASS |
-| Unattended behaviour | PASS |
-| Execution-count criterion | **FAIL by 5** |
+| Collection, warehouse, request budget, security, unattended behaviour | PASS |
+| Execution ceiling | **FAIL by 5** |
 
-- Baseline 14; allowed total 29; **actual total 34; exceeded by 5.**
-- The five excess executions are the dispatchers of 16:00, 17:00, 18:00, 19:00 and
-  20:00. Each refused with `control_expired`.
-- Excess source calls 0; excess child jobs 0; excess work orders 0; excess
-  expected-target rows 0; no movement in the source budget.
-- Twelve consecutive expired-control refusals were observed, 09:00 through 20:00, none
-  with any child or source effect.
-- Cause: cleanup happened at 20:43, roughly eight hours after the recommended time,
-  while the hourly scheduler kept starting the dispatcher.
-- Lesson: control expiry stops source work; it does not stop the scheduler.
+- Final executions for C2-D: **34** (baseline 14, ceiling 29).
+- The five beyond the ceiling were fail-closed dispatchers only (16:00 to 20:00 UTC on
+  9 October), each refusing with `control_expired`.
+- Excess child jobs 0; excess source calls 0; excess work orders 0; excess ledger rows
+  0.
+- **Twelve consecutive `control_expired` refusals** were proven, 09:00 through 20:00.
+- Wikimedia outbound attempts **14** (limit 22); retries **0**; 14 of 14 collected.
+- Warehouse: 8 batches, 76 rows, dbt **PASS=28**, WARN 0, ERROR 0.
+- Data: 1,372 observations (2026-07-08 to 2026-10-07), 28 ledger rows, 20 run rows; no
+  duplicates, no truncation.
+- BigQuery for the soak day: about 220 MiB billed, about 2 percent of the daily limit.
+- Cause of the ceiling failure: cleanup about eight hours later than recommended while
+  the hourly scheduler kept starting the dispatcher. Lesson: control expiry stops
+  source work; it does not stop the scheduler.
 
-No repeat of the soak is required. The failure stays on the record.
+Recorded permanently in `docs/phase4-c2-plan.md` section 26 and `docs/phase4-runbook.md`
+hard gate 19.
 
-## Soak figures (unchanged from the audit)
+## Still pending, on purpose
 
-- **Wikimedia:** 14 physical outbound attempts of a limit of 22; 0 retries; 14 targets
-  collected; no source error, no 429, no budget exhaustion; no call after the 03:00
-  collection.
-- **Warehouse (`ms-warehouse-d726r`, 04:00):** 8 batches loaded, 11 already loaded, 76
-  rows; no late data; no full refresh; dbt PASS=28, WARN=0, ERROR=0, SKIP=0.
-- **Data:** `ms_raw.period_observations` 1,372 (+56); staging 1,372; `expected_targets`
-  28 (+14); `collection_runs` 20 (+8). Range 2026-07-08 to 2026-10-07; no duplicates,
-  no truncation, no revision among overlapping periods.
-- **BigQuery:** 70 jobs (46 top level), about 220 MiB billed, 59,775 slot-ms, no error;
-  about 2 percent of the daily limit.
-- **Alerts during the soak:** only the start-up silence incident, opened 02:44:29 and
-  closed by itself at 03:07:05.
-- **Security:** no secret version, no secret access, no key, no IAM or WIF drift.
+**32 landed run-log rows** from the sixteen dispatchers of 05:00 to 20:00 UTC on
+9 October are not loaded. They are durable operational history: not deleted, not
+rewritten, and no warehouse run was made for them. The next approved warehouse run
+loads them by the existing mechanism. The routine load window is three days of landing
+folders, so a run after 11 October needs the wider window the job already supports.
 
-## Pending by design: 32 run-log rows
+## What is and is not permitted next
 
-The run logs of the sixteen dispatchers from 05:00 to 20:00 are landed and not loaded.
-They are durable operational history, left exactly as they are. No warehouse run was
-made for them. The next approved warehouse run loads them by the existing mechanism.
+- **C2-E: permitted.** It is review and analysis of what the soak measured. It has not
+  been started.
+- **C2-F: blocked.** A longer unattended soak may not start until there is a reviewed,
+  bounded way to prevent indefinite hourly dispatcher executions after the control
+  record expires: fail-closed, independent of the owner's machine, least-privilege with
+  no broad Cloud Scheduler administration, deterministic, auditable and cheap. No
+  solution is chosen yet.
 
-## Permanent documentation
+## Open hardening items
 
-Updated in this commit, documents only:
+1. **Deployments depend on an anonymous Docker Hub pull.** Every apply, however small,
+   rebuilds the image in verification first, and a rate limit there blocked a one-line
+   reconciliation twice. Needs its own decision.
+2. The expiry-stop design above (the C2-F gate).
+3. From earlier: the deferred Wikimedia freshness alert; the missed-tick review before
+   any sampled source; the sampled collector not yet wired to a request budget; the
+   branch-protection decision before any secret-backed source; local Terraform one patch
+   behind CI; the Debian 13 base evaluation.
 
-- `docs/phase4-c2-plan.md`, new section 26, "C2-D closeout: functional pass, execution
-  ceiling failed": the two results kept apart, the cause, the impact, the lesson, the
-  twelve refusals, the pending rows.
-- `docs/phase4-runbook.md`, hard gate 19: stopping the scheduler when a soak expires.
+## State summary
 
-## Hard gate before C2-F
+| | |
+|---|---|
+| Scheduler | PAUSED |
+| Control record | DISABLED |
+| `dispatcher_silent` | DISABLED |
+| Prod state serial | 11 |
+| Executions | 34 |
+| Deployed image | `sha256:a8680b2b…c754` on all seven jobs |
+| Secret versions / keys | 0 / 0 |
+| BigQuery daily query quota | 10,240 MiB |
+| Repository variable `SCHEDULER_PAUSED` | `true` |
 
-A longer unattended soak may not start until there is a reviewed, bounded way to prevent
-indefinite hourly dispatcher executions after the control record expires. No solution
-is chosen. It must keep source safety fail-closed; not depend on the owner's machine;
-leave no indefinite scheduler execution after the finite window; be least-privilege,
-with no broad Cloud Scheduler administration; and be deterministic, auditable and cheap.
-
-- **C2-E:** permitted by the ruling **after reconciliation**, which has not happened.
-- **C2-F:** not permitted.
-
-## A second gap this exposed
-
-Any apply, however small, depends on Docker Hub answering an anonymous pull, because
-verification rebuilds the image first. Today that blocked a one-line reconciliation
-twice. It is worth its own decision (for example an authenticated or mirrored pull of
-the pinned base image, or verification that does not rebuild for an infrastructure-only
-apply). Nothing was changed for it here.
+Git: only this handoff file changes in this commit. The portfolio repository was not
+touched.
 
 ## Exact next approval required
 
-One of:
-
-- **Retry the same apply later**, once Docker Hub's limit has cleared: the deploy
-  workflow, `operation = apply`, `plan_run_id = 37989297604`, `plan_sha256 =
-  74b80a4212f4fa04c15a310b4d4c5ef421b762386f3738dda30e80673ffe1de6`, `allow_destroy =
-  false`. Valid while prod state stays at serial 10 and until 2026-10-12T20:56:59Z.
-- **Or accept that the alert fires once** at about 23:02 UTC and apply when convenient.
-
-After it applies: verify state serial 11, the policy disabled, everything else
-unchanged; then C2-D can be marked closed and C2-E may begin on its own approval.
+Approval to begin C2-E (cost and reliability review from the measured soak). Separately,
+whenever it is wanted: the expiry-stop design for the C2-F gate, and the Docker Hub
+dependency.
 
 STOP. C2-E has not begun.
