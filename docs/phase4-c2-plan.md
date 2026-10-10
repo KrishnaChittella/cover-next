@@ -918,3 +918,334 @@ the next approved warehouse run loads them by the existing mechanism (its routin
 window covers three days of landing folders; a later run needs the wider window the
 job already supports).
 
+
+## 27. C2-E: measured cost and reliability review
+
+Read-only review made on 2026-10-10 from the execution records, logs, Scheduler logs,
+BigQuery job statistics and bucket contents left by C1, C2-C and C2-D. Nothing was
+run, changed, unpaused or armed, and no source was called. It replaces the estimates in
+sections 21 and 24; those sections are left as they were written.
+
+C2-D's ruling is unchanged by anything below: functional pass, execution ceiling failed
+by five (34 against 29).
+
+### Where the start-up delay is
+
+Every execution has four clocks: created, execution start, container (task) start, and
+the application's first log line. C2-D, seconds:
+
+| Dispatcher, 18 executions | min | median | p90 | max |
+|---|---|---|---|---|
+| On the hour to created (Scheduler delivery) | 1.1 | 6.7 | 42 | 52.3 |
+| Created to execution start | 9.5 | 16.9 | 20.9 | 51.9 |
+| **Created to container start** | **37.0** | **128.2** | **185.2** | **244.3** |
+| Container start to first log line | 2.1 | 4.0 | 9.9 | 15.0 |
+| First to last log line (the work) | 0.3 | 0.4 | 1.3 | 2.4 |
+| Container start to exit | 5.5 | 8.9 | 12.1 | 18.2 |
+| Created to completed (lifetime) | 77.1 | 140.0 | 194.8 | 264.8 |
+
+| One execution each | Created to container start | Start to first log | Work | Container | Lifetime |
+|---|---|---|---|---|---|
+| Wikimedia collector | 129.3 | 3.1 | 4.5 | 9.5 | 141.4 |
+| Warehouse | 179.0 | 3.9 | 109.9 | 118.9 | 301.2 |
+
+Across all 34 executions since C1 the created-to-container-start time is 37 to 245
+seconds, median 134, p90 208. All 20 soak executions succeeded on the first attempt
+with no task retry. With one collector and one warehouse execution there is no
+distribution to report for those two.
+
+**Finding.** The one to four and a half minutes is spent before the container starts.
+It is not application initialisation (two to fifteen seconds from container start to
+first log, which includes starting Python), not logging delay (log entries were
+received a median 0.18 s and at most 0.34 s after they were written), and not the
+recorded image import (1 to 35 s, finished long before). It is Cloud Run's own
+provisioning between accepting the execution and starting the container. Whether that
+is instance scheduling or fetching the 226 MB image into the second-generation sandbox
+**cannot be distinguished with current telemetry**: the platform reports one "started"
+time and nothing in between. No runtime setting was changed.
+
+The practical effect: a tick's work begins two to four minutes after the hour, and a
+child started by it another two to three minutes later. That is harmless for daily
+period data at an hourly tick. It would matter for a 15-minute tick.
+
+### What C2-D proved about reliability
+
+| | Evidence |
+|---|---|
+| Tick delivery | 18 of 18 hourly ticks delivered, 03:00 to 20:00 UTC, none missed, none doubled |
+| Scheduler retries | 0. 18 attempts started, 18 finished with HTTP 200 |
+| Dispatcher | 18 of 18 succeeded; 6 ran a tick, 12 refused with `control_expired` |
+| Child starts | 2 of 2 (collector at 03:00, warehouse at 04:00); 0 started after expiry |
+| Work order | 1 written, 14 targets, budget 22; honoured by the collector; none after expiry |
+| Receipt folding | Folded by the next tick: health shows success, no pending order, empty backlog |
+| Completion markers | 14 of 14 targets completed; nothing refetched by the later ticks |
+| Request budget | 22 reserved, 14 physical attempts; the day counter holds the reservation |
+| Retries | 0 |
+| Breaker and health | Stayed closed and healthy; never exercised by a real failure |
+| Control expiry | Refusals from the first tick after 08:30; 12 consecutive, fail-closed |
+| Warehouse idempotence | 8 batches loaded, 11 recognised as already loaded, 0 incomplete |
+| dbt | PASS=28, WARN 0, ERROR 0 |
+| BigQuery loads | 10 of 10 load jobs succeeded; 0 failed jobs on the day |
+| Source availability | Wikimedia answered 14 of 14 |
+| Monitoring | See below |
+
+Wikimedia, counted: targets planned 14, attempted 14, collected 14; physical attempts
+14; retries 0; HTTP or source errors 0; 429s 0; missing targets 0; duplicates 0;
+unexpected refetches 0.
+
+What it did **not** prove, because it never happened: a failed execution and its
+recovery, a breaker opening on a real source, a missed or late tick, a rate limit, a
+weekly reconciliation run, more than one collection day in a row. One collection and
+one build are a demonstration, not a rate.
+
+Monitoring behaved as built and showed two weaknesses. The silence alert fired at
+launch (it was enabled before the first tick could succeed) and again after the pause;
+both were artifacts of a finite soak, not faults. The execution-count alert has a
+threshold of 60 a day, so it could not see a ceiling of 29 being passed; the ceiling
+was a checkpoint rule with nothing enforcing it. Both are entry gates for C2-F below.
+
+### What C2-D cost
+
+There is no billing export, so no invoice line can be read. Durations, bytes and counts
+are measured; dollars are list prices applied to them.
+
+| Item | Measured | Cost at list price | After allowances |
+|---|---|---|---|
+| Cloud Run, 20 executions | 303 s of container time; 3,109 s of execution lifetime | $0.006 if container time is billed; $0.02 with a one-minute minimum; $0.06 if the whole lifetime is billed | $0 |
+| Cloud Scheduler | 1 job, 18 attempts | $0.003 for the day (one job is $0.10 a month) | $0 |
+| BigQuery queries | 220 MiB billed by the warehouse, 140 MiB by the owner's audit queries | $0.002 | $0 |
+| BigQuery storage | 0.5 MB | negligible | $0 |
+| Cloud Storage | 0.7 MB landed, 0.07 MB operational, a few hundred operations | negligible | $0 |
+| Artifact Registry | 11 images, at most 2.1 GB before shared layers | at most $0.005 for the day | same |
+| Logging | 1.3 MB ingested on the day | negligible | $0 |
+| Monitoring | 8 alert policies, built-in and log-based metrics | not measured; see below | unknown |
+
+C2-D cost at most about seven cents at list price, and most likely nothing. The five
+executions beyond the ceiling cost between a tenth of a cent and two cents.
+
+**Which billing rule applies is still not settled.** The billable-time metric shows
+181 s for the 18 dispatchers, which matches container time (175 s) and neither a
+one-minute minimum nor lifetime billing. But the same metric shows 0.1 s for a
+collector that ran 9.5 s and 72 s for a warehouse run of 119 s, so it is incomplete for
+short jobs and cannot be treated as authoritative. Only invoice lines can settle it.
+
+Against the earlier model:
+
+| | Earlier model | Measured |
+|---|---|---|
+| Dispatcher billed time | 60 s assumed | 9 s container, 140 s lifetime |
+| Warehouse run | 65 s | 119 s container (63, 80, 110 over three runs), 301 s lifetime |
+| Daily build, billed | 136 MB (130 MiB) | 220 MiB, the same on both C2 days |
+| Seconds per source request | 0.5 assumed | about 0.3 (14 requests inside 4.5 s) |
+| Registry | 1.4 GB | at most 2.1 GB |
+
+The build bills more because C2 added the ledger models: 22 billing minimums against
+13. The warehouse run has grown with each run for reasons three samples cannot
+explain. Neither moves the total by a cent. The one discrepancy that matters is that
+an execution exists for about two minutes longer than it works, and it is not known
+whether that time is billed.
+
+One item was not checked: Google announced per-condition charges for alert policies.
+If they are in force, eight single-condition policies are of the order of a dollar a
+month. This needs reading on the pricing page before C2-F, not assuming.
+
+### Projections
+
+Three billing readings are carried, because the evidence does not choose between them:
+**low**, container time only; **middle**, a one-minute minimum; **conservative**, the
+whole execution lifetime, taken as the work plus 208 s (the p90 start-up over all 34
+executions). Decisions are made on the conservative figure without allowances. All
+include $0.16 a month for the registry and exclude the unverified alerting charge.
+
+| Configuration | Low | Middle | Conservative | Conservative, after allowances | Verdict on the conservative figure |
+|---|---|---|---|---|---|
+| A. 14 articles, hourly tick, one build a day, per month | $0.45 | $1.13 | **$3.54** | $0.16 | below the preferred range |
+| B. Seven-day C2-F soak (182 executions) | $0.07 | $0.23 | **$0.79** | $0 | negligible |
+| C. 1,000 catalogued, 300 monitored | $3.09 | $4.28 | **$11.77** | $5.92 | acceptable with scrutiny |
+| C. 5,000 catalogued, 1,500 monitored | $4.03 | $4.69 | **$12.95** | $6.98 | acceptable with scrutiny |
+| C. 10,000 catalogued, 3,000 monitored | $5.10 | $5.76 | **$14.26** | $8.16 | acceptable with scrutiny |
+| C. 50,000 catalogued, 15,000 monitored | $10.90 | $11.55 | **$21.47** | $14.53 | **ABOVE THE $20 REVIEW BOUNDARY. NOT APPROVED** |
+
+The C rows are the quiet-day simulations of section 24: the adaptive tiers decide what
+is due, not every entity is fetched every hour, and they include the stand-in sampled
+source, which is not approved and cannot be switched on. They show the shape of the
+cost, not a configuration anyone may enable.
+
+What the measurement changes: under the conservative reading cost follows the **number
+of executions**, not the number of requests or the size of the catalogue. From 1,000 to
+10,000 catalogued the requests grow tenfold and the bill by a fifth. The simulated
+configuration starts 72 to 88 executions a day, 23 of them warehouse builds, and each
+carries about three and a half minutes of start-up. If that reading is the true one,
+the levers are fewer builds a day and fewer, larger collector executions; nothing is
+decided here. If the low reading is true, every row but the last is in or below the
+preferred range and the last is at its edge.
+
+The 50,000 row is not approved by this document under any reading, and no row with a
+sampled source is.
+
+### BigQuery
+
+Verified from the job records: on 2026-10-09 the warehouse identity ran 70 jobs, 46
+top-level (36 queries, 10 loads) and 24 children, billed 220 MiB and used 59,775
+slot-milliseconds. The day before was identical in count and bytes.
+
+- It processed 0.2 MiB. The 220 MiB is 13 statements billed at the 10 MiB minimum for
+  each table they read, 22 minimums in all. Billed bytes follow the **number of
+  statements**, not the data, and will until a table passes 10 MiB (the largest is
+  0.5 MiB at 1,372 rows).
+- The three incremental staging models account for 120 MiB (a 30 MiB script and a
+  10 MiB statement each), the two daily marts for 40 MiB, five tests for 60 MiB.
+- Current cadence: 220 MiB a day, about 1.5 GiB over seven days, 6.4 GiB a month:
+  $0.04 at list price, under one percent of the free terabyte.
+- The 10 GiB daily quota is about 2 percent used by the warehouse, 3.5 percent with
+  the owner's audit queries. It is still appropriately conservative and is unchanged.
+- Scans are not a scaling concern at any size simulated: models read a three- or
+  seven-day window of partitions. Frequency is. Twenty-three builds a day would bill
+  about 4 GiB a day, 40 percent of the quota, though still about 120 GiB a month and
+  inside the free terabyte. Build frequency is the thing to review before any sampled
+  source, for the quota and for the compute above alike.
+
+### The 32 pending run-log rows
+
+Still there: 36 dispatcher run rows landed for 2026-10-09, 4 loaded at 04:04 that day,
+32 not loaded (the dispatchers of 05:00 to 20:00). No warehouse run was made for them.
+
+The loader walks the landing folders for today and the two days before. The rows sit
+in the folder for 2026-10-09, so a normal warehouse run on 9, 10 or 11 October UTC
+loads them without anyone doing anything. From 12 October the ordinary window no
+longer reaches that folder, and the run needs `METASPIKE_LOAD_DAYS` set wide enough to
+reach back to it. That is an execution-time setting on a supervised run; a
+dispatcher-started run uses three. The late-data record then rebuilds the affected
+models from that day. Since C2-F cannot start before its hardening is built and
+reviewed, the wider window is the likely path, and the first warehouse run of C2-F's
+preparation should be planned with it.
+
+### The expiry stop (C2-F hard gate): options
+
+The problem: the control record's expiry stops work, and Cloud Scheduler goes on
+starting the dispatcher every hour for ever.
+
+**Option 1. A finite schedule.** The scheduler's cron expression names the soak's days,
+for example `0 * 12-18 10 *`, set by the same reviewed Terraform plan that unpauses it.
+After the last hour of the last day there is no next run until the same dates a year
+later.
+
+- Least privilege: no new permission, identity or code.
+- Determinism: complete. The number of ticks is fixed when the plan is reviewed.
+- Owner's machine: not needed to stop. Needed only for the later tidy-up.
+- Drift: none. Terraform owns the schedule and nothing else writes it.
+- Re-arm: a new reviewed plan with new dates, and a new control record.
+- Failure modes: the window must sit inside one calendar month, or the expression
+  matches unwanted days in the other month; a window left in place repeats a year
+  later, by which time the control record has expired and every tick refuses. During
+  an API failure nothing has to happen for the stop to hold.
+- Risk of leaving production disabled: none, it is a soak mechanism. Steady state
+  returns to `0 * * * *` by its own reviewed plan.
+- Audit: the plan, its hash and the Scheduler attempt log.
+- Cost and complexity: none; two variables and a Terraform test.
+- Weakness: it is a second clock beside `armed_until`. If the two disagree the result
+  is still fail-closed, and refusals are bounded by the window's end.
+
+**Option 2. The dispatcher pauses its own trigger.** On `control_expired` the
+dispatcher calls the Scheduler API to pause the job.
+
+- Least privilege: a custom role with `cloudscheduler.jobs.pause` alone, but Cloud
+  Scheduler has no per-job IAM, so it is granted on the project. Misuse can only pause.
+- Determinism: one refusal, then stopped. If the call fails the next tick tries again.
+- Drift: yes. Terraform says "not paused" and the live job is paused; the next
+  unrelated apply would start it again unless the plan is read carefully. This is the
+  serious cost of the option.
+- Re-arm: reviewed unpause plan, as now.
+- Risk of leaving production disabled: real once steady state exists; an expired
+  record silently stops collection until someone notices.
+- Complexity: new code on the control path, a new permission, a new failure branch.
+
+**Option 3. A separate one-shot stopper.** A second Scheduler job, timed at the expiry,
+calls the Scheduler API to pause the first, as a dedicated identity holding only the
+pause permission.
+
+- Independent of the dispatcher's health, and no application code.
+- Same project-wide pause grant and the same Terraform drift as option 2, plus a new
+  service account, a second job and a second schedule to keep in step with the first.
+- If its one call fails beyond its retries, the scheduler runs on.
+
+**Option 4. A self-renewing chain.** No recurring schedule: each tick enqueues the next
+only while the control record is valid.
+
+- Stops by construction, but any single failure ends collection for good, it needs a
+  queue and an enqueue permission, and it replaces the proven trigger. Rejected.
+
+**Recommendation: option 1.** It is the only one that adds no permission, no identity,
+no code and no drift, and the only one whose stop needs nothing to succeed at the
+moment of stopping. It meets every condition of the gate in section 26. Its limits
+(one calendar month, day granularity, a second clock) are acceptable for a seven-day
+soak and are checkable in a Terraform test. Options 2 and 3 need a project-wide
+Scheduler permission and make Terraform disagree with the live system by design;
+neither is justified while option 1 exists. What stops an indefinite, steady-state
+schedule when a control record lapses is a different question and belongs to C2-G.
+
+Nothing is implemented.
+
+### The Docker Hub dependency: options
+
+The problem: every apply rebuilds the image in verification, the build pulls the pinned
+Python base anonymously from Docker Hub, and a rate limit there twice blocked a
+one-line change that had nothing to do with the image.
+
+| Option | Security | Reproducibility | CI complexity | External dependency | Cost | Weakens verification |
+|---|---|---|---|---|---|---|
+| A. Skip the image rebuild for an infrastructure-only apply | The scan no longer runs at apply time | Unaffected | Low | Removed for those applies only | None | **Yes**: a gate is skipped |
+| B. Take the same digest from another registry, Docker Hub as fallback | Unchanged: the digest in the Dockerfile is the trust anchor, the registry is transport | Unchanged, byte-identical | Low: a build argument for the registry and a fallback | Google's public mirror first, Docker Hub second | None | No |
+| C. A private copy of the base in Artifact Registry | Unchanged, and the copy is under our retention | Unchanged | Higher: the verification job has no cloud identity by design, so the base must be handed to it by a job that has | None at build time | A few cents | No, but it brings cloud credentials nearer to the test job |
+| D. Authenticated Docker Hub pulls | Adds a long-lived secret to a repository that has none | Unchanged | Low | Still Docker Hub | None | No, but breaks the zero-secret position |
+| E. Retry with backoff | Unchanged | Unchanged | Trivial | Unchanged | None | No; does not remove the dependency |
+
+Checked on 2026-10-10 without credentials: Google's public mirror serves the pinned
+base digest (`mirror.gcr.io/library/python@sha256:54c85f3c…8cb3`, HTTP 200).
+
+**Recommendation: option B**, with the mirror tried first and Docker Hub kept as the
+fallback. It needs no secret, no permission and no new resource, weakens no gate, and
+helps ordinary push CI as well as applies. Its residual risk is that the mirror is a
+cache and may one day not hold the digest, in which case the build is where it is
+today. If that proves insufficient, option C is the stronger second step. Option A is
+not recommended while a fix exists that skips nothing; option D is rejected. The build
+also depends on the uv image, Debian's package servers, the Python package index and
+the scanner's database; none has failed, and all remain.
+
+Nothing is implemented.
+
+### C2-F entry gates
+
+All must be true, with evidence, before a seven-day soak is launched.
+
+1. The expiry stop is implemented, reviewed and tested: with the scheduler unpaused,
+   the planned schedule is finite, and a test fails if it is not.
+2. The unpause plan shows a number of ticks that is known in advance, and the total
+   execution ceiling for the soak is derived from it, not chosen separately.
+3. After the window no dispatcher execution can occur without a new reviewed plan:
+   zero executions after expiry, not "few".
+4. Source fail-closed behaviour is unchanged: the control record still gates every
+   tick, and its tests still pass.
+5. Request budgets are unchanged: outbound attempts are counted and reserved as in
+   C2-C.1.
+6. The sampled collector stays inactive; it is not wired to a request budget and no
+   sampled source is enabled.
+7. The Scheduler configuration (schedule, time zone, retry settings, target, identity)
+   is reviewed in the plan output.
+8. Monitoring fits a finite soak: the silence alert does not fire before the first
+   tick or after the planned end, and the execution-count alert's threshold is
+   consistent with the soak's ceiling.
+9. The alerting charge is read from the pricing page and the projection updated; the
+   conservative projection for the soak stays under $1 and the monthly figure under
+   $10.
+10. No saved or pending Terraform plan contains a destroy, and state matches live.
+11. Security is clean: 0 secret versions, 0 user-managed keys, no IAM or WIF change
+    other than what a reviewed plan made, the deployed image approved.
+12. The deployment path no longer fails on a Docker Hub rate limit, or the owner
+    accepts that risk for the soak explicitly.
+13. The 32 pending run-log rows are accounted for in the plan for the first warehouse
+    run.
+14. Wikimedia remains the only source, 14 articles, tiering shadow only.
+
+**C2-F: BLOCKED** pending the expiry-stop implementation (gates 1 to 3) and the
+monitoring adjustment (gate 8). No launch time is chosen.

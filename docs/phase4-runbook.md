@@ -259,6 +259,14 @@ is about 500 seconds of real work every 15 minutes, which is materially expensiv
 whatever the rounding. Anything expected above $20 a month needs the owner's explicit
 approval.
 
+**Measured in C2-E (2026-10-10).** Thirty-four executions have now run. The container
+runs 5 to 18 seconds for a dispatcher, but an execution exists for one to four and a
+half minutes before its container starts, and the billable-time metric proved
+incomplete for short jobs. Which of the two statements above governs is therefore still
+not settled, and cost is projected under three readings, deciding on the most
+expensive. See section 27 of `docs/phase4-c2-plan.md`. A billing export would settle it
+and has not been set up.
+
 ## Budget
 
 One budget, $20 a month, with email alerts at 25, 50, 75 and 100 percent of actual
