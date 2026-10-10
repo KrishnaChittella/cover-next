@@ -1417,3 +1417,26 @@ third was completed by a second reviewed plan once the descriptor was visible. A
 environment would meet the same race for every such pair. The root has no wait step by
 design. Whether to add a bounded one or to accept a two-step first apply is a later
 infrastructure-hardening decision.
+
+## 29. C2-F launch design: three findings from reading the code
+
+The launch design for the seven-day soak (2026-10-12 to 2026-10-18 UTC,
+`0 * 12-18 10 *`, 168 ticks) is in the handoff of 2026-10-10 and is not repeated here.
+Three things it found are permanent:
+
+- **A finite window has to be unpaused before it opens.** A paused scheduler does not
+  fire and missed runs are not made up. Any hour of the window that passes before the
+  unpause is a tick lost. Everything up to the unpause apply is therefore done before
+  the window's first tick, and the unpaused scheduler waits for it.
+- **The request budget is per task attempt.** It is enforced inside the collector
+  process. A collector task that crashes before writing its receipt is started once
+  more by Cloud Run (`max_retries = 1` on `ms-wikimedia`), claims the same order and
+  gets a fresh budget. Finished targets are skipped, but the strict daily bound is
+  twice the order's budget (44 with a budget of 22), not the budget. A source failure
+  does not cause this; a crash does.
+- **The volume alert counts completions.** A rolling 24 hours can hold the children of
+  two UTC days, hence `24 + 2 x max_executions_per_day`; and because a dispatcher
+  completes one to four minutes after its tick, the window can also catch a
+  twenty-fifth dispatcher. The strict bound is one higher than the formula.
+
+Nothing was changed for any of them.
