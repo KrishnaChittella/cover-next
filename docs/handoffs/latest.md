@@ -4,224 +4,132 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous checkpoint: **PHASE 4 PART C2-E: REVIEW COMPLETE — CHATGPT APPROVAL REQUIRED**
+Previous checkpoint: **PHASE 4 PART C2-F PREP: HARDENING READY — PLAN REVIEW REQUIRED**
 
-Current checkpoint: **PHASE 4 PART C2-F PREP: HARDENING READY — PLAN REVIEW REQUIRED**
+Current checkpoint: **PHASE 4 PART C2-F PREP: BLOCKED — APPLY FAILED PART-WAY, 2 OF 3 RESOURCES CREATED**
 
-The hardening is built, tested and pushed (`0250e61`). One infrastructure-only plan was
-made for review and **not applied**. Nothing in production changed. The scheduler
-stayed paused, the control record disabled, and no source was called. C2-F has not
-started and has no dates.
+The approved plan was applied once and the apply **failed after creating two of its
+three resources**. Nothing was retried, nothing was deleted, no new plan was made. The
+partial state is harmless and fully accounted for below. It needs a ruling before
+anything else is done.
 
-## The plan to review
+This is not "HARDENING APPLIED" and the success block was not printed.
+
+## What happened
 
 | | |
 |---|---|
-| Plan run | `38022130278` (commit `0250e61`, `reuse_deployed_image=true`) |
+| Saved plan run | `38022130278` |
 | Plan SHA-256 | `7d441d9e92d300032b4676daeda297409e50611760cc4b6a9329d25074da4914` |
-| Artifact expires | 2026-10-13T03:59:46Z |
-| Result | **3 to add, 0 to change, 0 to destroy** |
-| Image | reused: the image all seven jobs already run. No job changes |
+| Apply run | `38023222777`, 2026-10-10, apply job ended 04:18:29 UTC, **failure** |
+| Verification jobs | all three passed (the base image again came from the mirror) |
+| Plan hash and destroy checks in the apply job | passed |
+| Terraform result | 2 created, then an error; **not** "3 added" |
 
-Exact diff:
+Order of events in the apply (UTC):
 
-1. `+ google_logging_metric.counter["ms_scheduler_attempt_failed"]`
-   filter `resource.type="cloud_scheduler_job" AND severity>=ERROR`, a DELTA INT64
-   counter.
-2. `+ google_monitoring_alert_policy.scheduler_delivery_failed`
-   "MetaSpike: the scheduler could not start the dispatcher": that counter above 0 in
-   an hour; enabled; the existing notification channel.
-3. `+ google_monitoring_alert_policy.dispatcher_failed`
-   "MetaSpike: a dispatcher execution failed": failed `ms-dispatch` executions above 0
-   in an hour, on Cloud Run's own metric; enabled; the existing channel.
+1. 04:18:24 `google_logging_metric.counter["ms_scheduler_attempt_failed"]` created.
+2. 04:18:26 `google_monitoring_alert_policy.dispatcher_failed` created.
+3. 04:18:27 `google_monitoring_alert_policy.scheduler_delivery_failed` **refused**:
+   `Error 404: Cannot find metric(s) that match type =
+   "logging.googleapis.com/user/ms_scheduler_attempt_failed". If a metric was created
+   recently, it could take up to 10 minutes to become available.`
 
-Outputs added: `dispatch_schedule = "0 * * * *"`, `daily_execution_alert_threshold = 60`.
+**Cause.** The alert policy reads the log-based counter created two seconds before it
+in the same apply, and Cloud Monitoring had not yet published the counter's
+descriptor. Terraform ordered the two correctly; the service needed time. This is the
+risk named in the previous handoff ("a new log-based metric can take a short while to
+become visible to a new alert policy"). The four older log-metric alerts were created
+the same way in C1 and happened not to hit it.
 
-Not in the diff, as intended: the scheduler (still paused, still `0 * * * *`), the
-silence alert (still disabled), the volume alert (still 60), every job, every IAM
-binding, every secret. No destroy, no IAM, no secret change, no image change. The
-finite schedule itself appears only in the later unpause plan, when dates exist.
+It is a timing failure, not a permission, configuration or design failure. At 04:19
+UTC, about forty seconds later, the descriptor was readable from the Monitoring API
+(HTTP 200).
 
-## Billing-model correction
+## Exact partial state (read-only audit, 04:19 UTC)
 
-Recorded in section 28 of `docs/phase4-c2-plan.md` and in the runbook. Jobs are billed
-for the lifetime of an instance once its container has started, minimum one minute.
-Time before the container starts is not billed and is kept as a reliability
-measurement (37 to 245 s, median 134). The approved projection is the one-minute
-model; the earlier "conservative" column is marked superseded and left as written.
-
-| Configuration | Approved projection, list price | Verdict |
+| | Before | Now |
 |---|---|---|
-| 14 articles, hourly, one build a day, per month | about $1.20 | below the preferred range |
-| Seven-day C2-F soak | about $0.30 | negligible |
-| 1,000 catalogued | $4.28 | below the preferred range |
-| 5,000 | $4.69 | below the preferred range |
-| 10,000 | $5.76 | within the preferred range |
-| 50,000 | $11.55 | acceptable with scrutiny |
+| Prod Terraform state serial | 11 | **12** |
+| Managed resources in state | 91 | **93** |
+| Log-based metrics, live | 5 | **6** |
+| Alert policies, live | 8 | **9** |
 
-Kept separate in the document: measured container time (9 s dispatcher, billed 60 s),
-the unbilled provisioning time, BigQuery ($0.04), Scheduler ($0.10), storage (under a
-cent), registry ($0.16). With allowances the 14-article month is about $0.16. The
-catalogue rows are planning figures from the existing simulations and approve nothing.
-$20 remains hard.
+Created and recorded in state, neither tainted:
 
-## Monitoring-pricing correction
+- log metric `ms_scheduler_attempt_failed`, filter
+  `resource.type="cloud_scheduler_job" AND severity>=ERROR`;
+- alert policy "MetaSpike: a dispatcher execution failed", enabled.
 
-The alert-condition charge begins no sooner than 2027-09-01 and is in no current
-projection. It is recorded as a later consideration (ten single-condition policies
-after this plan). No billing export was created; it is not a C2-F gate.
+Not created, absent from state and from the live project:
 
-## Finite scheduler
+- alert policy `scheduler_delivery_failed` ("MetaSpike: the scheduler could not start
+  the dispatcher"). No orphan or half-made policy exists.
 
-- Terraform variable `soak_window = { month, start_day, end_day }` produces
-  `0 * <start>-<end> <month> *` in `Etc/UTC`; one day produces `0 * <day> <month> *`.
-- `schedule_mode` defaults to `finite_soak`: unpausing without a window is refused, and
-  a window while paused is refused, so paused always means the plain `0 * * * *`.
-  `steady_state` is the unbounded schedule and the deploy workflow cannot pass it.
-- One calendar month only: end before start, a day past the month's end, month 13 and
-  29 February are refused.
-- The deploy workflow reads four repository variables, all or none: `SOAK_MONTH`,
-  `SOAK_START_DAY`, `SOAK_END_DAY`, `SOAK_DAILY_EXECUTION_CEILING`. None is set.
-- The plan shows the cron on the scheduler and in the outputs `dispatch_schedule` and
-  `soak_scheduled_ticks`.
-- No new permission, identity or runtime code. The dispatcher cannot pause anything.
-  `armed_until` is untouched and independent.
+State outputs written: `dispatch_schedule = "0 * * * *"`,
+`daily_execution_alert_threshold = 60`.
 
-## Annual recurrence
+Terraform state and the live project agree with each other. Neither matches the
+configuration yet: one resource is missing.
 
-**This is not a one-shot schedule.** Cloud Scheduler's cron has no year and the service
-has no end date. A window is eligible again on the same dates the following year. What
-it guarantees is that hourly ticks stop at the end of its last day and nothing fires
-for the rest of that year (358 days for a seven-day window). The safeguards:
+## Everything else, verified unchanged
 
-- A. `armed_until` carries the year and fails closed.
-- B. No execution in the post-soak period: tested hour by hour for thirty days and on
-  to the recurrence.
-- C. Post-soak reconciliation pauses the scheduler and removes the window; Terraform
-  refuses a paused scheduler that still carries one.
-- D. Recorded in the plan document, the runbook, the Terraform variables and the
-  module's docstring.
-- E. Tested, including a test that asserts the recurrence so it cannot later be
-  described as year-bounded.
+- **Scheduler:** PAUSED, `0 * * * *`, `Etc/UTC`.
+- **Control record:** disabled, generation `1791578645841911`, unchanged.
+- **Monitoring:** `dispatcher_silent` still disabled. The seven other earlier policies
+  unchanged and enabled. The audit comparison against the pre-apply snapshot shows one
+  difference only: the alert list (the one new policy).
+- **Cloud Run:** 34 executions; nothing ran. All seven jobs at generation 6 on
+  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`. No job
+  definition changed.
+- **Security:** 0 secret versions; 0 user-managed keys across 10 service accounts; no
+  IAM difference; WIF pool ACTIVE.
+- **BigQuery quota:** 10,240 MiB a day.
+- **Data:** row counts and object counts identical (1,372 / 28 / 20; 102 and 106
+  objects). The 32 pending run-log rows are untouched.
+- **Repository variables:** `SCHEDULER_PAUSED` = `true`; no soak variable set.
+- **Sources:** Wikimedia 0, Steam 0, IGDB 0.
 
-## Schedule tests
+## Consequences
 
-`tests/test_c2f_finite_soak.py` walks a calendar with the generated cron:
+- **Risk now:** none. One extra, correct, enabled failure alert exists; one unused
+  counter exists and costs nothing. With the scheduler paused neither can fire.
+- **The saved plan is spent.** It was made against serial 11; state is at 12. It cannot
+  be applied again and no attempt was made.
+- **Gate 8 (monitoring for a finite soak) is not met.** The scheduler-delivery alert is
+  one of the two that stand in for the silence alert during a soak.
+- **A finding for later, not acted on:** any fresh environment would meet the same
+  race. The repository deliberately has no wait step in Terraform (a test forbids
+  one). Whether to add a bounded wait or accept a two-step first apply is a design
+  decision that was not taken here.
 
-| Requirement | Test |
-|---|---|
-| Hourly ticks inside the window | 168 consecutive hours, none missing or doubled, on the hour only |
-| First and last eligible tick | 12 Oct 00:00 and 18 Oct 23:00 UTC for the example window |
-| No tick just before | 11 Oct 23:00, and nothing from 1 January to the start |
-| No tick after, same year | 19 Oct 00:00, thirty days hour by hour, and to 31 December |
-| Exact count | Seven windows: 24, 168 and 720 ticks, including a leap year and December |
-| End before start refused | Python and Terraform |
-| Cross-month refused | Python and Terraform, including February 29 |
-| Unbounded refused in finite-soak mode | Terraform `unpausing_is_refused_without_a_finite_window` |
-| Steady state separate | Terraform: its own mode, takes no window, keeps the silence alert and 60 |
-| Recurrence | The same window fires again on 12 Oct of the next year, and not before |
+## Pre-apply check, for the record (04:10 UTC, all met)
 
-The Python cron and the Terraform cron are pinned to the same literal strings.
+`main` level with origin and clean; only `docs/handoffs/latest.md` changed since
+`0250e61`; plan run succeeded; artifact unexpired (2026-10-13T03:59:46Z) and hashing
+exactly; rendered plan 3 add, 0 change, 0 destroy with exactly the three expected
+resources; state serial 11; no apply since the plan; scheduler PAUSED `0 * * * *`
+`Etc/UTC`; control disabled, generation unchanged; 34 executions; seven jobs on the
+approved digest; 0 secret versions; 0 keys; `SCHEDULER_PAUSED` = `true`; no soak
+variable.
 
-**Ceiling.** `24 x days + days x max_executions_per_day`: the ticks are exact and the
-tick enforces the control record's daily child cap. 168 + 7 x 3 = 189 with C2-D's cap.
-The final figure is not set; it depends on the C2-F control record.
+## Still proven
 
-## Monitoring for finite soaks
+- Docker mirror hardening: three runs on the runner have now fetched the pinned base
+  from `mirror.gcr.io/library`, verified it and passed the scan.
+- Finite scheduler hardening: offline and mocked-provider tests as reported; not yet
+  exercised against production, by design.
 
-- The silence alert is on only for an unpaused, unbounded schedule. In a finite soak it
-  is off, so it cannot fire before the first tick or after the last.
-- In its place, on in every mode: a failed scheduler attempt, and any failed
-  dispatcher execution. Neither can fire when nothing runs. The second closes an older
-  gap: one dispatcher failure an hour never reached the "two failures in an hour"
-  alert.
-- The volume alert takes `soak_daily_execution_ceiling` (24 to 59) in a finite soak, 60
-  otherwise. Terraform refuses a finite soak without it. The value that never fires in
-  a correct soak is `24 + 2 x max_executions_per_day`, because a rolling day can hold
-  two UTC days' children.
-- No failure alert was weakened. Not alerted on: a scheduler that silently attempts
-  nothing; the post-soak audit compares executions with the exact tick count.
+## What I would do next, if approved
 
-## Docker mirror and fallback
-
-- The Dockerfile takes its base as `${BASE_REGISTRY}/python:3.12-slim-bookworm@sha256:54c85f3c…8cb3`.
-  The digest is unchanged and is the trust anchor.
-- `.github/scripts/build-image.sh` tries `mirror.gcr.io/library`, then
-  `docker.io/library`. For each: fetch the manifest by digest, check the bytes hash to
-  the pinned digest, pull by digest. It builds from the first that passes, with
-  `--pull --no-cache`. If neither passes it fails and builds nothing.
-- No credential, no secret. No workflow step removed: build, run, dbt and scan are as
-  before.
-- **Proof on the runner:** push CI run `38021586494` and plan run `38022130278` both
-  logged "base python@sha256:54c85f3c…8cb3 verified and pulled from
-  mirror.gcr.io/library", and the image built, ran and passed the scan.
-- No image was pushed to the registry and none deployed.
-
-## Pending run-log rows
-
-Still 36 landed for 2026-10-09, 4 loaded, **32 pending**. Untouched; no warehouse run.
-
-The first approved warehouse execution of C2-F needs
-`METASPIKE_LOAD_DAYS = (UTC date of that run - 2026-10-09) + 1`: 4 on 12 October, 10 on
-18 October, 24 on 1 November. It is an execution-time setting on one supervised run
-before the scheduler is unpaused. The exact value goes into the launch instruction
-when the start date is chosen.
-
-## Tests
-
-- Offline suite: **1,199 passed**, 5 deselected (was 1,160). Ruff and strict mypy clean.
-- Terraform: format clean, both roots valid, **25** production tests passed (was 12),
-  bootstrap tests passed in CI.
-- New: `tests/test_c2f_finite_soak.py`, `tests/test_base_image_mirror.py`, 13 Terraform
-  runs. The build script is run for real in tests against stand-in `curl` and `docker`.
-- CI: push run `38021586494` passed, cloud jobs skipped. Plan run `38022130278` passed.
-
-## Limits of what was proven
-
-- A finite-soak plan has only been made against the mocked provider. The real one is
-  the unpause plan, once dates are chosen.
-- The scheduler-error counter has never seen a real failed attempt; its filter is by
-  the documented severity, not by an observed entry.
-- A new log-based metric can take a short while to become visible to a new alert
-  policy. If the apply of this plan fails on that, nothing is half-done that matters,
-  and it is to be reported, not retried.
-- A full local build was started and interrupted after the base was verified and
-  pulled from the mirror; the complete build is the CI one.
-
-## Security state
-
-Scheduler PAUSED, `0 * * * *`, `Etc/UTC`. Control disabled, generation unchanged.
-Executions 34. All seven jobs on `sha256:a8680b2b…c754`. Prod state serial 11. 0 secret
-versions. 0 user-managed keys. 8 alert policies live (10 after this plan). 11 images in
-the registry, none new. No IAM or WIF change, none planned. Repository variables: only
-`SCHEDULER_PAUSED` = `true`; no soak variable set. Wikimedia calls 0, Steam 0, IGDB 0.
-The portfolio repository was not touched.
-
-## C2-F entry gates
-
-| Gate | State |
-|---|---|
-| 1. Expiry stop implemented, reviewed, tested | Built and tested; awaiting this review |
-| 2. Tick count known in advance, ceiling derived | Met by construction; final figure at launch |
-| 3. Zero executions after the window | Tested; live proof is the soak itself |
-| 4. Source fail-closed unchanged | Met; no control-path code changed |
-| 5. Request budgets unchanged | Met |
-| 6. Sampled collector inactive | Met |
-| 7. Scheduler configuration reviewed in plan output | At the unpause plan |
-| 8. Monitoring fits a finite soak | Built; **needs this plan applied** |
-| 9. Alerting charge read; projection inside bounds | Met: none until 2027-09-01; $0.30 soak, $1.20 a month |
-| 10. No destroy; state matches live | Met: this plan destroys nothing; serial 11 |
-| 11. Security clean | Met |
-| 12. Deploy path survives a Docker Hub rate limit | Met for the base image, proven in CI |
-| 13. 32 pending rows accounted for | Met: rule recorded; value at launch |
-| 14. Wikimedia only, 14 articles, tiering shadow only | Met |
-
-Everything except date selection and launch passes **except gate 8, which needs this
-plan reviewed and applied**. Until then: C2-F BLOCKED on plan review.
+One new infrastructure-only plan from the unchanged code (`reuse_deployed_image=true`).
+Expected: **1 to add** (`google_monitoring_alert_policy.scheduler_delivery_failed`),
+0 to change, 0 to destroy, no output change. The counter's descriptor is now visible,
+so the cause of the failure is gone. That plan would come back for review before any
+apply. Nothing of this has been started.
 
 ## Exact next approval required
 
-Review of plan `38022130278` (SHA-256 above), and approval to apply exactly that plan.
-After it: the choice of soak dates, the C2-F control record, and the unpause plan.
+A ruling on the partial state, and approval (or not) to make that one plan.
 
-STOP. C2-F has not begun.
+C2-F has not started. No dates were chosen. STOP.
