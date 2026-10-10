@@ -4,265 +4,224 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous checkpoint: **PHASE 4 PART C2-D: CLOSED — FUNCTIONAL PASS / EXECUTION CEILING FAIL**
+Previous checkpoint: **PHASE 4 PART C2-E: REVIEW COMPLETE — CHATGPT APPROVAL REQUIRED**
 
-Current checkpoint: **PHASE 4 PART C2-E: REVIEW COMPLETE — CHATGPT APPROVAL REQUIRED**
+Current checkpoint: **PHASE 4 PART C2-F PREP: HARDENING READY — PLAN REVIEW REQUIRED**
 
-A read-only review made on 2026-10-10 from execution records, logs, Scheduler logs,
-BigQuery job records and bucket contents. Nothing was run, changed, unpaused or armed.
-**No source was called.** The permanent version is section 27 of
-`docs/phase4-c2-plan.md`. C2-D's ruling is unchanged: functional pass, execution
-ceiling failed by five (34 against 29).
+The hardening is built, tested and pushed (`0250e61`). One infrastructure-only plan was
+made for review and **not applied**. Nothing in production changed. The scheduler
+stayed paused, the control record disabled, and no source was called. C2-F has not
+started and has no dates.
 
-## Three things that need a decision
+## The plan to review
 
-1. **Cloud Run billing is still unsettled, and it matters at scale.** An execution
-   exists for about two minutes before its container starts. If that time is billed,
-   the broad-catalogue projections roughly triple, and 50,000 catalogued crosses $20.
-   Only invoice lines can settle it; there is no billing export.
-2. **Expiry stop: a finite schedule is recommended** (no new permission, code or
-   drift).
-3. **Docker Hub: take the same pinned digest from Google's public mirror first** is
-   recommended (no secret, no gate skipped).
-
-## Safe start state, confirmed at 02:24 UTC
-
-Scheduler PAUSED, `0 * * * *`, `Etc/UTC`; control disabled (generation unchanged);
-`dispatcher_silent` disabled, the other seven policies enabled; prod state serial 11;
-34 executions; all seven jobs on `sha256:a8680b2b…c754`; 0 secret versions; 0
-user-managed keys; quota 10,240 MiB a day; `SCHEDULER_PAUSED` = `true`. It was the same
-at the end.
-
-## Execution latency
-
-C2-D dispatcher, 18 executions, seconds:
-
-| | min | median | p90 | max |
-|---|---|---|---|---|
-| On the hour to created (Scheduler delivery) | 1.1 | 6.7 | 42 | 52.3 |
-| Created to execution start | 9.5 | 16.9 | 20.9 | 51.9 |
-| **Created to container start** | **37.0** | **128.2** | **185.2** | **244.3** |
-| Container start to first log line | 2.1 | 4.0 | 9.9 | 15.0 |
-| First to last log line (the work) | 0.3 | 0.4 | 1.3 | 2.4 |
-| Container start to exit | 5.5 | 8.9 | 12.1 | 18.2 |
-| Created to completed (lifetime) | 77.1 | 140.0 | 194.8 | 264.8 |
-
-| One execution each, no distribution | Created to container start | Start to first log | Work | Container | Lifetime |
-|---|---|---|---|---|---|
-| Wikimedia collector | 129.3 | 3.1 | 4.5 | 9.5 | 141.4 |
-| Warehouse | 179.0 | 3.9 | 109.9 | 118.9 | 301.2 |
-
-All 20 soak executions succeeded on the first attempt; task retries 0. Across all 34
-executions since C1, created-to-container-start is 37 to 245 s, median 134, p90 208.
-
-**The start-up delay.** It is spent before the container starts. It is not application
-initialisation (2 to 15 s), not logging delay (entries received at most 0.34 s after
-being written), and not the recorded image import (1 to 35 s). It is Cloud Run's own
-provisioning. Whether that is instance scheduling or fetching the 226 MB image into the
-second-generation sandbox **cannot be distinguished with current telemetry**. No
-runtime setting was changed.
-
-## Reliability: what C2-D proved
-
-| | Evidence |
+| | |
 |---|---|
-| Tick delivery | 18 of 18 hourly ticks, none missed, none doubled |
-| Scheduler retries | 0; 18 attempts, 18 HTTP 200 |
-| Dispatcher | 18 of 18 succeeded; 6 ran a tick, 12 refused `control_expired` |
-| Child starts | 2 of 2; 0 after expiry |
-| Work order | 1, 14 targets, budget 22, honoured; none after expiry |
-| Receipt folding | Folded by the next tick; no pending order, empty backlog |
-| Completion markers | 14 of 14; nothing refetched |
-| Request budget | 22 reserved, 14 physical attempts |
-| Retries | 0 |
-| Breaker and health | Closed and healthy; never exercised by a real failure |
-| Control expiry | 12 consecutive refusals from the first tick after 08:30 |
-| Warehouse idempotence | 8 batches loaded, 11 recognised as already loaded, 0 incomplete |
-| dbt | PASS=28, WARN 0, ERROR 0 |
-| BigQuery loads | 10 of 10; 0 failed jobs on the day |
-| Source availability | 14 of 14 |
+| Plan run | `38022130278` (commit `0250e61`, `reuse_deployed_image=true`) |
+| Plan SHA-256 | `7d441d9e92d300032b4676daeda297409e50611760cc4b6a9329d25074da4914` |
+| Artifact expires | 2026-10-13T03:59:46Z |
+| Result | **3 to add, 0 to change, 0 to destroy** |
+| Image | reused: the image all seven jobs already run. No job changes |
 
-Wikimedia: planned 14, attempted 14, collected 14, physical attempts 14, retries 0,
-HTTP or source errors 0, 429s 0, missing 0, duplicates 0, unexpected refetches 0.
+Exact diff:
 
-**Not proven**, because it never happened: a failed execution and its recovery, a
-breaker opening on a real source, a missed tick, a rate limit, a weekly reconciliation
-run, consecutive collection days. One collection and one build are a demonstration,
-not a rate.
+1. `+ google_logging_metric.counter["ms_scheduler_attempt_failed"]`
+   filter `resource.type="cloud_scheduler_job" AND severity>=ERROR`, a DELTA INT64
+   counter.
+2. `+ google_monitoring_alert_policy.scheduler_delivery_failed`
+   "MetaSpike: the scheduler could not start the dispatcher": that counter above 0 in
+   an hour; enabled; the existing notification channel.
+3. `+ google_monitoring_alert_policy.dispatcher_failed`
+   "MetaSpike: a dispatcher execution failed": failed `ms-dispatch` executions above 0
+   in an hour, on Cloud Run's own metric; enabled; the existing channel.
 
-**Monitoring.** It behaved as built and showed two weaknesses. The silence alert fired
-at launch and again after the pause, both artifacts of a finite soak. The
-execution-count alert's threshold is 60 a day, so it could not see a ceiling of 29
-being passed. The second silence incident (opened 00:07:08 UTC on 10 October) had no
-auto-resolve event in the logs when they were read at about 02:30; it was not touched.
+Outputs added: `dispatch_schedule = "0 * * * *"`, `daily_execution_alert_threshold = 60`.
 
-**Kept separate:** executions 34 against a ceiling of 29, failed by 5. Not a clean pass.
+Not in the diff, as intended: the scheduler (still paused, still `0 * * * *`), the
+silence alert (still disabled), the volume alert (still 60), every job, every IAM
+binding, every secret. No destroy, no IAM, no secret change, no image change. The
+finite schedule itself appears only in the later unpause plan, when dates exist.
 
-## Measured cost of C2-D
+## Billing-model correction
 
-No invoice line can be read. Durations, bytes and counts are measured; dollars are list
-prices applied to them.
+Recorded in section 28 of `docs/phase4-c2-plan.md` and in the runbook. Jobs are billed
+for the lifetime of an instance once its container has started, minimum one minute.
+Time before the container starts is not billed and is kept as a reliability
+measurement (37 to 245 s, median 134). The approved projection is the one-minute
+model; the earlier "conservative" column is marked superseded and left as written.
 
-| Item | Measured | At list price | Class |
-|---|---|---|---|
-| Cloud Run, 20 executions | 303 s container time; 3,109 s lifetime | $0.006, $0.02 or $0.06 depending on the billing rule | ESTIMATED from measured time; free-tier absorbed |
-| Cloud Scheduler | 1 job, 18 attempts | $0.003 | free-tier absorbed |
-| BigQuery queries | 220 MiB warehouse + 140 MiB owner audit | $0.002 | ACTUAL bytes; free-tier absorbed |
-| BigQuery storage | 0.5 MB | negligible | NEGLIGIBLE |
-| Cloud Storage | 0.7 MB landed, 0.07 MB operational | negligible | NEGLIGIBLE |
-| Artifact Registry | 11 images, at most 2.1 GB | at most $0.005 a day | ESTIMATED |
-| Logging | 1.3 MB ingested | negligible | NEGLIGIBLE |
-| Monitoring | 8 alert policies | not measured | UNKNOWN |
+| Configuration | Approved projection, list price | Verdict |
+|---|---|---|
+| 14 articles, hourly, one build a day, per month | about $1.20 | below the preferred range |
+| Seven-day C2-F soak | about $0.30 | negligible |
+| 1,000 catalogued | $4.28 | below the preferred range |
+| 5,000 | $4.69 | below the preferred range |
+| 10,000 | $5.76 | within the preferred range |
+| 50,000 | $11.55 | acceptable with scrutiny |
 
-Total: at most about seven cents, most likely nothing. The five excess executions cost
-between a tenth of a cent and two cents.
+Kept separate in the document: measured container time (9 s dispatcher, billed 60 s),
+the unbilled provisioning time, BigQuery ($0.04), Scheduler ($0.10), storage (under a
+cent), registry ($0.16). With allowances the 14-article month is about $0.16. The
+catalogue rows are planning figures from the existing simulations and approve nothing.
+$20 remains hard.
 
-The billable-time metric shows 181 s for the 18 dispatchers, which matches container
-time. But it shows 0.1 s for a 9.5 s collector and 72 s for a 119 s warehouse run, so
-it is incomplete and not authoritative.
+## Monitoring-pricing correction
 
-Against the earlier model: dispatcher 60 s assumed, 9 s container and 140 s lifetime
-measured; warehouse 65 s assumed, 119 s measured (63, 80, 110 over three runs, cause
-not explainable from three samples); daily build 130 MiB assumed, 220 MiB measured
-(C2 added the ledger models); registry 1.4 GB assumed, at most 2.1 GB. None of these
-moves the total by a cent. The start-up time is the only discrepancy that matters.
+The alert-condition charge begins no sooner than 2027-09-01 and is in no current
+projection. It is recorded as a later consideration (ten single-condition policies
+after this plan). No billing export was created; it is not a C2-F gate.
 
-Not checked: Google's announced per-condition charge for alert policies. If in force,
-eight policies are of the order of a dollar a month.
+## Finite scheduler
 
-## Projections
+- Terraform variable `soak_window = { month, start_day, end_day }` produces
+  `0 * <start>-<end> <month> *` in `Etc/UTC`; one day produces `0 * <day> <month> *`.
+- `schedule_mode` defaults to `finite_soak`: unpausing without a window is refused, and
+  a window while paused is refused, so paused always means the plain `0 * * * *`.
+  `steady_state` is the unbounded schedule and the deploy workflow cannot pass it.
+- One calendar month only: end before start, a day past the month's end, month 13 and
+  29 February are refused.
+- The deploy workflow reads four repository variables, all or none: `SOAK_MONTH`,
+  `SOAK_START_DAY`, `SOAK_END_DAY`, `SOAK_DAILY_EXECUTION_CEILING`. None is set.
+- The plan shows the cron on the scheduler and in the outputs `dispatch_schedule` and
+  `soak_scheduled_ticks`.
+- No new permission, identity or runtime code. The dispatcher cannot pause anything.
+  `armed_until` is untouched and independent.
 
-Three readings of Cloud Run billing: **low** (container time), **middle** (one-minute
-minimum), **conservative** (work plus 208 s, the p90 start-up). Decide on the
-conservative figure without allowances. Each includes $0.16 a month for the registry
-and excludes the unverified alerting charge.
+## Annual recurrence
 
-| Configuration | Low | Middle | Conservative | Conservative, after allowances | Verdict (conservative) |
-|---|---|---|---|---|---|
-| A. 14 articles, hourly, one build a day, per month | $0.45 | $1.13 | **$3.54** | $0.16 | below the preferred range |
-| B. Seven-day C2-F soak, 182 executions | $0.07 | $0.23 | **$0.79** | $0 | negligible |
-| C. 1,000 catalogued | $3.09 | $4.28 | **$11.77** | $5.92 | acceptable with scrutiny |
-| C. 5,000 | $4.03 | $4.69 | **$12.95** | $6.98 | acceptable with scrutiny |
-| C. 10,000 | $5.10 | $5.76 | **$14.26** | $8.16 | acceptable with scrutiny |
-| C. 50,000 | $10.90 | $11.55 | **$21.47** | $14.53 | **ABOVE $20. NOT APPROVED** |
+**This is not a one-shot schedule.** Cloud Scheduler's cron has no year and the service
+has no end date. A window is eligible again on the same dates the following year. What
+it guarantees is that hourly ticks stop at the end of its last day and nothing fires
+for the rest of that year (358 days for a seven-day window). The safeguards:
 
-The C rows are the existing quiet-day simulations: adaptive tiers decide what is due,
-not every entity is fetched every hour, and they include a stand-in sampled source that
-is not approved. They show the shape of the cost only.
+- A. `armed_until` carries the year and fails closed.
+- B. No execution in the post-soak period: tested hour by hour for thirty days and on
+  to the recurrence.
+- C. Post-soak reconciliation pauses the scheduler and removes the window; Terraform
+  refuses a paused scheduler that still carries one.
+- D. Recorded in the plan document, the runbook, the Terraform variables and the
+  module's docstring.
+- E. Tested, including a test that asserts the recurrence so it cannot later be
+  described as year-bounded.
 
-Under the conservative reading cost follows the **number of executions**, not requests
-or catalogue size: tenfold the requests from 1,000 to 10,000 adds a fifth to the bill.
-The simulated configuration starts 72 to 88 executions a day, 23 of them warehouse
-builds. If that reading is true, the levers are fewer builds and fewer, larger
-collector executions. Nothing is decided.
+## Schedule tests
 
-## BigQuery
+`tests/test_c2f_finite_soak.py` walks a calendar with the generated cron:
 
-Verified from job records for 2026-10-09: warehouse identity 70 jobs, 46 top-level
-(36 queries, 10 loads), 24 children, **220 MiB billed, 59,775 slot-ms**. The previous
-day was identical.
+| Requirement | Test |
+|---|---|
+| Hourly ticks inside the window | 168 consecutive hours, none missing or doubled, on the hour only |
+| First and last eligible tick | 12 Oct 00:00 and 18 Oct 23:00 UTC for the example window |
+| No tick just before | 11 Oct 23:00, and nothing from 1 January to the start |
+| No tick after, same year | 19 Oct 00:00, thirty days hour by hour, and to 31 December |
+| Exact count | Seven windows: 24, 168 and 720 ticks, including a leap year and December |
+| End before start refused | Python and Terraform |
+| Cross-month refused | Python and Terraform, including February 29 |
+| Unbounded refused in finite-soak mode | Terraform `unpausing_is_refused_without_a_finite_window` |
+| Steady state separate | Terraform: its own mode, takes no window, keeps the silence alert and 60 |
+| Recurrence | The same window fires again on 12 Oct of the next year, and not before |
 
-- 0.2 MiB was actually processed. The bill is 13 statements at the 10 MiB minimum per
-  table read. Billed bytes follow statement count, not data.
-- Staging models 120 MiB, daily marts 40 MiB, five tests 60 MiB.
-- 220 MiB a day; 1.5 GiB over seven days; 6.4 GiB a month; $0.04 at list price.
-- The 10 GiB daily quota is 2 percent used (3.5 with audit queries). Still
-  appropriately conservative. Not changed.
-- Scans are not a scaling concern. Build frequency is: 23 builds a day would bill about
-  4 GiB a day, 40 percent of the quota.
+The Python cron and the Terraform cron are pinned to the same literal strings.
 
-## The 32 pending run-log rows
+**Ceiling.** `24 x days + days x max_executions_per_day`: the ticks are exact and the
+tick enforces the control record's daily child cap. 168 + 7 x 3 = 189 with C2-D's cap.
+The final figure is not set; it depends on the C2-F control record.
 
-Still present and untouched: 36 dispatcher run rows landed for 9 October, 4 loaded,
-32 not. No warehouse run was made.
+## Monitoring for finite soaks
 
-A normal run on 9, 10 or 11 October UTC loads them automatically. From 12 October the
-ordinary three-day window no longer reaches that folder, and the run needs
-`METASPIKE_LOAD_DAYS` set wide enough, an execution-time setting on a supervised run
-(a dispatcher-started run uses three). Since C2-F cannot start before its hardening,
-the wider window is the likely path.
+- The silence alert is on only for an unpaused, unbounded schedule. In a finite soak it
+  is off, so it cannot fire before the first tick or after the last.
+- In its place, on in every mode: a failed scheduler attempt, and any failed
+  dispatcher execution. Neither can fire when nothing runs. The second closes an older
+  gap: one dispatcher failure an hour never reached the "two failures in an hour"
+  alert.
+- The volume alert takes `soak_daily_execution_ceiling` (24 to 59) in a finite soak, 60
+  otherwise. Terraform refuses a finite soak without it. The value that never fires in
+  a correct soak is `24 + 2 x max_executions_per_day`, because a rolling day can hold
+  two UTC days' children.
+- No failure alert was weakened. Not alerted on: a scheduler that silently attempts
+  nothing; the post-soak audit compares executions with the exact tick count.
 
-## Expiry stop: options
+## Docker mirror and fallback
 
-| | 1. Finite schedule | 2. Dispatcher pauses its trigger | 3. Separate one-shot stopper | 4. Self-renewing chain |
-|---|---|---|---|---|
-| New permission | None | Pause, project-wide | Pause, project-wide, new identity | Enqueue |
-| Depends on owner's machine | No | No | No | No |
-| Deterministic stop | Yes, fixed at review | After one refusal | At a set time, if its call succeeds | Yes |
-| Terraform drift | None | **Yes, by design** | **Yes, by design** | Replaces the trigger |
-| Re-arm | New reviewed plan | Reviewed unpause plan | Reviewed plan, two schedules | Manual restart |
-| Leaves production disabled by accident | No | Possible in steady state | Possible | Likely, on any failure |
-| During an API failure | Nothing needs to succeed | Retries next tick | Runs on if retries fail | Chain breaks |
-| Cost and complexity | None; two variables, one test | New code and failure branch | New job and identity | High |
+- The Dockerfile takes its base as `${BASE_REGISTRY}/python:3.12-slim-bookworm@sha256:54c85f3c…8cb3`.
+  The digest is unchanged and is the trust anchor.
+- `.github/scripts/build-image.sh` tries `mirror.gcr.io/library`, then
+  `docker.io/library`. For each: fetch the manifest by digest, check the bytes hash to
+  the pinned digest, pull by digest. It builds from the first that passes, with
+  `--pull --no-cache`. If neither passes it fails and builds nothing.
+- No credential, no secret. No workflow step removed: build, run, dbt and scan are as
+  before.
+- **Proof on the runner:** push CI run `38021586494` and plan run `38022130278` both
+  logged "base python@sha256:54c85f3c…8cb3 verified and pulled from
+  mirror.gcr.io/library", and the image built, ran and passed the scan.
+- No image was pushed to the registry and none deployed.
 
-**Recommended: option 1.** The cron expression names the soak's days (for example
-`0 * 12-18 10 *`), set by the same reviewed plan that unpauses. No permission, identity,
-code or drift, and the stop needs nothing to succeed when it happens. Limits: the
-window must sit inside one calendar month; day granularity; it is a second clock beside
-`armed_until` (disagreement is still fail-closed); a window left in place repeats a
-year later against an expired control record. Options 2 and 3 need a project-wide
-Scheduler permission and make Terraform disagree with the live system. What stops an
-indefinite steady-state schedule belongs to C2-G. Nothing is implemented.
+## Pending run-log rows
 
-## Docker Hub: options
+Still 36 landed for 2026-10-09, 4 loaded, **32 pending**. Untouched; no warehouse run.
 
-| Option | Weakens verification | Secret | Complexity | Dependency afterwards |
-|---|---|---|---|---|
-| A. Skip the rebuild for infrastructure-only applies | **Yes** | No | Low | Removed for those applies only |
-| B. Same digest from another registry, Docker Hub as fallback | No | No | Low | Google's public mirror, then Docker Hub |
-| C. Private copy of the base in Artifact Registry | No | No | Higher; brings cloud credentials nearer the test job | None at build time |
-| D. Authenticated Docker Hub pulls | No | **Yes** | Low | Docker Hub |
-| E. Retry with backoff | No | No | Trivial | Unchanged |
+The first approved warehouse execution of C2-F needs
+`METASPIKE_LOAD_DAYS = (UTC date of that run - 2026-10-09) + 1`: 4 on 12 October, 10 on
+18 October, 24 on 1 November. It is an execution-time setting on one supervised run
+before the scheduler is unpaused. The exact value goes into the launch instruction
+when the start date is chosen.
 
-Checked without credentials: Google's public mirror serves the pinned base digest
-today.
+## Tests
 
-**Recommended: option B.** The digest in the Dockerfile stays the trust anchor; the
-registry is only transport. No secret, permission or new resource, no gate skipped,
-and it helps push CI too. Residual risk: the mirror is a cache. Option C is the
-stronger second step if needed. A is not recommended while a fix exists that skips
-nothing; D is rejected. Nothing is implemented.
+- Offline suite: **1,199 passed**, 5 deselected (was 1,160). Ruff and strict mypy clean.
+- Terraform: format clean, both roots valid, **25** production tests passed (was 12),
+  bootstrap tests passed in CI.
+- New: `tests/test_c2f_finite_soak.py`, `tests/test_base_image_mirror.py`, 13 Terraform
+  runs. The build script is run for real in tests against stand-in `curl` and `docker`.
+- CI: push run `38021586494` passed, cloud jobs skipped. Plan run `38022130278` passed.
+
+## Limits of what was proven
+
+- A finite-soak plan has only been made against the mocked provider. The real one is
+  the unpause plan, once dates are chosen.
+- The scheduler-error counter has never seen a real failed attempt; its filter is by
+  the documented severity, not by an observed entry.
+- A new log-based metric can take a short while to become visible to a new alert
+  policy. If the apply of this plan fails on that, nothing is half-done that matters,
+  and it is to be reported, not retried.
+- A full local build was started and interrupted after the base was verified and
+  pulled from the mirror; the complete build is the CI one.
+
+## Security state
+
+Scheduler PAUSED, `0 * * * *`, `Etc/UTC`. Control disabled, generation unchanged.
+Executions 34. All seven jobs on `sha256:a8680b2b…c754`. Prod state serial 11. 0 secret
+versions. 0 user-managed keys. 8 alert policies live (10 after this plan). 11 images in
+the registry, none new. No IAM or WIF change, none planned. Repository variables: only
+`SCHEDULER_PAUSED` = `true`; no soak variable set. Wikimedia calls 0, Steam 0, IGDB 0.
+The portfolio repository was not touched.
 
 ## C2-F entry gates
 
-1. Expiry stop implemented, reviewed and tested; a test fails if the unpaused schedule
-   is not finite.
-2. The unpause plan shows a tick count known in advance; the execution ceiling is
-   derived from it.
-3. Zero dispatcher executions after the window without a new reviewed plan.
-4. Source fail-closed behaviour unchanged; its tests pass.
-5. Request budgets unchanged.
-6. Sampled collector inactive; no sampled source enabled.
-7. Scheduler configuration reviewed in the plan output.
-8. Monitoring fits a finite soak: no silence alert before the first tick or after the
-   end; execution-count threshold consistent with the ceiling.
-9. Alerting charge read from the pricing page; conservative projection under $1 for
-   the soak and under $10 a month.
-10. No plan with a destroy; state matches live.
-11. Security clean: 0 secret versions, 0 keys, no unreviewed IAM or WIF change,
-    approved image.
-12. The deploy path no longer fails on a Docker Hub rate limit, or that risk is
-    accepted explicitly.
-13. The 32 pending rows accounted for in the first warehouse run's plan.
-14. Wikimedia only, 14 articles, tiering shadow only.
+| Gate | State |
+|---|---|
+| 1. Expiry stop implemented, reviewed, tested | Built and tested; awaiting this review |
+| 2. Tick count known in advance, ceiling derived | Met by construction; final figure at launch |
+| 3. Zero executions after the window | Tested; live proof is the soak itself |
+| 4. Source fail-closed unchanged | Met; no control-path code changed |
+| 5. Request budgets unchanged | Met |
+| 6. Sampled collector inactive | Met |
+| 7. Scheduler configuration reviewed in plan output | At the unpause plan |
+| 8. Monitoring fits a finite soak | Built; **needs this plan applied** |
+| 9. Alerting charge read; projection inside bounds | Met: none until 2027-09-01; $0.30 soak, $1.20 a month |
+| 10. No destroy; state matches live | Met: this plan destroys nothing; serial 11 |
+| 11. Security clean | Met |
+| 12. Deploy path survives a Docker Hub rate limit | Met for the base image, proven in CI |
+| 13. 32 pending rows accounted for | Met: rule recorded; value at launch |
+| 14. Wikimedia only, 14 articles, tiering shadow only | Met |
 
-**C2-F: BLOCKED** pending the expiry-stop implementation (gates 1 to 3) and the
-monitoring adjustment (gate 8). No launch time is chosen.
-
-## Confirmations
-
-- Scheduler remained PAUSED and the control record DISABLED throughout.
-- Source calls during C2-E: 0. Cloud Run executions: 0 new (still 34).
-- No infrastructure, quota, IAM, image or data change. No warehouse run.
-- One anonymous read of a public registry manifest was made to check the mirror.
-- Documents changed: `docs/phase4-c2-plan.md` (new section 27),
-  `docs/phase4-runbook.md` (one measured note), this file. No code. Local tests:
-  1,160 passed. The portfolio repository was not touched.
+Everything except date selection and launch passes **except gate 8, which needs this
+plan reviewed and applied**. Until then: C2-F BLOCKED on plan review.
 
 ## Exact next approval required
 
-Approval of this review, and rulings on: the expiry-stop option; the Docker Hub option;
-whether to set up a billing export so the Cloud Run billing rule can be settled before
-any widening of scope.
+Review of plan `38022130278` (SHA-256 above), and approval to apply exactly that plan.
+After it: the choice of soak dates, the C2-F control record, and the unpause plan.
 
 STOP. C2-F has not begun.
