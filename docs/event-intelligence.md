@@ -1,7 +1,10 @@
 # Event intelligence
 
 **Status: INTERNAL / UNCALIBRATED.** This describes an engine, not a product feature.
-No event source is collected yet, so for every real game the result is "unavailable".
+One event source exists, Steam News, for private development only (see
+[event-sources.md](event-sources.md)). It is not collected on a schedule; a single
+supervised probe checked three games and found no promotable event, so no real game has
+a non-zero Event Heat and most real results are "unavailable".
 Every number in `event_heat_rules_v1` is an engineering prior: not fitted, not
 backtested, and not a statement about what anyone should make content about.
 
@@ -248,7 +251,8 @@ No cloud resource was created for any of this.
 ## Limitations
 
 - Internal and uncalibrated. Nothing has been fitted or backtested.
-- No event source is collected; all real results are unavailable.
+- One event source, private development only, not collected on a schedule. No real
+  event has been promoted from it.
 - Not part of score v0 and affects no rank.
 - Importance is per type, not per game: a small game's release and a large game's are
   treated alike.

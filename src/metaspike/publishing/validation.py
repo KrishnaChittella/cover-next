@@ -79,6 +79,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
         )
     _validate_events(games, methodology, radar)
     _validate_history(validation)
+    _validate_event_sources(health)
     for unranked in current.unranked:
         game = games[unranked.slug]
         _require(
@@ -94,6 +95,20 @@ def validate_published(root: Path) -> Manifest:
     version_dir = root / manifest.version_path
     current = validate_version(version_dir)
     _require(current.run_id == manifest.run_id, "manifest selects a different run")
+    _require(
+        (manifest.distribution == "private_development_only") == bool(manifest.restricted_sources),
+        "manifest distribution disagrees with its restricted sources",
+    )
+    health = read_artifact(version_dir / SOURCE_HEALTH_FILE, SourceHealthArtifact)
+    named = {restricted.source for restricted in manifest.restricted_sources}
+    for source in health.event_sources:
+        public = [c for c in source.stage_clearance if c.stage == "public_launch"]
+        asked = source.status == "collected" or source.fetches_after_as_of > 0
+        _require(
+            bool(public) and (not asked or public[0].cleared or source.source in named),
+            f"{source.source}: not cleared for public launch, yet the manifest does not "
+            "mark the bundle as private",
+        )
     _require(
         manifest.ranked_count == len(current.entries)
         and manifest.game_count == len(current.entries) + len(current.unranked),
@@ -179,6 +194,46 @@ def _validate_events(
                 for contribution in games[item.slug].event_intelligence.contributions
             ),
             f"radar lists an event {item.slug} does not carry as upcoming",
+        )
+
+
+def _validate_event_sources(health: SourceHealthArtifact) -> None:
+    """An event source's counts agree with themselves. A post is never counted as an event."""
+    for source in health.event_sources:
+        name = source.source
+        _require(
+            source.candidates_promoted + source.candidates_not_promoted == source.candidates,
+            f"{name}: promoted and unpromoted candidates do not add up",
+        )
+        _require(
+            source.candidates_promoted <= source.candidates_classified <= source.candidates,
+            f"{name}: more candidates promoted than classified",
+        )
+        _require(
+            sum(source.promoted_event_types.values()) == source.candidates_promoted,
+            f"{name}: promoted event types do not add up to the promoted count",
+        )
+        _require(
+            source.candidates_promoted == 0 or source.fetches_ok > 0,
+            f"{name}: promoted candidates without a successful fetch",
+        )
+        collected = source.fetches_ok + source.fetches_failed + source.fetches_not_sent > 0
+        _require(
+            (source.status == "collected") == collected,
+            f"{name}: status disagrees with its fetches",
+        )
+        _require(
+            collected
+            or (source.posts_observed == 0 and source.candidates == 0 and not source.games),
+            f"{name}: reports posts or candidates without having been asked",
+        )
+        _require(
+            len({stage.stage for stage in source.stage_clearance}) == 4,
+            f"{name}: does not state every deployment stage",
+        )
+        _require(
+            sum(game.candidates_promoted for game in source.games) <= source.candidates_promoted,
+            f"{name}: games report more promoted candidates than the source",
         )
 
 

@@ -1473,7 +1473,7 @@ def test_validation_is_published_through_the_artifact_contract(
 ) -> None:
     root = publish(tmp_path, fixture_backtest.report)
     manifest = validate_published(root)
-    assert manifest.schema_version == SCHEMA_VERSION == "1.3.0"
+    assert manifest.schema_version == SCHEMA_VERSION == "1.4.0"
     assert manifest.artifacts.validation == f"{manifest.version_path}/validation.json"
     document = json.loads((root / "validation.json").read_text())
     schema = json.loads((REPO / "schemas" / "validation.schema.json").read_text())

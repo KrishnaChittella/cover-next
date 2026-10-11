@@ -6,6 +6,7 @@ internal domain models reach an artifact only through `publishing/mapping.py`.
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
@@ -13,8 +14,9 @@ from typing import Any
 from metaspike.domain.games import CanonicalGame, Catalogue
 from metaspike.domain.observations import TimeSeries
 from metaspike.domain.signals import CollectionStatus, Signal
-from metaspike.domain.source_policy import SourcePolicy
+from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.timeseries import Granularity
+from metaspike.event_sources.summary import EventSourceSummary
 from metaspike.events.heat import EventIntelligence
 from metaspike.events.model import CoverageCheck, EventRecord
 from metaspike.events.rules import EVENT_HEAT_RULES_V1, EventHeatRules
@@ -41,6 +43,9 @@ from metaspike.publishing.artifacts import (
     ArtifactBundle,
     ConfidenceMethodology,
     CurrentArtifact,
+    EventSourceGameView,
+    EventSourceStageView,
+    EventSourceView,
     FeatureMethodology,
     GameArtifact,
     HistoryPoint,
@@ -52,6 +57,7 @@ from metaspike.publishing.artifacts import (
     MethodologyRef,
     RadarArtifact,
     RelationshipView,
+    RestrictedSourceView,
     ScoreMethodology,
     SignalView,
     SourceCoverage,
@@ -133,6 +139,13 @@ class EventInputs:
     # When to evaluate. None: the end of the run's window (see `event_as_of`).
     as_of: datetime | None = None
     rules: EventHeatRules = field(default=EVENT_HEAT_RULES_V1)
+    # The policy of every source whose events may be used. When given, an event, a
+    # coverage check or a summary from a source that is not in it, or whose policy does
+    # not clear the bundle's stage, stops the build. None: the caller vouches for its
+    # own inputs (tests with synthetic sources); nothing real is wired that way.
+    source_policies: Mapping[str, SourcePolicy] | None = None
+    # What each event source had been asked by `as_of`, in counts.
+    source_summaries: tuple[EventSourceSummary, ...] = ()
 
 
 def build_bundle(
@@ -154,6 +167,7 @@ def build_bundle(
     # assessments are already fixed above, from attention alone.
     inputs = events or EventInputs()
     as_of = inputs.as_of or event_as_of(report)
+    restricted = _restricted_event_sources(inputs, registry.stage)
     intelligence = assess_catalogue(catalogue, inputs.records, inputs.checks, as_of, inputs.rules)
 
     drafts = {
@@ -189,10 +203,14 @@ def build_bundle(
     radar = radar_draft.model_copy(update={"run_id": run_id})
     validation_view = validation_draft.model_copy(update={"run_id": run_id})
     current = _current(games, report, generated_at, run_id)
-    source_health = _source_health(catalogue, report, registry, generated_at, run_id)
+    source_health = _source_health(
+        catalogue, report, registry, generated_at, run_id, inputs.source_summaries
+    )
     version_path = f"{VERSIONS_DIR}/{run_id}"
     manifest = Manifest(
         **_header(generated_at, run_id),
+        distribution="private_development_only" if restricted else "internal",
+        restricted_sources=restricted,
         content_hash=content_hash,
         version_path=version_path,
         artifacts=ManifestPaths(
@@ -214,6 +232,67 @@ def build_bundle(
         methodology=methodology,
         radar=radar,
         validation=validation_view,
+    )
+
+
+def _restricted_event_sources(
+    inputs: EventInputs, stage: DeploymentStage
+) -> tuple[RestrictedSourceView, ...]:
+    """Refuse event data the bundle's stage does not clear; name what is private-only.
+
+    An event derived from a source is a derived output of that source. It may be in a
+    bundle only at a stage the source's policy clears for event intelligence. Where
+    that stage is private and the source is not cleared for public launch, the bundle
+    says so on its manifest, so it cannot be taken for something publishable.
+    """
+    used = {source for record in inputs.records for source in record.sources}
+    used.update(check.source for check in inputs.checks)
+    # A source that was never asked has put nothing into the bundle.
+    used.update(
+        summary.source
+        for summary in inputs.source_summaries
+        if summary.collected or summary.fetches_after_as_of
+    )
+    if inputs.source_policies is None:
+        return ()
+    restricted = []
+    for source in sorted(used):
+        policy = inputs.source_policies.get(source)
+        if policy is None:
+            raise SourcePolicyError(f"{source}: no source policy for this event source")
+        refusal = policy.registration_refusal(SourcePurpose.EVENT_INTELLIGENCE, stage)
+        if refusal is not None:
+            raise SourcePolicyError(f"{source}: {refusal}")
+        public = policy.clearance(DeploymentStage.PUBLIC_LAUNCH)
+        if not public.cleared:
+            restricted.append(
+                RestrictedSourceView(
+                    source=source,
+                    purpose=SourcePurpose.EVENT_INTELLIGENCE.value,
+                    cleared_stages=tuple(
+                        c.stage.value for c in policy.stage_clearance if c.cleared
+                    ),
+                    reason=public.reason,
+                )
+            )
+    return tuple(restricted)
+
+
+def _event_source_view(summary: EventSourceSummary, catalogue: Catalogue) -> EventSourceView:
+    games = []
+    for row in summary.games:
+        game = catalogue.get(row.canonical_game_id)
+        games.append(EventSourceGameView(**row.model_dump(), slug=game.slug, name=game.name))
+    return EventSourceView(
+        **summary.model_dump(exclude={"games", "collected", "stage_clearance", "rules_version"}),
+        purpose="event_intelligence",
+        classification_rules_version=summary.rules_version,
+        status="collected" if summary.collected else "not_collected",
+        stage_clearance=tuple(
+            EventSourceStageView(stage=c.stage.value, cleared=c.cleared, reason=c.reason)
+            for c in summary.stage_clearance
+        ),
+        games=tuple(sorted(games, key=lambda view: view.slug)),
     )
 
 
@@ -430,9 +509,14 @@ def _source_health(
     registry: SourceRegistry,
     generated_at: datetime,
     run_id: str,
+    event_sources: tuple[EventSourceSummary, ...] = (),
 ) -> SourceHealthArtifact:
     return SourceHealthArtifact(
         **_header(generated_at, run_id),
+        event_sources=tuple(
+            _event_source_view(summary, catalogue)
+            for summary in sorted(event_sources, key=lambda item: item.source)
+        ),
         sources=tuple(
             _source_health_entry(run, catalogue, report, registry) for run in report.runs
         ),

@@ -2,14 +2,14 @@
 
 import Link from "next/link";
 
-import type { SourceHealthEntry } from "@/contract";
+import type { EventSourceView, SourceHealthEntry } from "@/contract";
 import { loadSourceHealth } from "@/lib/data/client";
 import { useArtifact } from "@/lib/data/use-artifact";
 import { formatCount, formatDay, formatStaleness, formatTimestamp, humanize } from "@/lib/format";
 
 import { DataState } from "./data-state";
 import { RunNote } from "./run-note";
-import { Stat, StatusBadge } from "./ui";
+import { Badge, Section, Stat, StatusBadge } from "./ui";
 
 const STATUS_MEANING: Record<string, string> = {
   healthy: "Every mapped game was collected.",
@@ -106,6 +106,143 @@ function SourceCard({ source }: { source: SourceHealthEntry }) {
   );
 }
 
+const EVENT_STATUS: Record<string, { label: string; meaning: string }> = {
+  not_collected: {
+    label: "Not collected",
+    meaning: "This source had not been asked about any game at the evaluation moment. That is not the same as no events.",
+  },
+  collected: {
+    label: "Collected",
+    meaning: "The source was asked. A successful check is coverage whether or not it found anything.",
+  },
+};
+
+function EventSourceCard({ source }: { source: EventSourceView }) {
+  const status = EVENT_STATUS[source.status] ?? { label: humanize(source.status), meaning: "" };
+  const refusals = Object.entries(source.refusals).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const types = Object.entries(source.promoted_event_types);
+  return (
+    <article data-testid="event-source" aria-labelledby={`event-source-${source.source}`} className="panel p-5">
+      <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <h3 id={`event-source-${source.source}`} className="text-lg font-semibold tracking-tight text-ink">
+          {humanize(source.source)}
+          <span className="ml-3 font-mono text-xs font-normal text-muted">{source.source}</span>
+        </h3>
+        <Badge tone={source.status === "collected" ? "info" : "neutral"}>{status.label}</Badge>
+      </header>
+      <p className="mt-1 text-sm text-muted">{status.meaning}</p>
+
+      <ul aria-label="Stage clearance" className="mt-4 flex flex-wrap gap-2">
+        {source.stage_clearance.map((stage) => (
+          <li key={stage.stage} title={stage.reason}>
+            <Badge tone={stage.cleared ? "good" : "bad"} glyph>
+              {humanize(stage.stage)}: {stage.cleared ? "cleared" : "not cleared"}
+            </Badge>
+          </li>
+        ))}
+      </ul>
+
+      <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-line pt-5 md:grid-cols-4">
+        <Stat label="Games checked" hint="With at least one successful check">
+          <span className="num font-mono text-xl">{formatCount(source.games_checked)}</span>
+        </Stat>
+        <Stat label="Last successful check">
+          <span className="num">{source.last_success_at ? formatTimestamp(source.last_success_at) : "None"}</span>
+        </Stat>
+        <Stat label="Checks" hint={`${formatCount(source.fetches_failed)} failed, ${formatCount(source.fetches_not_sent)} not sent`}>
+          <span className="num font-mono text-xl">{formatCount(source.fetches_ok)}</span>
+        </Stat>
+        <Stat label="As of">
+          <span className="num">{formatTimestamp(source.as_of)}</span>
+        </Stat>
+      </dl>
+
+      <p className="mt-5 border-t border-line pt-5 text-sm text-ink-soft">
+        A post is an announcement, not an event. Only a promoted candidate becomes an event and can reach Event Heat or
+        the radar.
+      </p>
+      <dl data-testid="event-source-counts" className="mt-4 grid grid-cols-2 gap-x-6 gap-y-5 md:grid-cols-4">
+        <Stat label="Posts observed">
+          <span className="num font-mono text-xl">{formatCount(source.posts_observed)}</span>
+        </Stat>
+        <Stat label="Candidates classified" hint="A type of event was recognised">
+          <span className="num font-mono text-xl">{formatCount(source.candidates_classified)}</span>
+        </Stat>
+        <Stat
+          label="Promoted to events"
+          hint={types.length > 0 ? types.map(([type, count]) => `${humanize(type)} ${count}`).join(", ") : undefined}
+        >
+          <span className="num font-mono text-xl">{formatCount(source.candidates_promoted)}</span>
+        </Stat>
+        <Stat label="Not promoted" hint={`${formatCount(source.candidates_unresolved)} for a game the catalogue does not bind`}>
+          <span className="num font-mono text-xl">{formatCount(source.candidates_not_promoted)}</span>
+        </Stat>
+      </dl>
+
+      {refusals.length > 0 ? (
+        <div className="mt-5 border-t border-line pt-5">
+          <h4 className="eyebrow">Why candidates were not promoted</h4>
+          <ul className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+            {refusals.map(([reason, count]) => (
+              <li key={reason} className="flex justify-between gap-4">
+                <span className="text-ink-soft">{humanize(reason)}</span>
+                <span className="num font-mono text-muted">{formatCount(count)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {source.games.length > 0 ? (
+        <div className="mt-5 overflow-x-auto border-t border-line pt-5">
+          <table className="w-full border-collapse text-sm">
+            <caption className="sr-only">Event source coverage by game</caption>
+            <thead>
+              <tr className="border-b border-line text-xs text-muted">
+                <th scope="col" className="py-2 pr-3 text-left font-medium">Game</th>
+                <th scope="col" className="px-3 py-2 text-left font-medium">Last checked</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Posts</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Classified</th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">Promoted</th>
+                <th scope="col" className="py-2 pl-3 text-right font-medium">Not promoted</th>
+              </tr>
+            </thead>
+            <tbody>
+              {source.games.map((game) => (
+                <tr key={game.canonical_game_id} className="border-b border-line last:border-b-0">
+                  <th scope="row" className="py-2.5 pr-3 text-left font-normal">
+                    <Link
+                      href={`/games/${game.slug}`}
+                      className="text-ink underline decoration-line-strong underline-offset-4 hover:decoration-signal"
+                    >
+                      {game.name}
+                    </Link>
+                  </th>
+                  <td className="num px-3 py-2.5 text-ink-soft">
+                    {game.last_checked_at ? formatTimestamp(game.last_checked_at) : "Never"}
+                  </td>
+                  <td className="num px-3 py-2.5 text-right font-mono">{formatCount(game.posts)}</td>
+                  <td className="num px-3 py-2.5 text-right font-mono">{formatCount(game.candidates_classified)}</td>
+                  <td className="num px-3 py-2.5 text-right font-mono">{formatCount(game.candidates_promoted)}</td>
+                  <td className="num py-2.5 pl-3 text-right font-mono">{formatCount(game.candidates_not_promoted)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {source.fetches_after_as_of > 0 ? (
+        <p className="mt-4 text-xs text-muted">
+          {formatCount(source.fetches_after_as_of)} check{source.fetches_after_as_of === 1 ? " was" : "s were"} made
+          after the evaluation moment and {source.fetches_after_as_of === 1 ? "takes" : "take"} no part in this run.
+        </p>
+      ) : null}
+      <p className="mt-4 font-mono text-xs text-faint">{source.classification_rules_version}</p>
+    </article>
+  );
+}
+
 export function SourceHealth() {
   const state = useArtifact("source-health", loadSourceHealth);
   return (
@@ -121,6 +258,21 @@ export function SourceHealth() {
               ))}
             </div>
           )}
+          <Section
+            id="event-sources"
+            title="Event sources"
+            note="Where announcements are read from. Counts only: no post is shown here."
+          >
+            {data.event_sources.length === 0 ? (
+              <p className="panel p-5 text-sm text-ink-soft">This run reports no event source.</p>
+            ) : (
+              <div className="space-y-4">
+                {data.event_sources.map((source) => (
+                  <EventSourceCard key={source.source} source={source} />
+                ))}
+              </div>
+            )}
+          </Section>
           <RunNote manifest={manifest} />
         </>
       )}

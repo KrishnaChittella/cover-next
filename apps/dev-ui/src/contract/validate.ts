@@ -3,7 +3,14 @@
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 
-import type { ArtifactKind, EventIntelligenceView, RadarArtifact, ValidationArtifact } from "./index";
+import type {
+  ArtifactKind,
+  EventIntelligenceView,
+  Manifest,
+  RadarArtifact,
+  SourceHealthArtifact,
+  ValidationArtifact,
+} from "./index";
 import currentSchema from "./schemas/current.schema.json";
 import gameSchema from "./schemas/game.schema.json";
 import manifestSchema from "./schemas/manifest.schema.json";
@@ -23,7 +30,7 @@ const SCHEMAS: Record<ArtifactKind, object> = {
 };
 
 // The contract version this build of the UI was generated from.
-export const SUPPORTED_SCHEMA_VERSION = "1.3.0";
+export const SUPPORTED_SCHEMA_VERSION = "1.4.0";
 
 let ajv: Ajv2020 | null = null;
 const compiled = new Map<ArtifactKind, ValidateFunction>();
@@ -76,6 +83,65 @@ export function eventIntelligenceViolations(events: EventIntelligenceView, at = 
     if (heat === null) found.push({ path: `${at}/event_heat`, message: "must be a number when event intelligence is available" });
     if (events.unavailable_reasons.length > 0) found.push({ path: `${at}/unavailable_reasons`, message: "must be empty when available" });
   }
+  return found;
+}
+
+/**
+ * What the schema cannot say about an event source: a post is not an event. Promoted and
+ * unpromoted candidates add up to the candidates, nothing is promoted that was not
+ * classified, and a source that was never asked reports nothing.
+ */
+export function eventSourceViolations(health: SourceHealthArtifact): Violation[] {
+  const found: Violation[] = [];
+  health.event_sources.forEach((source, index) => {
+    const at = `/event_sources/${index}`;
+    if (source.candidates_promoted + source.candidates_not_promoted !== source.candidates) {
+      found.push({ path: `${at}/candidates`, message: "promoted and unpromoted candidates do not add up" });
+    }
+    if (source.candidates_promoted > source.candidates_classified || source.candidates_classified > source.candidates) {
+      found.push({ path: `${at}/candidates_promoted`, message: "more candidates promoted than classified" });
+    }
+    const typed = Object.values(source.promoted_event_types).reduce((sum, count) => sum + count, 0);
+    if (typed !== source.candidates_promoted) {
+      found.push({ path: `${at}/promoted_event_types`, message: "do not add up to the promoted count" });
+    }
+    const asked = source.fetches_ok + source.fetches_failed + source.fetches_not_sent > 0;
+    if ((source.status === "collected") !== asked) {
+      found.push({ path: `${at}/status`, message: "disagrees with the source's fetches" });
+    }
+    if (!asked && (source.posts_observed > 0 || source.candidates > 0 || source.games.length > 0)) {
+      found.push({ path: `${at}/posts_observed`, message: "reports posts without the source having been asked" });
+    }
+    if (source.candidates_promoted > 0 && source.fetches_ok === 0) {
+      found.push({ path: `${at}/candidates_promoted`, message: "promoted candidates without a successful fetch" });
+    }
+  });
+  return found;
+}
+
+/** A bundle is private exactly when it names a source that is not cleared to be shown. */
+export function manifestViolations(manifest: Manifest): Violation[] {
+  const restricted = manifest.restricted_sources.length > 0;
+  if ((manifest.distribution === "private_development_only") !== restricted) {
+    return [{ path: "/distribution", message: "disagrees with the manifest's restricted sources" }];
+  }
+  return [];
+}
+
+/** An event source that is not cleared for public launch must make its bundle private. */
+export function privacyViolations(manifest: Manifest, health: SourceHealthArtifact): Violation[] {
+  const named = new Set(manifest.restricted_sources.map((source) => source.source));
+  const found: Violation[] = [];
+  health.event_sources.forEach((source, index) => {
+    const asked = source.status === "collected" || source.fetches_after_as_of > 0;
+    const cleared = source.stage_clearance.some((stage) => stage.stage === "public_launch" && stage.cleared);
+    if (asked && !cleared && !named.has(source.source)) {
+      found.push({
+        path: `/event_sources/${index}/source`,
+        message: "is not cleared for public launch, yet the manifest does not mark the bundle as private",
+      });
+    }
+  });
   return found;
 }
 

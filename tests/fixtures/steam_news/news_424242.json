@@ -1,0 +1,28 @@
+{
+ "note": "SYNTHETIC. Written by hand for tests in the shape the adapter reads. Not a recording of any Steam response; every title, id and URL here is invented.",
+ "status": 200,
+ "body": {
+  "appnews": {
+   "appid": 424242,
+   "newsitems": [
+    {
+     "gid": "7001",
+     "title": "Hotfix 0.9.1",
+     "url": "https://example.invalid/news/7001",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1790942400,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 424242,
+     "tags": [
+      "patchnotes"
+     ]
+    }
+   ],
+   "count": 1
+  }
+ }
+}

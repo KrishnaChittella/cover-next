@@ -322,6 +322,19 @@ what its source had published by then). On the recorded fixture the evidence sta
 score predicts demand. See
 [docs/historical-validation.md](docs/historical-validation.md).
 
+## Event sources (internal, private development only)
+
+`src/metaspike/event_sources/` reads announcements from a source and decides which are
+events. The one source is Steam News, through the documented keyless method
+`ISteamNews/GetNewsForApp/v2`. A post is evidence, not an event: it becomes a
+candidate, and a candidate is promoted to an event observation only when a
+deterministic rule set (`event_classification_rules_v1`) establishes both its type and
+its timing. Everything else stays a candidate and never reaches Event Heat.
+
+`uv run metaspike ingest-events --replay tests/fixtures/steam_news --apps 730 570` runs
+it offline on synthetic fixtures. Nothing Steam-derived is cleared for public or
+commercial use. See [docs/event-sources.md](docs/event-sources.md).
+
 ## Architecture
 
 ```

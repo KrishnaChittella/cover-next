@@ -14,6 +14,9 @@ import type {
 import {
   SUPPORTED_SCHEMA_VERSION,
   eventIntelligenceViolations,
+  eventSourceViolations,
+  manifestViolations,
+  privacyViolations,
   radarViolations,
   validationViolations,
   violations,
@@ -108,7 +111,10 @@ function urlFor(base: string, relative: string): string {
 export async function loadManifest(options: LoadOptions = {}): Promise<Manifest> {
   const base = options.baseUrl ?? dataBaseUrl();
   const url = urlFor(base, MANIFEST_FILE);
-  return conform<Manifest>("manifest", await fetchJson(url, options), url);
+  const manifest = conform<Manifest>("manifest", await fetchJson(url, options), url);
+  const broken = manifestViolations(manifest);
+  if (broken.length > 0) throw new DataError("invalid", `${url} contradicts itself.`, url, broken);
+  return manifest;
 }
 
 async function loadFrom<T extends { run_id: string }>(
@@ -175,6 +181,10 @@ export async function loadSourceHealth(options: LoadOptions = {}): Promise<Loade
     manifest.artifacts.source_health,
     options,
   );
+  const broken = [...eventSourceViolations(data), ...privacyViolations(manifest, data)];
+  if (broken.length > 0) {
+    throw new DataError("invalid", `${manifest.artifacts.source_health} contradicts itself.`, null, broken);
+  }
   return { manifest, data };
 }
 

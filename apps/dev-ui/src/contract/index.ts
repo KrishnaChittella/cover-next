@@ -23,7 +23,7 @@ export type {
   EventContributionView,
   MethodologyRef,
 } from "./types/game";
-export type { Manifest, ManifestPaths } from "./types/manifest";
+export type { Manifest, ManifestPaths, RestrictedSourceView } from "./types/manifest";
 export type {
   MethodologyArtifact,
   TermView,
@@ -49,6 +49,9 @@ export type {
   SourceHealthArtifact,
   SourceHealthEntry,
   SourceFailure,
+  EventSourceView,
+  EventSourceGameView,
+  EventSourceStageView,
 } from "./types/source-health";
 
 export type ArtifactKind =

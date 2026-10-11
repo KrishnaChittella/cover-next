@@ -9,9 +9,11 @@ export interface Manifest {
    * INTERNAL / non-binding engineering contract; not the public contract.
    */
   contract_status: "internal";
+  distribution: "internal" | "private_development_only";
   game_count: number;
   generated_at: string;
   ranked_count: number;
+  restricted_sources: RestrictedSourceView[];
   run_id: string;
   schema_version: string;
   score_version: string;
@@ -26,4 +28,13 @@ export interface ManifestPaths {
   radar: string;
   source_health: string;
   validation: string;
+}
+/**
+ * A source whose data is in this bundle and is not cleared to be shown publicly.
+ */
+export interface RestrictedSourceView {
+  cleared_stages: string[];
+  purpose: string;
+  reason: string;
+  source: string;
 }

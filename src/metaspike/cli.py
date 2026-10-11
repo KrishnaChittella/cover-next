@@ -26,6 +26,22 @@ from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.domain.source_records import SourceRecord
+from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1
+from metaspike.event_sources.ingest import IngestReport, ingest
+from metaspike.event_sources.registry import (
+    EVENT_SOURCE_POLICIES,
+    build_steam_news,
+    replay_news_client,
+)
+from metaspike.event_sources.resolve import steam_app_bindings, steam_news_resolver
+from metaspike.event_sources.steam_news import (
+    DEFAULT_COUNT,
+    MAX_COUNT,
+    NEWS_URL,
+    STEAM_NEWS_POLICY,
+)
+from metaspike.event_sources.store import EventSourceStore
+from metaspike.event_sources.summary import summarise
 from metaspike.events.store import EventStore
 from metaspike.jobs import commands as job_commands
 from metaspike.pipeline.collection import (
@@ -100,6 +116,10 @@ DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_CACHE_DIR = Path(".metaspike/cache")
 DEFAULT_EVENTS_DIR = Path(".metaspike/events")
 DEFAULT_VALIDATION_DIR = Path(".metaspike/validation")
+DEFAULT_EVENT_SOURCES_DIR = Path(".metaspike/event-sources")
+# A supervised live look at an event source: never more than this many apps, and never
+# more than one request for each.
+LIVE_EVENT_PROBE_MAX_APPS = 3
 DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
 DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
 DEFAULT_RECORDED_DIRECTORIES = (
@@ -159,6 +179,7 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     build.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     build.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    build.add_argument("--event-sources-dir", type=Path, default=DEFAULT_EVENT_SOURCES_DIR)
     build.add_argument("--validation-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
     build.set_defaults(handler=_build)
 
@@ -166,6 +187,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_collection_options(run)
     run.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     run.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    run.add_argument("--event-sources-dir", type=Path, default=DEFAULT_EVENT_SOURCES_DIR)
     run.add_argument("--validation-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
 
     backtest = commands.add_parser(
@@ -210,6 +232,39 @@ def _parser() -> argparse.ArgumentParser:
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
     check.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     check.set_defaults(handler=_validate_artifacts)
+
+    events = commands.add_parser(
+        "ingest-events",
+        help="read an event source's announcements into candidates; promote what passes",
+        description=(
+            "Fetch announcements for Steam apps bound to catalogue games, keep them as "
+            "candidates, and promote to event observations only those whose type and "
+            "timing are both established. Offline from recordings with --replay. --live "
+            f"is a supervised probe: at most {LIVE_EVENT_PROBE_MAX_APPS} bound apps, one "
+            "request each, no credential, and nothing of a post is printed."
+        ),
+    )
+    events.add_argument("--source", choices=["steam-news"], default="steam-news")
+    mode = events.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--replay", type=Path, metavar="DIR", help="answer from recorded files")
+    mode.add_argument("--live", action="store_true", help="call the source: a bounded probe")
+    events.add_argument("--apps", type=int, nargs="+", required=True, metavar="APPID")
+    events.add_argument("--count", type=int, default=DEFAULT_COUNT, help=f"posts, 1-{MAX_COUNT}")
+    events.add_argument(
+        "--backfill-requests",
+        type=int,
+        default=0,
+        metavar="N",
+        help="walk back up to N pages per app with the documented enddate (replay only)",
+    )
+    events.add_argument("--observed-at", type=datetime.fromisoformat, default=None)
+    events.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    events.add_argument("--event-sources-dir", type=Path, default=DEFAULT_EVENT_SOURCES_DIR)
+    events.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    events.add_argument("--quota-dir", type=Path, default=DEFAULT_QUOTA_DIR)
+    events.set_defaults(handler=_ingest_events)
 
     probe = commands.add_parser(
         "probe-sources",
@@ -369,14 +424,105 @@ def _collect(args: argparse.Namespace) -> int:
 
 
 def _event_inputs(args: argparse.Namespace, report: CollectionReport) -> EventInputs:
-    """What the local event store knew at the run's evaluation moment.
+    """What the local stores knew at the run's evaluation moment. Nothing is fetched.
 
-    No event source is collected yet, so the store is normally absent and every game's
-    event intelligence is published as unavailable. Nothing here contacts a network.
+    Events and coverage come from the event store, which holds only what was promoted.
+    Each event source's counts come from the source store. Both are read as of the
+    evaluation moment, so anything observed later takes no part. With neither store
+    present every game's event intelligence is published as unavailable.
     """
     as_of = event_as_of(report)
     store = EventStore(args.events_dir)
-    return EventInputs(records=store.events(as_of), checks=store.checks(as_of), as_of=as_of)
+    sources = EventSourceStore(args.event_sources_dir)
+    return EventInputs(
+        records=store.events(as_of),
+        checks=store.checks(as_of),
+        as_of=as_of,
+        source_policies=EVENT_SOURCE_POLICIES,
+        source_summaries=tuple(
+            summarise(sources, policy, EVENT_CLASSIFICATION_RULES_V1.version, as_of)
+            for policy in EVENT_SOURCE_POLICIES.values()
+        ),
+    )
+
+
+def _ingest_events(args: argparse.Namespace) -> int:
+    """One ingestion pass over an event source. Prints counts, never a post."""
+    if args.observed_at is not None and args.observed_at.tzinfo is None:
+        return _fail(EXIT_INVALID_CATALOGUE, "--observed-at must carry a UTC offset")
+    apps = [str(app) for app in dict.fromkeys(args.apps)]
+    records = _recorded(args.recorded)
+    bindings = steam_app_bindings(generate_catalogue(records, as_of=_now()), records)
+    if args.live:
+        if len(apps) > LIVE_EVENT_PROBE_MAX_APPS:
+            return _fail(
+                EXIT_SOURCE_POLICY,
+                f"a live probe covers at most {LIVE_EVENT_PROBE_MAX_APPS} apps",
+            )
+        if args.backfill_requests:
+            return _fail(EXIT_SOURCE_POLICY, "a live backfill is not approved; use --replay")
+        unbound = [app for app in apps if app not in bindings]
+        if unbound:
+            return _fail(
+                EXIT_SOURCE_POLICY,
+                f"app(s) {', '.join(unbound)} are not bound to a catalogue game; a live "
+                "probe uses known bindings only",
+            )
+    requests = len(apps) * max(1, args.backfill_requests)
+    clock = _now if args.observed_at is None else (lambda: args.observed_at)
+    pool = LimiterPool() if args.replay else LimiterPool(ledger=FileQuotaLedger(args.quota_dir))
+    with replay_news_client(args.replay) if args.replay else build_client() as client:
+        adapter = build_steam_news(client, pool, max_requests=requests, now=clock, count=args.count)
+        report = ingest(
+            adapter,
+            STEAM_NEWS_POLICY,
+            apps,
+            steam_news_resolver(bindings),
+            EventSourceStore(args.event_sources_dir),
+            EventStore(args.events_dir),
+            stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+            backfill_requests=args.backfill_requests,
+        )
+    _print_ingest(report, live=args.live, budget=requests)
+    print(f"\nSource store: {args.event_sources_dir}   Event store: {args.events_dir}")
+    return EXIT_OK if report.fetches_failed == 0 else EXIT_SOURCE_UNAVAILABLE
+
+
+def _print_ingest(report: IngestReport, live: bool, budget: int) -> None:
+    mode = "LIVE probe" if live else "offline replay"
+    print(f"Event ingestion ({mode}): {report.source}, {report.rules_version}")
+    print(f"  endpoint: GET {NEWS_URL}  (no key; body and author never read)")
+    print(
+        f"  requests sent: {report.requests} of a budget of {budget}; fetches ok "
+        f"{report.fetches_ok}, failed {report.fetches_failed}, not sent {report.fetches_not_sent}"
+    )
+    for target in report.targets:
+        game = target.canonical_game_id or "not bound to a catalogue game"
+        errors = f"  errors: {', '.join(target.error_codes)}" if target.error_codes else ""
+        print(
+            f"    app {target.source_game_id:<9} requests {target.requests}  posts "
+            f"{target.posts}  coverage {'recorded' if target.coverage_recorded else 'none'}"
+            f"  {game}{errors}"
+        )
+    print(f"  response fields seen: envelope {list(report.observed_envelope_fields)}")
+    print(f"                        post {list(report.observed_item_fields)}")
+    print(f"  feeds seen: {report.observed_feed_names}")
+    print(f"  tags seen:  {report.observed_tags}")
+    print("\n  Posts are announcements, not events:")
+    print(f"    posts observed            {report.posts_observed}")
+    print(f"    posts unreadable          {report.posts_rejected}")
+    print(f"    new post versions kept    {report.new_post_versions}")
+    print(f"    candidates created        {report.candidates_created}")
+    print(f"    candidates classified     {report.candidates_classified}")
+    print(f"    candidates PROMOTED       {report.candidates_promoted}")
+    print(f"    candidates not promoted   {report.candidates_not_promoted}")
+    print(f"    refusals                  {report.refusals}")
+    print(f"    promoted event types      {report.promoted_event_types}")
+    print(f"    event observations added  {report.observations_appended}")
+    print(f"    withdrawals added         {report.withdrawals_appended}")
+    print(f"    coverage checks recorded  {report.coverage_checks_recorded}")
+    if report.candidates_promoted == 0:
+        print("  No candidate could safely become an event in this pass.")
 
 
 def _backtest(args: argparse.Namespace) -> int:

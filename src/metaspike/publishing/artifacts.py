@@ -26,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
@@ -390,8 +390,65 @@ class SourceHealthEntry(ContractModel):
     failures: tuple[SourceFailure, ...]
 
 
+class EventSourceStageView(ContractModel):
+    stage: str
+    cleared: bool
+    reason: str
+
+
+class EventSourceGameView(ContractModel):
+    canonical_game_id: str
+    slug: str
+    name: str
+    source_game_ids: tuple[str, ...]
+    last_checked_at: AwareDatetime | None = None
+    fetches_ok: int = Field(ge=0)
+    fetches_failed: int = Field(ge=0)
+    posts: int = Field(ge=0)
+    candidates_classified: int = Field(ge=0)
+    candidates_promoted: int = Field(ge=0)
+    candidates_not_promoted: int = Field(ge=0)
+
+
+class EventSourceView(ContractModel):
+    """An event source: what it was asked by `as_of` and what came of it, in counts.
+
+    A post is not an event. `posts_observed` and `candidates` count announcements;
+    only `candidates_promoted` became event observations, and only those can reach
+    Event Heat or the radar. No title or text of a post is published here.
+    """
+
+    source: str
+    purpose: Literal["event_intelligence"]
+    classification_rules_version: str
+    as_of: AwareDatetime
+    # "not_collected": nothing had been asked of the source by `as_of`. That is not the
+    # same as asked-and-found-nothing, which is "collected" with zero posts.
+    status: Literal["not_collected", "collected"]
+    stage_clearance: tuple[EventSourceStageView, ...]
+    fetches_ok: int = Field(ge=0)
+    fetches_failed: int = Field(ge=0)
+    fetches_not_sent: int = Field(ge=0)
+    last_success_at: AwareDatetime | None = None
+    last_failure_at: AwareDatetime | None = None
+    games_checked: int = Field(ge=0)
+    posts_observed: int = Field(ge=0)
+    candidates: int = Field(ge=0)
+    candidates_classified: int = Field(ge=0)
+    candidates_promoted: int = Field(ge=0)
+    candidates_not_promoted: int = Field(ge=0)
+    candidates_unresolved: int = Field(ge=0)
+    refusals: dict[str, int]
+    promoted_event_types: dict[str, int]
+    # Requests made after `as_of`: not part of this picture, counted so that a store
+    # filled later is not mistaken for coverage that existed then.
+    fetches_after_as_of: int = Field(ge=0)
+    games: tuple[EventSourceGameView, ...]
+
+
 class SourceHealthArtifact(ArtifactHeader):
     sources: tuple[SourceHealthEntry, ...]
+    event_sources: tuple[EventSourceView, ...]
 
 
 class TermView(ContractModel):
@@ -816,7 +873,21 @@ class ManifestPaths(ContractModel):
     games: dict[str, str]
 
 
+class RestrictedSourceView(ContractModel):
+    """A source whose data is in this bundle and is not cleared to be shown publicly."""
+
+    source: str
+    purpose: str
+    cleared_stages: tuple[str, ...]
+    reason: str
+
+
 class Manifest(ArtifactHeader):
+    # "private_development_only": the bundle holds something derived from a source that
+    # is cleared for private development and not for public launch. Such a bundle is
+    # for the local developer interface and must never be published.
+    distribution: Literal["internal", "private_development_only"]
+    restricted_sources: tuple[RestrictedSourceView, ...]
     content_hash: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     version_path: str
     artifacts: ManifestPaths

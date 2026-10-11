@@ -61,6 +61,9 @@ class SourcePurpose(StrEnum):
 
     DEMAND_SIGNALS = "demand_signals"  # metrics that features and scores derive from
     CATALOGUE_METADATA = "catalogue_metadata"  # identity, dates and relationships
+    # Announcements read as evidence of events. Nothing here is a demand metric, and
+    # what is derived is an event (a type and a time), never a number of the source's.
+    EVENT_INTELLIGENCE = "event_intelligence"
 
 
 class StageClearance(FrozenModel):
@@ -250,10 +253,44 @@ class SourcePolicy(FrozenModel):
             Permission.PROHIBITED,
         ):
             return "policy does not permit storing the source's metadata"
+        if purpose is SourcePurpose.EVENT_INTELLIGENCE:
+            # A derived event is a derived output of the source. Privately the question
+            # may stay unanswered; a prohibition is a prohibition at every stage.
+            if self.derived_metrics_allowed is Permission.PROHIBITED:
+                return "policy does not permit collection (derived events are prohibited)"
+            if self.historical_storage_allowed in (Permission.UNKNOWN, Permission.PROHIBITED):
+                return "policy does not permit storing the source's announcements"
+            if stage in PUBLIC_STAGES:
+                if not self.derived_output_permitted:
+                    return (
+                        f"derived events are not explicitly allowed "
+                        f"({self.derived_metrics_allowed.value}), so the source may not be "
+                        f"part of a {stage.value} configuration"
+                    )
+                if not self.redistribution_allowed.permits:
+                    return (
+                        f"showing the source's announcements is not explicitly allowed "
+                        f"({self.redistribution_allowed.value}), so the source may not be "
+                        f"part of a {stage.value} configuration"
+                    )
         clearance = self.clearance(stage)
         if not clearance.cleared:
             return f"not cleared for {stage.value}: {clearance.reason}"
         return None
+
+    def field_retention_permitted(self, field: str) -> bool:
+        """Whether one field of a response may be kept at all, even privately.
+
+        Looser than `field_storage_permitted`, which demands an unconditional ALLOWED:
+        a RESTRICTED permission is a conditional yes, and the conditions are the stage
+        clearance's business. An UNKNOWN or PROHIBITED one is a no. A field rule can
+        only narrow the source's own permission.
+        """
+        refused = (Permission.UNKNOWN, Permission.PROHIBITED)
+        if self.historical_storage_allowed in refused:
+            return False
+        rule = self._rule(field)
+        return rule is None or rule.storage_allowed not in refused
 
     @property
     def collection_permitted(self) -> bool:

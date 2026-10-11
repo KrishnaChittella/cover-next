@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.3.0",
+  "schema_version": "1.4.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T19:48:47.101275Z",
-  "run_id": "20261011T194847Z-a687df83",
+  "generated_at": "2026-10-11T20:57:04.040769Z",
+  "run_id": "20261011T205704Z-c082f8f4",
   "score_version": "metaspike_score_v0",
   "canonical_game_id": "f2f36b97-9664-4d59-a749-d2bba4f57e05",
   "slug": "fortnite",
@@ -71,5 +71,5 @@
     "path": "methodology.json",
     "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
   },
-  "updated_at": "2026-10-11T19:48:47.101275Z"
+  "updated_at": "2026-10-11T20:57:04.040769Z"
 }
