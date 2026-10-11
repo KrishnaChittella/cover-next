@@ -5,216 +5,280 @@ on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and
 touched. It supports communication only and replaces no code, test or document.
 
 Production baseline: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
-(true at 19:55 UTC on 2026-10-11: the first tick is 2026-10-12T00:00Z and no scheduler
+(true at 21:04 UTC on 2026-10-11: the first tick is 2026-10-12T00:00Z and no scheduler
 attempt has been made)
 
-Parallel checkpoint: **PRODUCT BUILD U3.1: POINT-IN-TIME VALIDATION CORRECTED — CHATGPT REVIEW REQUIRED**
+Parallel checkpoint: **PRODUCT BUILD U4: EVENT SOURCE INGESTION COMPLETE — CHATGPT REVIEW REQUIRED**
 
-Everything here is offline and deterministic. No source was called, nothing was
-deployed, and production was only read.
+Private development only. Nothing was deployed, published or connected to production.
+One bounded, supervised live probe was run; its exact scope is below.
 
-## The bug
+Full description: `docs/event-sources.md`.
 
-`RecordedHistory.inputs_at(cutoff_day)` kept every value through `cutoff_day` and
-stamped the prediction at the end of that day. It restricted by the calendar and not by
-whether the source had published the period. Wikimedia publishes a day 24 hours after
-it ends, so each simulated recommendation used one day nobody could have seen at that
-moment, and its outcome window began the day after. That is point-in-time leakage. The
-existing checks could not see it: they perturbed only days after the cutoff.
+## One decision that needs your review
 
-## Corrected semantics
+The existing build refuses any *demand* source whose derived-metrics permission is
+unanswered, at every stage. Steam's is unanswered. Applied to events as it stands, that
+rule would keep every Steam-derived event out of the artifacts and so out of the local
+interface.
 
-Three times, now three fields on every snapshot:
+I gated events **by deployment stage** instead: event data may enter a bundle only at a
+stage the source's policy clears for event intelligence (today, private development
+only). Any such bundle is marked on its manifest, `distribution:
+"private_development_only"` with the source under `restricted_sources`; the validator
+and the interface both refuse a bundle that carries such data unmarked, and the
+interface shows a notice on every page.
 
-| Field | Meaning | Fixture example |
-|---|---|---|
-| `as_of` (P) | The instant the recommendation is simulated | 2026-09-15 00:00 UTC |
-| `evaluation_day` | Last UTC day fully ended at P | 2026-09-14 |
-| `latest_due_day` | Newest day the source had published by P | 2026-09-13 |
+This makes the artifact bundle a place private-only data can be, which it was not
+before. The demand-source rule is unchanged. If you would rather events follow the
+stricter demand rule, the change is one condition in
+`publishing/build.py::_restricted_event_sources`, and the interface would then show
+event sources only as "not collected".
 
-Also `latest_observed_day` (newest day a value was actually held) and
-`publication_lag_hours`. `data_cutoff_day` is gone. Snapshot format is
-`recommendation_snapshot_v2`; report format `validation_report_v2`.
+## Source policy
 
-- **Availability** is `latest_due_period(granularity, P, lag)`, the pipeline's own
-  function, with the lag from each source's policy
-  (`operations.expected_publication_lag`). It is applied where a recording becomes
-  inputs (`inputs_at(as_of: datetime)`) and checked again where inputs are used
-  (`ensure_available`, called by `predict`). Feature and scoring code are untouched and
-  know nothing of any source. A lag must be stated for every source; there is no
-  default.
-- **Outcome window** starts at `first_forward_day(as_of)`: the day beginning at P when
-  P is exactly on a UTC boundary, otherwise the following day. 72h is the next three
-  whole forward days; 24h, 7d and local-peak use the same start. A label records
-  `prediction_at` and is refused if its window starts before it.
-- The day that had ended but was not due is in neither side. Its only use is on the
-  outcome side, as the "day before" when deciding whether the first forward day rose.
-- The backtest's `--from`/`--to` are prediction days, each at 00:00 UTC. A day the
-  recording cannot stand in for is refused with a clear error.
-
-## New invariant and checks
-
-At P, no observation whose period was not due by P under its source's lag may enter a
-prediction. A violation raises `LeakageError`; no report can be produced from it.
-
-Five checks run in every backtest (was four):
-
-| Check | Checked on the fixture |
-|---|---|
-| `source_publication_lag_respected` (new; replaces `inputs_end_at_cutoff`) | 546 series |
-| `outcome_window_after_prediction` (new) | 1,365 |
-| `reproduced_after_labelling` | 1,365 |
-| `unchanged_when_unseen_values_altered` (renamed from `unchanged_when_future_altered`; now also alters ended-but-unpublished days) | 45 |
-| `reference_frozen_at_snapshot` | 1,365 |
-
-The artifact validator and the UI's validator additionally refuse a report without the
-lag check, with a recommendation that sees its own day, with an outcome window before
-its recommendation, with no lag stated, or with a malformed provenance hash.
-
-## Regression test
-
-`test_a_period_that_had_ended_but_was_not_yet_published_is_withheld`: P = 00:00 on day
-61, lag one day. Day 59 (X) is due; day 60 (X+1) is in the recording with 9,000,000
-and is not due. Asserts X+1 is absent (null, not zero), the newest feature day is X,
-and the snapshot (score, rank, confidence, id) is identical whether X+1 is 90 or
-9,000,000. It then applies the old calendar-only rule to the same data and shows the
-value does get in and the score changes, and that such inputs are refused when the true
-lag is stated.
-
-Stated plainly: the old code was not checked out and run against this test, because
-its interface no longer exists; the old behaviour is reproduced inside the test.
-
-Companion tests: zero lag; the exact due boundary; one second before and after; a
-mid-day P taking the next whole day; two sources with different lags; a not-yet-due day
-is missing and never zero; the first outcome day follows the recommendation, not the
-data. The U2 regression that a later event revision cannot rewrite an earlier
-recommendation is kept and passes; events are evaluated at the exact P. Event Heat was
-not calibrated.
-
-## Provenance
-
-`snapshot_set_hash` and `label_set_hash`: SHA-256 over the sorted record ids joined by
-newlines. Same set, same hash; one changed record, different hash (tested both ways,
-including same snapshots with a different future changing only the label hash). Both
-feed the `report_id`. `AccountabilityStore.audit(report)` recomputes them from stored
-records; the `backtest` command prints the result. Published in `validation.json` and
-shown in a compact section on `/validation`. Ids and hashes only, no observations.
-
-**Internal schema 1.2.0 → 1.3.0**, Python contract → JSON Schema → generated
-TypeScript. Renamed `first/last_snapshot_day` to `first/last_prediction_day`; added
-`first/last_latest_due_day`, `publication_lag_hours`, the two hashes; inspection days
-gain `latest_due_day`, `primary_window_start`, `primary_window_end`. Published outcome
-formulas are restated relative to the recommendation (`x[f]`, `[P]`).
-
-## Corrected real fixture result
-
-`uv run metaspike backtest --replay tests/fixtures/wikimedia --recorded-through
-2026-10-03 --from 2026-07-07 --to 2026-10-05`
-
-- 91 prediction days at 00:00 UTC; newest visible day 2026-07-05 to 2026-10-03; lag
-  wikimedia_pageviews 24 h.
-- Universe 15; 6 ever ranked; 1,365 snapshots (420 ranked, 945 unranked).
-- Evaluable 396; unavailable: `future_incomplete` 24, `not_scored_at_snapshot` 945.
-- **Evidence status `framework_only`**, set mechanically by `validation_protocol_v1`.
-- 5 of 5 checks passed.
-- `report_ab3be39389de0313637e9518d2569722`
-- `snapshot_set_hash` `8a0f192d11aac11fd92d37736598cb3cd7ea130c253c84cac5efeb86770ee748`
-- `label_set_hash` `6b8aa3ce15dbe68977bf1bd68778d4ed65f0e2cfd704a94af7adf70d182cabdf`
-
-Mean / median / hit rate (top 1 n=66, top 3 n=198, top 5 n=330); association over 66 days:
-
-| Strategy | Top 1 | Top 3 | Top 5 | Rank association |
-|---|---|---|---|---|
-| `metaspike_score_v0` | +114.4% / +50.1% / 82% | +66.6% / +30.0% / 68% | +41.4% / +10.7% / 51% | +0.62 (60 pos, 6 neg) |
-| `raw_popularity` | +77.9% / +5.4% / 47% | +41.0% / +9.2% / 48% | +42.6% / +8.9% / 47% | +0.06 (29, 37) |
-| `simple_lift` | +112.6% / +51.3% / 80% | +62.8% / +25.9% / 68% | +41.2% / +9.5% / 50% | +0.71 (64, 2) |
-| `simple_velocity` | +74.3% / +35.4% / 67% | +56.9% / +10.5% / 51% | +39.0% / +5.1% / 43% | +0.15 (41, 25) |
-
-All ranked (n=396): mean +36.6%, median +6.1%, min −49.0%, max +1,045.5%, hits 43.9%,
-downsides 28.3%. By score: 0 → −0.1% (117); 0–10 → +6.2% (146); 10–25 → +52.3% (62);
-25–50 → +76.5% (37); 50–100 → +221.2% (34). Confidence: low +47.0% (144), medium +30.6%
-(252), high none. Movement 24h: mean +8.5%, median −1.9% (408). Persistence: mean 0.62,
-median 0.86 (372). Peak: found 259, none 113, unavailable 48; median 3 days.
-
-**Plain lift still orders the games more consistently than score v0** (+0.71 against
-+0.62). Score v0's top pick has a marginally higher mean and a marginally lower median.
-
-## Against U3's provisional figures (superseded)
-
-| | U3 (leaky) | U3.1 |
-|---|---|---|
-| Days / snapshots | 90 / 1,350 | 91 / 1,365 |
-| Evaluable / future incomplete | 402 / 18 | 396 / 24 |
-| v0 top 1 mean / hit | +129.3% / 84% | +114.4% / 82% |
-| v0 top 3 | +72.0% / 68% | +66.6% / 68% |
-| v0 top 5 | +42.2% / 50% | +41.4% / 51% |
-| v0 association | +0.68 | +0.62 |
-| lift top 1 | +127.6% / 84% | +112.6% / 80% |
-| lift association | +0.78 | +0.71 |
-| popularity association | +0.08 | +0.06 |
-| velocity top 1 / association | +90.4% / +0.18 | +74.3% / +0.15 |
-| All ranked mean / median | +35.2% / +5.5% | +36.6% / +6.1% |
-
-Leading-group means and both main rank associations fell once the unpublished day was
-removed. The qualitative reading did not change.
-
-## Runtime
-
-Measured: the fixture run (91 days × 15 games) took 0.58 to 0.59 s on a laptop,
-including reproduction and perturbation. Nothing else has been measured. Complexity is
-O(prediction days × games). The unmeasured timing claims for 1,000 to 10,000 games are
-removed. Bottlenecks noted, not addressed: results held in memory until the end; the
-store reads every record on each add and audit; each day re-filters the recording.
-
-## Frozen parts, unchanged
+`STEAM_NEWS_POLICY`, source id `steam_news`. Its own policy, not the catalogue's or the
+player counts'. New purpose `SourcePurpose.EVENT_INTELLIGENCE`.
 
 | | |
 |---|---|
-| `src/metaspike/scoring` (concatenated sources, SHA-256 prefix) | `3b857c551d5ab5b0`, as at U3.1 start |
-| `src/metaspike/features` | `24cf7d170f57d8ab`, same |
-| `src/metaspike/events` | `333373c61ae6c37f`, same |
-| `events/rules.py` | `7358ea6563ddcad9`, same |
-| Pinned model fingerprints (event heat rules, outcome rules, validation protocol) | tests unchanged and passing |
-| Score v0 golden replay | bit-for-bit; also reproduced by the backtest with zero lag |
+| Private development | cleared |
+| Private collection | **not cleared** |
+| Public launch | **not cleared** |
+| Commercial production | **not cleared** |
+| Raw / historical storage | restricted (conditional) |
+| Derived events | **unknown** |
+| Redistribution / display | restricted; a publisher's title: **unknown** |
+| Commercial use | **unknown** |
+| Attribution | required |
+| Budget | 1 request/s self-imposed; 100,000 calls/day documented; one budget group with every Steam source |
+| Publication | a post's own timestamp; lag 0, self-imposed, undocumented |
+| Never read | post body (`contents`), `author` |
 
-`git diff a50b678 -- src/metaspike/scoring src/metaspike/features src/metaspike/events`
-is empty.
+Recorded as unresolved on the policy: the Web API terms are written around a key and
+this method takes none; derived data is not addressed; a post is the publisher's text,
+not Valve's; the Subscriber Agreement's automation clause; the undocumented response;
+commercial use. Unknown was left unknown.
 
-## Found along the way
+Enforced at ingestion (before any request), at storage (per field) and at the build.
 
-- A local store holding U3-format records made `metaspike run` fail. The store now
-  keeps each simulation generation apart (`{root}/point-in-time-v2/…`); older records
-  stay on disk and are never read as current. Tested.
-- An unreachable backtest range was an unexpected failure; it is now a clean error.
+## Adapter
 
-## Gates
+`EventSourceAdapter` protocol (`event_sources/base.py`): `fetch` and `backfill`,
+returning immutable `SourceItem`s with source, source game id, source item id,
+`published_at`, title, optional summary, reference, raw feed and tag fields,
+`observed_at` and provenance. No classification, scoring or canonical game in it.
 
-Backend: `ruff format --check` clean (200 files); `ruff check` clean; `mypy` clean (190
-files); `pytest` 1,356 passed, 5 deselected (the slow marker, as before).
-Frontend (`apps/dev-ui`): `contract:check`, `typecheck`, `lint`, `test` (163 passed),
+`SteamNewsAdapter`: `GET https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/`
+with `appid`, `count` (5; never above 20), `maxlength=1`, and `enddate` for a backfill
+page. No key. Only `gid`, `title`, `date` are required; other fields optional, unknown
+ones ignored. A bad entry fails alone (position and reason, never content); a bad
+envelope fails the request. A title is plain text, never parsed or rendered. No link is
+followed. Uses the existing `LimitedHttpClient`, Steam limiter and `AttemptBudget`; one
+transmission per fetch, no retry.
+
+## Event candidate
+
+`EventCandidate`: canonical game and the binding it resolved through; source item id and
+item version; announced and observed times; proposed type, start and precision where
+established; classifying rule and all matching rules; evidence; evidence category;
+timing basis and whether explicit or inferred; promotion status; **every** refusal; an
+explanation; the observation id when promoted.
+
+## `event_classification_rules_v1` (exact)
+
+Deterministic; titles and structured tags only. No LLM, embeddings or similarity. Pinned
+by fingerprint.
+
+Read at all only if `feedname == "steam_community_announcements"`.
+
+| Rule | Type | Needs | Without a date |
+|---|---|---|---|
+| `patch_notes_hotfix` | minor patch | tag `patchnotes` + "hotfix"/"hotfixes"/"hot fix" | publication time |
+| `patch_notes_major_update` | major patch | tag `patchnotes` + "major update" | publication time |
+| `season_start` | season | "season" + a number | publication time only with a live phrase |
+| `free_weekend` | free weekend | "free weekend" | same |
+| `expansion_release` | expansion | "expansion" | same |
+| `dlc_release` | DLC | "DLC" | same |
+
+Type refusals: `not_an_official_feed`, `no_type_evidence`, `ambiguous_type` (more than
+one type), `patch_size_not_established` (tag, no size word),
+`title_not_about_an_occurrence` (trailer, roadmap, recap, sale, delayed, ends, last,
+and the rest of a fixed list).
+
+Timing, asked only once the type is settled:
+
+- **Explicit date**, three forms with a year (`2026-10-20`, `October 20, 2026`,
+  `20 October 2026`). Refused as `ambiguous_date` (no year, slashed digits, impossible
+  date, more than one), `date_role_unclear` (no start word, or an end word such as
+  "until"), `date_before_publication`, `date_too_far_ahead` (over 180 days). Otherwise
+  day precision, explicit.
+- **Publication time**, to the second, only where the rule allows. Refused as
+  `title_says_not_yet` (coming, soon, tomorrow, will, preview, ...) or
+  `no_timing_evidence`. The four title rules need "now live", "is live", "out now",
+  "available now" or one of six similar phrases. The two patch-notes rules do not: the
+  accepted basis is the publisher's own patch-notes filing. That is the one inference in
+  the rule set and each such candidate records its timing as inferred.
+
+No end time is proposed.
+
+## Promotion gate
+
+All of: game bound; source cleared at this stage; type established; timing established.
+Otherwise a candidate with its reasons. A promoted candidate becomes one
+`EventObservation` through the event engine's own `observe`.
+**`EventObservation` was not extended**: it already carries the source item id and
+reference; rule and timing basis stay on the candidate, linked by `observation_id`. A
+post later edited into a non-event appends a `withdrawn` observation.
+
+Resolution is the catalogue's existing binding (bound app, confirmed by a structured
+external id), the standard the player-count sampler uses. No title is read. An unbound
+app's post is a source-level candidate only: no observation, no coverage.
+
+## Coverage
+
+A successful fetch records a `CoverageCheck` for the game asked about whatever it
+returned: nothing, posts that classify as nothing, refused candidates, or only
+unreadable entries. That game then has Event Heat 0, available. A failed fetch, or one
+not sent because the budget was spent, records none: unavailable, not zero.
+
+## Storage
+
+`EventSourceStore`, separate from `EventStore`, under
+`{root}/event-source-v1/{fetches,items,candidates}/{observed day}/{hash}.ndjson`.
+Append-only, content-addressed, idempotent; an edited post is a new version (including
+one reverting to earlier wording); point-in-time reads; an item with a field the policy
+forbids is refused whole. Only promoted observations and coverage checks go to
+`EventStore`, which is all Event Heat reads. The event engine does not import this
+package. No cloud table was created; the future mapping is documented.
+
+## Historical support
+
+`backfill(app, max_requests=N)` pages backwards with the documented `enddate`, stopping
+on failure, an empty page, no progress, or N requests. Implemented and tested offline
+only. **No live backfill was run**; the command refuses one.
+
+Both `published_at` and `observed_at` are kept. A backfilled post is not treated as
+known in the past: point-in-time reads use `observed_at`. Using publication time as
+availability in a later backtest would be an explicit assumption, not yet made.
+
+The backtest already takes an event store. A synthetic test proves the wiring
+(unavailable before a post was seen, counted after; score v0 identical). Evidence status
+stays `framework_only`. No event performance is claimed.
+
+## Live probe: performed
+
+After every offline gate had passed, and after a read-only C2-F check.
+
+| | |
+|---|---|
+| When | 2026-10-11 21:02:56 to 21:02:57 UTC, from the owner's machine |
+| Apps | 730, 570, 1086940 (Counter-Strike 2, Dota 2, Baldur's Gate 3), all bound |
+| Requests | **3**, one per app, hard budget 3, no retry, no backfill |
+| Credential | none |
+| Result | HTTP 200 ×3 |
+
+Shape observed: envelope `appid`, `count`, `newsitems` (`count` is the app's total, not
+the number returned); twelve post fields, all already handled; own-feed posts had
+`feed_type` 1 and syndicated ones 0; `is_external_url` was true on all 15 and is not
+used; the only tag was `patchnotes`. `author` and `contents` were present and unread.
+
+**No fixture was kept from it.** The policy does not clearly allow a publisher's titles
+in a repository. Test fixtures are synthetic and say so. The 15 posts are in the local
+untracked store only.
+
+### Real results, candidates versus events
+
+| | |
+|---|---|
+| Posts observed | 15 |
+| Candidates created | 15 |
+| Candidates classified | **0** |
+| Candidates promoted | **0** |
+| Not promoted | 15: not the game's own feed 9; patch notes with no size 4; no type evidence 2 |
+| Event types observed | none |
+| Event observations written | 0 |
+| Coverage checks | 3 |
+
+**Zero candidates could safely become events.** The classifier was not changed
+afterwards, and no post was inspected to find a rule that would promote it.
+
+Exactly: those three games have real coverage as of the probe and no real event, so
+their event intelligence at that moment is available with a heat of 0. No game has a
+non-zero Event Heat from real data.
+
+## Artifacts and UI
+
+Internal contract **1.3.0 → 1.4.0**, Python → JSON Schema → TypeScript.
+
+- `source-health.json`: `event_sources`, counts only (status, stage clearances, checks,
+  games checked, posts, candidates classified / promoted / not promoted / unresolved,
+  refusal counts, promoted types, checks after the evaluation moment, a row per game).
+- `manifest.json`: `distribution`, `restricted_sources`.
+- Sources page: one event-source panel. Every page: the private-only notice when it
+  applies. No redesign. No candidate view with titles was added. Radar and game
+  artifacts hold promoted events only.
+
+The replay bundle is evaluated on 4 October, before the probe, so it shows Steam News as
+`not_collected` and counts the three later checks as taking no part.
+
+## Tests and gates
+
+94 new backend tests (`tests/test_event_sources.py`) and 12 new frontend tests, covering
+every item in the list given.
+
+Backend: `ruff format --check` clean; `ruff check` clean; `mypy` clean (200 files);
+`pytest` **1,450 passed**, 5 deselected (slow marker), run before the probe and again
+after it. Frontend: `contract:check`, `typecheck`, `lint`, `test` (**175 passed**),
 `build` all pass.
-Not done: the page was not opened in a real browser this checkpoint; it is covered by
-the component tests against the real replay bundle and by the production build.
 
-## Production isolation (read-only, 19:55 UTC 2026-10-11)
+Also changed: an autouse test fixture now points the command line's default local
+stores at an empty directory, so no test reads a developer's real local state.
 
-C2-F has **not begun**: no autonomous activity to report. Scheduler ENABLED,
-`0 * 12-18 10 *`, `Etc/UTC`, next run 2026-10-12T00:00:00Z, no attempt. Control record
-generation `1791684706340016`, unchanged. Executions 35, last `ms-warehouse-lxqp9` at
-2026-10-11T01:06Z. Seven jobs, generation 6, image `sha256:a8680b2be8b5…`. Ten alert
-policies; IAM, schemas, secrets, alerts identical to the last snapshot. 0 secret
-versions, 0 user keys. Rows unchanged (collection_runs 54, observations 1,372, ledger
-28). Repository variables unchanged. `main` = `cb33198`, level with origin. Last
-workflow run is still 38104941975. No pull request exists. The portfolio repository
-was not touched.
+Not done: the new panel was not opened in a real browser; it is covered by component
+tests and the production build.
+
+## Unchanged
+
+| | |
+|---|---|
+| `src/metaspike/scoring` | `3b857c551d5ab5b0`, as before |
+| `src/metaspike/features` | `24cf7d170f57d8ab`, as before |
+| `src/metaspike/events` (the whole engine) | `333373c61ae6c37f`, as before |
+| `events/rules.py` / `event_heat_rules_v1` | `7358ea6563ddcad9`; model fingerprint test passes |
+| `src/metaspike/validation` (U3.1) | no diff; the publication-lag regression passes |
+| Score v0 golden replay | bit-for-bit |
+
+Event Heat is not in score v0.
+
+## Limitations worth knowing
+
+Titles only, English only, one source. Most real posts will not be promoted, by design.
+The feed name and tag are observed values, not documented ones. Posts already stored are
+not re-read when rules change. A deleted post is not noticed.
+
+## Production and C2-F isolation (read-only, 21:04 UTC 2026-10-11)
+
+C2-F has **not begun**; there is no autonomous activity to report. Scheduler ENABLED,
+`0 * 12-18 10 *`, next run 2026-10-12T00:00:00Z, no attempt. Control generation
+`1791684706340016`, unchanged. Terraform state unchanged (latest object generation is
+the launch apply's). Executions 35, last `ms-warehouse-lxqp9`. Seven jobs, generation 6,
+image `sha256:a8680b2be8b5…`. Ten alert policies; IAM, schemas, secrets and alerts
+identical to the previous snapshot. 0 secret versions, 0 user keys. Rows unchanged.
+Repository variables unchanged. Last workflow run still 38104941975. `main` =
+`cb33198`, level with origin. No pull request. The portfolio repository was not
+touched.
+
+The probe called Steam's public API from this machine only. No production job, bucket,
+identity or secret was involved, and production made no source call because of U4.
 
 ## Commits
 
-`4333284` fix: make historical validation publication-lag safe; then this handoff.
-Pushed to `origin/product/local-ui` only. No PR, no merge to `main`.
+`30bc382` feat: add official event source ingestion; then this handoff. Pushed to
+`origin/product/local-ui` only. No PR, no merge to `main`.
 
 ## Exact next approval required
 
-ChatGPT review of U3.1.
+ChatGPT review of U4, including the stage-gating decision above.
 
-STOP. U4 has not been started.
+STOP. U5 has not been started.
