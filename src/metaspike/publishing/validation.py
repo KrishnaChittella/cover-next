@@ -109,6 +109,26 @@ def validate_published(root: Path) -> Manifest:
             f"{source.source}: not cleared for public launch, yet the manifest does not "
             "mark the bundle as private",
         )
+    # Every source an event or a coverage check in the bundle is attributed to must be
+    # accounted for: named as restricted, or described here as cleared for public
+    # launch. An event source nobody declared is not allowed to be in a bundle at all.
+    public_sources = {
+        source.source
+        for source in health.event_sources
+        if any(c.stage == "public_launch" and c.cleared for c in source.stage_clearance)
+    }
+    radar = read_artifact(version_dir / RADAR_FILE, RadarArtifact)
+    used = {name for item in radar.items for name in item.sources}
+    for relative in manifest.artifacts.games.values():
+        game = read_artifact(root / relative, GameArtifact)
+        used.update(game.event_intelligence.coverage_sources)
+        used.update(name for item in game.event_intelligence.contributions for name in item.sources)
+    undeclared = sorted(used - named - public_sources)
+    _require(
+        not undeclared,
+        f"event source(s) {', '.join(undeclared)} appear in the bundle without being "
+        "declared as restricted or as cleared for public launch",
+    )
     _require(
         manifest.ranked_count == len(current.entries)
         and manifest.game_count == len(current.entries) + len(current.unranked),

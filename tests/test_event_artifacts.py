@@ -35,6 +35,11 @@ from metaspike.publishing.validation import ArtifactValidationError, validate_pu
 from metaspike.sources.registry import default_registry
 from metaspike.sources.replay import replay_client
 from tests.conftest import RECORDED_END, RECORDINGS, RUN_TIME, run_fixture_pipeline
+from tests.synthetic_policy import (
+    SYNTHETIC_EVENT_SOURCE,
+    synthetic_event_policies,
+    with_synthetic_identifiers,
+)
 
 REPO = Path(__file__).parent.parent
 SCHEMAS = REPO / "schemas"
@@ -81,8 +86,10 @@ def report_for(
     precision: TimePrecision = TimePrecision.DAY,
 ) -> EventReport:
     game = next(game for game in catalogue.games if game.slug == slug)
+    identifier = game.identifier_for(SYNTHETIC_EVENT_SOURCE)
+    assert identifier is not None, "report_for needs the synthetic catalogue view"
     return EventReport(
-        game=game.source_identifiers[0],
+        game=identifier,
         event_type=kind,
         title=title,
         starts_at=starts,
@@ -94,7 +101,7 @@ def report_for(
 
 def synthetic_events() -> EventInputs:
     """A handful of invented events around the replay's as-of day, and who was checked."""
-    catalogue = load_seed_catalogue()
+    catalogue = with_synthetic_identifiers(load_seed_catalogue())
     observed = AS_OF - 3 * DAY
     reports = [
         report_for(
@@ -126,11 +133,11 @@ def synthetic_events() -> EventInputs:
     by_slug = {game.slug: game.canonical_game_id for game in catalogue.games}
     checks = tuple(
         CoverageCheck(
-            canonical_game_id=by_slug[slug], source="synthetic_events", checked_at=AS_OF - DAY
+            canonical_game_id=by_slug[slug], source=SYNTHETIC_EVENT_SOURCE, checked_at=AS_OF - DAY
         )
         for slug in ("minecraft", "gta-vi", "no-mans-sky", "star-citizen", "gta-v")
     )
-    return EventInputs(records=records, checks=checks)
+    return EventInputs(records=records, checks=checks, source_policies=synthetic_event_policies())
 
 
 def games_of(artifacts_dir: Path) -> dict[str, dict[str, Any]]:
@@ -264,7 +271,7 @@ def test_synthetic_events_publish_heat_contributions_and_a_radar(tmp_path: Path)
     assert minecraft["event_heat"] == pytest.approx(expected, abs=0.05)
     assert minecraft["top_event_id"] == patch["event_id"]
     assert minecraft["summary"] == patch["text"] == minecraft["reasons"][0]["text"]
-    assert minecraft["coverage_sources"] == ["synthetic_events", "wikimedia_pageviews"]
+    assert minecraft["coverage_sources"] == ["synthetic_events"]
     assert [event["title"] for event in games["minecraft"]["events"]] == [
         "Synthetic Update", "Synthetic Live", "Synthetic Trailer",
     ]  # fmt: skip
@@ -311,7 +318,7 @@ def test_synthetic_events_publish_heat_contributions_and_a_radar(tmp_path: Path)
 
 def ramp_edge_events(offset: timedelta) -> EventInputs:
     """One synthetic major patch starting `offset` after the end of its five-day ramp."""
-    catalogue = load_seed_catalogue()
+    catalogue = with_synthetic_identifiers(load_seed_catalogue())
     ramp = timedelta(days=EVENT_HEAT_RULES_V1.rule(EventType.MAJOR_PATCH).ramp_days)
     report = report_for(
         catalogue,
@@ -321,7 +328,10 @@ def ramp_edge_events(offset: timedelta) -> EventInputs:
         AS_OF + ramp + offset,
         precision=TimePrecision.EXACT,
     )
-    return EventInputs(records=reconcile([observe(report, catalogue, AS_OF - DAY)]))
+    return EventInputs(
+        records=reconcile([observe(report, catalogue, AS_OF - DAY)]),
+        source_policies=synthetic_event_policies(),
+    )
 
 
 @pytest.mark.parametrize("offset", [timedelta(0), timedelta(seconds=1), timedelta(hours=3)])
@@ -389,9 +399,16 @@ def test_the_three_published_states_stay_distinct(tmp_path: Path) -> None:
     by_slug = {game.slug: game.canonical_game_id for game in catalogue.games}
     inputs = ramp_edge_events(timedelta(seconds=-1))
     looked = CoverageCheck(
-        canonical_game_id=by_slug["gta-v"], source="synthetic_events", checked_at=AS_OF - DAY
+        canonical_game_id=by_slug["gta-v"], source=SYNTHETIC_EVENT_SOURCE, checked_at=AS_OF - DAY
     )
-    run_with(tmp_path, EventInputs(records=inputs.records, checks=(looked,)))
+    run_with(
+        tmp_path,
+        EventInputs(
+            records=inputs.records,
+            checks=(looked,),
+            source_policies=synthetic_event_policies(),
+        ),
+    )
     validate_published(tmp_path)
     games = games_of(tmp_path)
     positive = games["minecraft"]["event_intelligence"]
@@ -534,7 +551,7 @@ def test_validation_catches_event_data_that_disagrees_with_itself(tmp_path: Path
 
 
 def test_an_event_for_a_game_outside_the_catalogue_is_refused(tmp_path: Path) -> None:
-    catalogue = load_seed_catalogue()
+    catalogue = with_synthetic_identifiers(load_seed_catalogue())
     record = reconcile(
         [
             observe(
@@ -546,7 +563,10 @@ def test_an_event_for_a_game_outside_the_catalogue_is_refused(tmp_path: Path) ->
     )[0]
     stray = record.model_copy(update={"canonical_game_id": "00000000-0000-4000-8000-0000000000aa"})
     with pytest.raises(ValueError, match="games not in the catalogue"):
-        run_with(tmp_path, EventInputs(records=(stray,)))
+        run_with(
+            tmp_path,
+            EventInputs(records=(stray,), source_policies=synthetic_event_policies()),
+        )
     assert not (tmp_path / "manifest.json").exists()  # nothing was published
 
 

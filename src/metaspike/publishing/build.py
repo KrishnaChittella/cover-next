@@ -139,10 +139,11 @@ class EventInputs:
     # When to evaluate. None: the end of the run's window (see `event_as_of`).
     as_of: datetime | None = None
     rules: EventHeatRules = field(default=EVENT_HEAT_RULES_V1)
-    # The policy of every source whose events may be used. When given, an event, a
-    # coverage check or a summary from a source that is not in it, or whose policy does
-    # not clear the bundle's stage, stops the build. None: the caller vouches for its
-    # own inputs (tests with synthetic sources); nothing real is wired that way.
+    # The policy of every event source these inputs use. A source is used when it is
+    # behind a record or a coverage check, or its summary shows it was ever asked. Every
+    # used source must have a policy here that clears the bundle's stage, or the build
+    # stops: there is no way to vouch for event data without one. None is accepted only
+    # when no source is used at all.
     source_policies: Mapping[str, SourcePolicy] | None = None
     # What each event source had been asked by `as_of`, in counts.
     source_summaries: tuple[EventSourceSummary, ...] = ()
@@ -244,6 +245,10 @@ def _restricted_event_sources(
     bundle only at a stage the source's policy clears for event intelligence. Where
     that stage is private and the source is not cleared for public launch, the bundle
     says so on its manifest, so it cannot be taken for something publishable.
+
+    Fail closed: a used source with no policy stops the build, whether the mapping is
+    missing, empty, or lacks only that source. Nothing about a source's name or the
+    caller exempts it.
     """
     used = {source for record in inputs.records for source in record.sources}
     used.update(check.source for check in inputs.checks)
@@ -253,13 +258,16 @@ def _restricted_event_sources(
         for summary in inputs.source_summaries
         if summary.collected or summary.fetches_after_as_of
     )
-    if inputs.source_policies is None:
-        return ()
+    policies: Mapping[str, SourcePolicy] = inputs.source_policies or {}
     restricted = []
     for source in sorted(used):
-        policy = inputs.source_policies.get(source)
+        policy = policies.get(source)
         if policy is None:
             raise SourcePolicyError(f"{source}: no source policy for this event source")
+        if policy.source != source:
+            raise SourcePolicyError(
+                f"{source}: the policy given for this event source is for '{policy.source}'"
+            )
         refusal = policy.registration_refusal(SourcePurpose.EVENT_INTELLIGENCE, stage)
         if refusal is not None:
             raise SourcePolicyError(f"{source}: {refusal}")

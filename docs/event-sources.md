@@ -89,11 +89,30 @@ Unknown stays unknown. Nothing here was read as a yes.
 
 - **Ingestion** refuses, before any request, a stage the policy does not clear.
 - **Storage** refuses an item carrying a field the policy does not allow to be kept.
-- **Building artifacts** refuses event data from a source with no policy, or at a stage
-  its policy does not clear. At the private-development stage it is allowed in, and the
-  manifest is then marked `distribution: "private_development_only"` with the source
-  named under `restricted_sources`. The developer interface shows a notice on every
-  page of such a bundle.
+- **Building artifacts** fails closed. An event source is *used* when it is behind an
+  event record or a coverage check, or when its summary shows it was ever asked
+  (before or after the evaluation moment). Every used source must have a `SourcePolicy`
+  in the inputs' `source_policies`, filed under its own name, that clears the bundle's
+  stage for event intelligence. A missing mapping, an empty one, or one that lacks
+  only that source stops the build with `SourcePolicyError` before any event
+  intelligence is computed. There is no way to vouch for event data without a policy
+  and no source name is exempt. `source_policies` may be absent only when no source is
+  used at all, and the bundle is then `internal`.
+- At the private-development stage a cleared source is allowed in, and the manifest is
+  marked `distribution: "private_development_only"` with the source named under
+  `restricted_sources`. The developer interface shows a notice on every page of such a
+  bundle. At private collection, public launch and commercial production the policy
+  must clear that exact stage, or the build refuses.
+- **Validating a published bundle** checks the same from the outside: the distribution
+  is private exactly when a source is restricted; a collected event source not cleared
+  for public launch must be named as restricted; and every source an event or a
+  coverage check in the bundle is attributed to must be either named as restricted or
+  described on source-health as cleared for public launch.
+
+Tests invent events, and invented events go through the same gate: `tests/
+synthetic_policy.py` holds a test-only policy (named `synthetic_...`, cleared for
+private development alone, in no runtime registry, with no endpoint). There is no
+production code path that treats a synthetic source differently.
 
 A note on that last point, because it is a decision and not a deduction. The existing
 build refuses any *demand* source whose derived-metrics permission is unanswered,

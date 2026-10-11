@@ -10,6 +10,7 @@ import json
 import re
 import socket
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,12 @@ from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY
 from metaspike.sources.steam_players import STEAM_CURRENT_PLAYERS_POLICY
 from metaspike.storage.base import StoragePolicyError
 from tests.conftest import make_id
+from tests.synthetic_policy import (
+    SYNTHETIC_EVENT_SOURCE,
+    synthetic_event_policies,
+    synthetic_event_policy,
+    with_synthetic_identifiers,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures" / "steam_news"
@@ -1780,3 +1787,300 @@ def test_the_fixtures_are_synthetic_and_say_so() -> None:
             "newsitems"
         )
     assert "synthetic" in (FIXTURES / "README.md").read_text().lower()
+
+
+# --- fail closed: no event data without a policy --------------------------------------
+
+
+def _bundle_at(stage: DeploymentStage, inputs: EventInputs | None) -> ArtifactBundle:
+    """Build the replay bundle at a stage, with the given event inputs. Offline."""
+    from metaspike.catalogue.seed import load_seed_catalogue
+    from metaspike.pipeline.assess import assess
+    from metaspike.pipeline.collection import collect, window_ending
+    from metaspike.publishing.build import build_bundle
+    from metaspike.sources.registry import default_registry
+    from metaspike.sources.replay import replay_client
+
+    catalogue = load_seed_catalogue()
+    generated = datetime(2026, 10, 4, 6, tzinfo=UTC)
+    with replay_client(REPO / "tests/fixtures/wikimedia") as client:
+        registry = default_registry(client)
+        registry.stage = stage
+        report = collect(
+            catalogue,
+            registry,
+            window_ending(date(2026, 10, 3)),
+            observed_at=generated,
+            clock=lambda: generated,
+        )
+        return build_bundle(
+            catalogue, report, assess(catalogue, report), registry, generated, inputs
+        )
+
+
+BUNDLE_AS_OF = datetime(2026, 10, 4, tzinfo=UTC)
+
+
+def _steam_inputs(root: Path) -> EventInputs:
+    """Real-policy Steam News inputs made from SYNTHETIC posts: a record, a check, a summary."""
+    from metaspike.catalogue.seed import load_seed_catalogue
+
+    game = next(g for g in load_seed_catalogue().games if g.slug == "counter-strike-2")
+    resolver = steam_news_resolver({APP: GameBinding(canonical_game_id=game.canonical_game_id)})
+    seen_at = datetime(2026, 10, 3, 12, tzinfo=UTC)
+    stores = Stores(root)
+    handler, _ = serving(
+        {APP: envelope([post("1", "Season 4 is now live", published=seen_at - HOUR)])}
+    )
+    ingest(
+        adapter_for(handler, Ticking(seen_at)),
+        STEAM_NEWS_POLICY,
+        [APP],
+        resolver,
+        stores.sources,
+        stores.events,
+    )
+    return EventInputs(
+        records=stores.events.events(BUNDLE_AS_OF),
+        checks=stores.events.checks(BUNDLE_AS_OF),
+        as_of=BUNDLE_AS_OF,
+        source_policies=EVENT_SOURCE_POLICIES,
+        source_summaries=(
+            summarise(stores.sources, STEAM_NEWS_POLICY, RULES_VERSION, BUNDLE_AS_OF),
+        ),
+    )
+
+
+def test_event_data_without_a_policy_never_reaches_an_artifact(tmp_path: Path) -> None:
+    """The regression for the bypass in the first version of the build gate.
+
+    With `source_policies=None` the gate returned at once, so a record, a coverage
+    check or a collected summary went into a bundle marked "internal" with no policy
+    consulted at all. Every case below built successfully then.
+    """
+    steam = _steam_inputs(tmp_path)
+    assert steam.records and steam.checks and steam.source_summaries[0].collected
+    private = DeploymentStage.PRIVATE_DEVELOPMENT
+    unpolicied: dict[str, EventInputs] = {
+        # A. an event record
+        "record": EventInputs(records=steam.records, as_of=BUNDLE_AS_OF),
+        # B. a coverage check
+        "check": EventInputs(checks=steam.checks, as_of=BUNDLE_AS_OF),
+        # C. a summary showing the source was asked
+        "summary": EventInputs(source_summaries=steam.source_summaries, as_of=BUNDLE_AS_OF),
+        "everything": EventInputs(
+            records=steam.records,
+            checks=steam.checks,
+            source_summaries=steam.source_summaries,
+            as_of=BUNDLE_AS_OF,
+        ),
+    }
+    for name, inputs in unpolicied.items():
+        assert inputs.source_policies is None
+        with pytest.raises(SourcePolicyError, match="steam_news: no source policy"):
+            _bundle_at(private, inputs)
+        # D. an empty mapping is no better than none.
+        with pytest.raises(SourcePolicyError, match="no source policy"):
+            _bundle_at(private, replace(inputs, source_policies={}))
+        # E. nor is a mapping that has every policy but this source's.
+        others = {"synthetic_other": synthetic_event_policy("synthetic_other")}
+        with pytest.raises(SourcePolicyError, match="steam_news: no source policy"):
+            _bundle_at(private, replace(inputs, source_policies=others))
+        assert name
+    # A summary of a source asked only AFTER the evaluation moment is still activity.
+    later = steam.source_summaries[0].model_copy(
+        update={"collected": False, "fetches_ok": 0, "fetches_after_as_of": 1}
+    )
+    with pytest.raises(SourcePolicyError, match="no source policy"):
+        _bundle_at(private, EventInputs(source_summaries=(later,), as_of=BUNDLE_AS_OF))
+    # A policy filed under the wrong name does not cover the source.
+    with pytest.raises(SourcePolicyError, match="is for 'steam_catalogue'"):
+        _bundle_at(
+            private,
+            EventInputs(
+                checks=steam.checks,
+                as_of=BUNDLE_AS_OF,
+                source_policies={SOURCE_ID: STEAM_CATALOGUE_POLICY},
+            ),
+        )
+    # No name exempts a source: a synthetic one is refused just the same.
+    synthetic_check = steam.checks[0].model_copy(update={"source": "synthetic_events"})
+    with pytest.raises(SourcePolicyError, match="synthetic_events: no source policy"):
+        _bundle_at(private, EventInputs(checks=(synthetic_check,), as_of=BUNDLE_AS_OF))
+    gate = (REPO / "src/metaspike/publishing/build.py").read_text()
+    assert "startswith" not in gate and "synthetic" not in gate.lower()
+    assert "return ()" not in gate.split("def _restricted_event_sources")[1].split("\ndef ")[0]
+
+
+def test_with_no_event_source_used_no_policy_is_needed_and_the_bundle_is_internal(
+    tmp_path: Path,
+) -> None:
+    private = DeploymentStage.PRIVATE_DEVELOPMENT
+    never_asked = summarise(
+        EventSourceStore(tmp_path / "empty"), STEAM_NEWS_POLICY, RULES_VERSION, BUNDLE_AS_OF
+    )
+    assert not never_asked.collected and never_asked.fetches_after_as_of == 0
+    for inputs in (
+        None,
+        EventInputs(),
+        EventInputs(as_of=BUNDLE_AS_OF),
+        EventInputs(source_policies={}),
+        # A source that was never asked has put nothing into the bundle.
+        EventInputs(source_summaries=(never_asked,), as_of=BUNDLE_AS_OF),
+    ):
+        built = _bundle_at(private, inputs)
+        assert built.manifest.distribution == "internal"
+        assert built.manifest.restricted_sources == ()
+        assert built.radar.availability == "unavailable"
+        assert all(g.event_intelligence.event_heat is None for g in built.games.values())
+    # With nothing used there is nothing to refuse at a public stage either.
+    assert _bundle_at(DeploymentStage.PUBLIC_LAUNCH, None).manifest.distribution == "internal"
+
+
+def test_synthetic_events_go_through_the_same_gate_with_a_test_only_policy(
+    tmp_path: Path,
+) -> None:
+    from metaspike.catalogue.seed import load_seed_catalogue
+    from metaspike.events.model import CoverageCheck, EventReport, observe
+    from metaspike.events.reconcile import reconcile
+
+    synthetic = with_synthetic_identifiers(load_seed_catalogue())
+    game = next(g for g in synthetic.games if g.slug == "minecraft")
+    identifier = game.identifier_for(SYNTHETIC_EVENT_SOURCE)
+    assert identifier is not None
+    report = EventReport(
+        game=identifier,
+        event_type=EventType.MAJOR_PATCH,
+        title="Synthetic Update",
+        starts_at=BUNDLE_AS_OF - DAY,
+    )
+    records = reconcile([observe(report, synthetic, BUNDLE_AS_OF - 2 * DAY)])
+    checks = (
+        CoverageCheck(
+            canonical_game_id=game.canonical_game_id,
+            source=SYNTHETIC_EVENT_SOURCE,
+            checked_at=BUNDLE_AS_OF - DAY,
+        ),
+    )
+    inputs = EventInputs(
+        records=records,
+        checks=checks,
+        as_of=BUNDLE_AS_OF,
+        source_policies=synthetic_event_policies(),
+    )
+    built = _bundle_at(DeploymentStage.PRIVATE_DEVELOPMENT, inputs)
+    # It is private data like any other that is not cleared for the public.
+    assert built.manifest.distribution == "private_development_only"
+    (restricted,) = built.manifest.restricted_sources
+    assert restricted.source == SYNTHETIC_EVENT_SOURCE
+    assert restricted.cleared_stages == ("private_development",)
+    assert "Synthetic test data" in restricted.reason
+    minecraft = built.games["minecraft"].event_intelligence
+    assert minecraft.availability == "available" and (minecraft.event_heat or 0) > 0
+    assert minecraft.coverage_sources == (SYNTHETIC_EVENT_SOURCE,)
+    # The same inputs without the policy, and at any further stage, are refused.
+    with pytest.raises(SourcePolicyError, match="no source policy"):
+        _bundle_at(
+            DeploymentStage.PRIVATE_DEVELOPMENT,
+            EventInputs(records=records, checks=checks, as_of=BUNDLE_AS_OF),
+        )
+    for stage in (
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+        DeploymentStage.COMMERCIAL_PRODUCTION,
+    ):
+        with pytest.raises(SourcePolicyError, match=SYNTHETIC_EVENT_SOURCE):
+            _bundle_at(stage, inputs)
+
+    # The helper is test-only: clearly named, cleared for tests alone, in no registry.
+    policy = synthetic_event_policy()
+    assert policy.source == "synthetic_events"
+    assert [c.cleared for c in policy.stage_clearance] == [True, False, False, False]
+    assert all("ynthetic test data" in c.reason for c in policy.stage_clearance)
+    assert not policy.commercial_production_permitted
+    for real_name in ("steam_news", "wikimedia_pageviews", "events", "official_feed"):
+        with pytest.raises(ValueError, match="must be named 'synthetic_"):
+            synthetic_event_policy(real_name)
+        with pytest.raises(ValueError, match="must be named 'synthetic_"):
+            with_synthetic_identifiers(load_seed_catalogue(), real_name)
+    assert set(EVENT_SOURCE_POLICIES) == {SOURCE_ID}
+    assert not any(name.startswith("synthetic") for name in EVENT_SOURCE_POLICIES)
+    for module in (REPO / "src").rglob("*.py"):
+        text = module.read_text()
+        assert "synthetic_policy" not in text and "synthetic_event_polic" not in text, module
+
+
+def test_steam_news_is_still_private_development_only_and_refused_beyond_it(
+    tmp_path: Path,
+) -> None:
+    steam = _steam_inputs(tmp_path)
+    # H. Real policy, private development: builds, and says what it is.
+    built = _bundle_at(DeploymentStage.PRIVATE_DEVELOPMENT, steam)
+    assert built.manifest.distribution == "private_development_only"
+    assert [r.source for r in built.manifest.restricted_sources] == [SOURCE_ID]
+    assert built.manifest.restricted_sources[0].cleared_stages == ("private_development",)
+    assert built.games["counter-strike-2"].event_intelligence.coverage_sources == (SOURCE_ID,)
+    assert built.manifest.schema_version == "1.4.0"
+    # I. The same inputs at every further stage: refused, each for its own reason.
+    reasons = {}
+    for stage in (
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+        DeploymentStage.COMMERCIAL_PRODUCTION,
+    ):
+        with pytest.raises(SourcePolicyError) as refused:
+            _bundle_at(stage, steam)
+        reasons[stage] = str(refused.value)
+    assert "not cleared for private_collection" in reasons[DeploymentStage.PRIVATE_COLLECTION]
+    for stage in (DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION):
+        assert "derived events are not explicitly allowed (unknown)" in reasons[stage]
+    # The policy itself is as it was: unknown has not become allowed.
+    assert STEAM_NEWS_POLICY.derived_metrics_allowed is Permission.UNKNOWN
+    assert STEAM_NEWS_POLICY.commercial_use_allowed is Permission.UNKNOWN
+    assert [c.cleared for c in STEAM_NEWS_POLICY.stage_clearance] == [True, False, False, False]
+
+
+def test_the_validator_refuses_an_event_source_nobody_declared(tmp_path: Path) -> None:
+    from metaspike.publishing.publisher import publish
+    from metaspike.publishing.validation import ArtifactValidationError, validate_published
+
+    root = tmp_path / "artifacts"
+    publish(_bundle_at(DeploymentStage.PRIVATE_DEVELOPMENT, _steam_inputs(tmp_path)), root)
+    manifest = validate_published(root)
+    version = root / manifest.version_path
+
+    def rewrite(name: str, change: Callable[[dict[str, Any]], None]) -> Callable[[], None]:
+        paths = [root / name] + ([version / name] if name != "manifest.json" else [])
+        originals = [path.read_text() for path in paths]
+        for path, original in zip(paths, originals, strict=True):
+            document = json.loads(original)
+            change(document)
+            path.write_text(json.dumps(document, indent=2) + "\n")
+
+        def restore() -> None:
+            for path, original in zip(paths, originals, strict=True):
+                path.write_text(original)
+
+        return restore
+
+    def stray_coverage(document: dict[str, Any]) -> None:
+        document["event_intelligence"]["coverage_sources"].append("undeclared_feed")
+
+    def stray_contribution(document: dict[str, Any]) -> None:
+        document["event_intelligence"]["contributions"][0]["sources"] = ["undeclared_feed"]
+
+    for change in (stray_coverage, stray_contribution):
+        restore = rewrite("games/counter-strike-2.json", change)
+        with pytest.raises(ArtifactValidationError, match="undeclared_feed appear in the bundle"):
+            validate_published(root)
+        restore()
+
+    # Steam's events left in the bundle with the restriction quietly dropped.
+    def drop(document: dict[str, Any]) -> None:
+        document["distribution"], document["restricted_sources"] = "internal", []
+
+    restore = rewrite("manifest.json", drop)
+    with pytest.raises(ArtifactValidationError):
+        validate_published(root)
+    restore()
+    validate_published(root)
