@@ -2,6 +2,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { formatTimestamp } from "@/lib/format";
 import { bundleFetcher, current, game, manifest, methodology, sourceHealth, type Overrides } from "@/test/bundle";
 
 const chart = { setOption: vi.fn(), resize: vi.fn(), dispose: vi.fn() };
@@ -48,7 +49,7 @@ describe("the overview", () => {
     expect(scope).toHaveTextContent("not the finished MetaSpike creator-opportunity model");
 
     const snapshot = screen.getByRole("region", { name: "Snapshot" });
-    expect(snapshot).toHaveTextContent("11 Oct 2026, 02:51 UTC");
+    expect(snapshot).toHaveTextContent(formatTimestamp(board.generated_at));
     expect(snapshot).toHaveTextContent("3 Oct 2026");
     expect(snapshot).toHaveTextContent(`${board.entries.length} of ${board.entries.length + board.unranked.length}`);
     expect(snapshot).toHaveTextContent("Wikimedia pageviews");

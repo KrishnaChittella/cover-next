@@ -10,6 +10,7 @@ export interface GameArtifact {
    * INTERNAL / non-binding engineering contract; not the public contract.
    */
   contract_status: "internal";
+  event_intelligence: EventIntelligenceView;
   events?: EventView[];
   explanation: ExplanationView;
   features?: FeaturesView | null;
@@ -43,6 +44,68 @@ export interface ConfidenceFactorsView {
   samples: number;
   source_ceiling: number;
 }
+/**
+ * A game's event intelligence: available with a heat, or explicitly unavailable.
+ *
+ * `event_heat` is null exactly when `availability` is "unavailable". A heat of 0 is a
+ * finding (a source looked and nothing is relevant); null is the absence of one.
+ */
+export interface EventIntelligenceView {
+  as_of: string;
+  availability: "available" | "unavailable";
+  contributions: EventContributionView[];
+  coverage_checked_at?: string | null;
+  coverage_sources: string[];
+  event_heat?: number | null;
+  reasons: ReasonView[];
+  rules_status: string;
+  rules_version: string;
+  summary: string;
+  top_event_id?: string | null;
+  unavailable_reasons: ("no_event_coverage" | "event_coverage_stale")[];
+}
+/**
+ * One event at the evaluation moment, and its part in the game's Event Heat.
+ */
+export interface EventContributionView {
+  contribution: number;
+  counted: boolean;
+  end_assumed: boolean;
+  ends_at: string;
+  event_id: string;
+  event_type:
+    | "release"
+    | "major_patch"
+    | "minor_patch"
+    | "season"
+    | "wipe"
+    | "expansion"
+    | "dlc"
+    | "expedition"
+    | "beta"
+    | "playtest"
+    | "free_weekend"
+    | "trailer"
+    | "showcase"
+    | "platform_release"
+    | "major_in_game_event";
+  importance: number;
+  in_ramp: boolean;
+  not_counted_because?: string | null;
+  phase: "upcoming" | "active" | "decaying" | "expired" | "called_off";
+  rank?: number | null;
+  sources: string[];
+  starts_at: string;
+  status: "scheduled" | "cancelled" | "withdrawn";
+  strength: number;
+  text?: string | null;
+  time_precision: "day" | "exact";
+  title: string;
+}
+export interface ReasonView {
+  code: string;
+  text: string;
+}
 export interface EventView {
   canonical_game_id: string;
   ends_on?: string | null;
@@ -71,10 +134,6 @@ export interface ExplanationView {
   reasons: ReasonView[];
   summary: string;
   top_reasons: string[];
-}
-export interface ReasonView {
-  code: string;
-  text: string;
 }
 export interface FeaturesView {
   as_of_day?: string | null;

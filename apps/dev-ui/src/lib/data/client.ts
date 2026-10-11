@@ -7,9 +7,16 @@ import type {
   GameArtifact,
   Manifest,
   MethodologyArtifact,
+  RadarArtifact,
   SourceHealthArtifact,
 } from "@/contract";
-import { SUPPORTED_SCHEMA_VERSION, violations, type Violation } from "@/contract/validate";
+import {
+  SUPPORTED_SCHEMA_VERSION,
+  eventIntelligenceViolations,
+  radarViolations,
+  violations,
+  type Violation,
+} from "@/contract/validate";
 
 import { MANIFEST_FILE, UnsafePathError, dataBaseUrl, resolveDataUrl } from "./config";
 
@@ -151,6 +158,10 @@ export async function loadGame(slug: string, options: LoadOptions = {}): Promise
   if (data.slug !== slug) {
     throw new DataError("inconsistent", `${relative} describes "${data.slug}", not "${slug}".`);
   }
+  const broken = eventIntelligenceViolations(data.event_intelligence);
+  if (broken.length > 0) {
+    throw new DataError("invalid", `${relative} carries event intelligence that contradicts itself.`, null, broken);
+  }
   return { manifest, data };
 }
 
@@ -173,5 +184,15 @@ export async function loadMethodology(options: LoadOptions = {}): Promise<Loaded
     manifest.artifacts.methodology,
     options,
   );
+  return { manifest, data };
+}
+
+export async function loadRadar(options: LoadOptions = {}): Promise<Loaded<RadarArtifact>> {
+  const manifest = await loadManifest(options);
+  const data = await loadFrom<RadarArtifact>(manifest, "radar", manifest.artifacts.radar, options);
+  const broken = radarViolations(data);
+  if (broken.length > 0) {
+    throw new DataError("invalid", `${manifest.artifacts.radar} contradicts itself.`, null, broken);
+  }
   return { manifest, data };
 }

@@ -2,7 +2,14 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { CurrentArtifact, GameArtifact, Manifest, MethodologyArtifact, SourceHealthArtifact } from "@/contract";
+import type {
+  CurrentArtifact,
+  GameArtifact,
+  Manifest,
+  MethodologyArtifact,
+  RadarArtifact,
+  SourceHealthArtifact,
+} from "@/contract";
 
 const ROOT = path.resolve(import.meta.dirname, "fixtures", "bundle");
 
@@ -16,6 +23,7 @@ export const sourceHealth = (): SourceHealthArtifact =>
   readBundleFile<SourceHealthArtifact>(manifest().artifacts.source_health);
 export const methodology = (): MethodologyArtifact =>
   readBundleFile<MethodologyArtifact>(manifest().artifacts.methodology);
+export const radar = (): RadarArtifact => readBundleFile<RadarArtifact>(manifest().artifacts.radar);
 export const game = (slug: string): GameArtifact => {
   const relative = manifest().artifacts.games[slug];
   if (!relative) throw new Error(`fixture has no game ${slug}`);

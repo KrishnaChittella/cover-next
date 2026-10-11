@@ -303,6 +303,14 @@ npm run dev             # http://localhost:3000
 
 See [apps/dev-ui/README.md](apps/dev-ui/README.md).
 
+## Event intelligence (internal, uncalibrated)
+
+`src/metaspike/events/` is a source-independent engine for dated events: append-only
+observations, deterministic identity and revisions, a versioned Event Heat
+(`event_heat_rules_v1`) and an upcoming radar. No event source is collected yet, so for
+every game it publishes "unavailable", which is never the same as zero. It is not part
+of `metaspike_score_v0`. See [docs/event-intelligence.md](docs/event-intelligence.md).
+
 ## Architecture
 
 ```

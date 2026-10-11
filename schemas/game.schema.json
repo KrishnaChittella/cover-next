@@ -87,6 +87,287 @@
       "title": "ConfidenceView",
       "type": "object"
     },
+    "EventContributionView": {
+      "additionalProperties": false,
+      "description": "One event at the evaluation moment, and its part in the game's Event Heat.",
+      "properties": {
+        "contribution": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Contribution",
+          "type": "number"
+        },
+        "counted": {
+          "title": "Counted",
+          "type": "boolean"
+        },
+        "end_assumed": {
+          "title": "End Assumed",
+          "type": "boolean"
+        },
+        "ends_at": {
+          "format": "date-time",
+          "title": "Ends At",
+          "type": "string"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "enum": [
+            "release",
+            "major_patch",
+            "minor_patch",
+            "season",
+            "wipe",
+            "expansion",
+            "dlc",
+            "expedition",
+            "beta",
+            "playtest",
+            "free_weekend",
+            "trailer",
+            "showcase",
+            "platform_release",
+            "major_in_game_event"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "importance": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Importance",
+          "type": "number"
+        },
+        "in_ramp": {
+          "title": "In Ramp",
+          "type": "boolean"
+        },
+        "not_counted_because": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Not Counted Because"
+        },
+        "phase": {
+          "enum": [
+            "upcoming",
+            "active",
+            "decaying",
+            "expired",
+            "called_off"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "rank": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rank"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "starts_at": {
+          "format": "date-time",
+          "title": "Starts At",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "scheduled",
+            "cancelled",
+            "withdrawn"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "strength": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strength",
+          "type": "number"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "time_precision": {
+          "enum": [
+            "day",
+            "exact"
+          ],
+          "title": "Time Precision",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "title",
+        "starts_at",
+        "ends_at",
+        "end_assumed",
+        "time_precision",
+        "status",
+        "phase",
+        "in_ramp",
+        "strength",
+        "importance",
+        "contribution",
+        "counted",
+        "sources"
+      ],
+      "title": "EventContributionView",
+      "type": "object"
+    },
+    "EventIntelligenceView": {
+      "additionalProperties": false,
+      "description": "A game's event intelligence: available with a heat, or explicitly unavailable.\n\n`event_heat` is null exactly when `availability` is \"unavailable\". A heat of 0 is a\nfinding (a source looked and nothing is relevant); null is the absence of one.",
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "availability": {
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Availability",
+          "type": "string"
+        },
+        "contributions": {
+          "items": {
+            "$ref": "#/$defs/EventContributionView"
+          },
+          "title": "Contributions",
+          "type": "array"
+        },
+        "coverage_checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coverage Checked At"
+        },
+        "coverage_sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Coverage Sources",
+          "type": "array"
+        },
+        "event_heat": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Heat"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/ReasonView"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "rules_status": {
+          "title": "Rules Status",
+          "type": "string"
+        },
+        "rules_version": {
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "top_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top Event Id"
+        },
+        "unavailable_reasons": {
+          "items": {
+            "enum": [
+              "no_event_coverage",
+              "event_coverage_stale"
+            ],
+            "type": "string"
+          },
+          "title": "Unavailable Reasons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "availability",
+        "rules_version",
+        "rules_status",
+        "as_of",
+        "summary",
+        "reasons",
+        "unavailable_reasons",
+        "coverage_sources",
+        "contributions"
+      ],
+      "title": "EventIntelligenceView",
+      "type": "object"
+    },
     "EventView": {
       "additionalProperties": false,
       "properties": {
@@ -862,6 +1143,9 @@
       "title": "Contract Status",
       "type": "string"
     },
+    "event_intelligence": {
+      "$ref": "#/$defs/EventIntelligenceView"
+    },
     "events": {
       "default": [],
       "items": {
@@ -986,6 +1270,7 @@
     "explanation",
     "history",
     "source_coverage",
+    "event_intelligence",
     "methodology",
     "updated_at"
   ],

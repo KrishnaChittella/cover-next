@@ -47,9 +47,26 @@ source: `data:replay` runs `uv run metaspike run --replay tests/fixtures/wikimed
 |---|---|---|
 | `/` | `current.json`, `source-health.json` | Scope notice, run snapshot, leaderboard with search, sort and filters, unranked games with reasons, what exists today |
 | `/games` | `current.json` | Every game in the run, searchable |
-| `/games/[slug]` | `games/{slug}.json` | Rank, score, components, confidence and its factors, why-now reasons, history chart, features, coverage |
+| `/games/[slug]` | `games/{slug}.json` | Rank, score, components, confidence and its factors, why-now reasons, event intelligence, history chart, features, coverage |
+| `/radar` | `radar.json` | Dated events that have not started, by window. Timing and context only |
 | `/sources` | `source-health.json` | What each source returned in this run |
-| `/methodology` | `methodology.json` | Score and confidence terms, feature definitions, source policy, limitations |
+| `/methodology` | `methodology.json` | Score and confidence terms, the Event Heat rules, feature definitions, source policy, limitations |
+
+## Events
+
+A game page shows its event intelligence: Event Heat, the strongest event and its phase,
+every relevant event with its timing, strength and contribution, and the sentence that
+explains it. `/radar` lists upcoming events by window.
+
+Both have an **unavailable** state, and with today's data that is what you will see: no
+event source is collected, so the offline replay has no event coverage. Unavailable
+shows the word and the reason and no number. It is never shown as 0, which would mean
+a source looked and found nothing. The interface refuses a game artifact that carries a
+heat on unavailable intelligence.
+
+Event Heat is internal and uncalibrated, and is not part of score v0. No event is ever
+invented for the developer UI: the synthetic events in `src/test/synthetic-events.ts`
+exist only for tests.
 
 ## Where the data comes from
 
@@ -63,6 +80,7 @@ public/data/
   versions/{run_id}/current.json     what the manifest selects
   versions/{run_id}/source-health.json
   versions/{run_id}/methodology.json
+  versions/{run_id}/radar.json
   versions/{run_id}/games/{slug}.json
 ```
 
@@ -106,10 +124,11 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 111 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 133 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
-confidence formatting, and history gaps staying gaps. The fixture under
+confidence formatting, history gaps staying gaps, and event intelligence in its
+available, zero and unavailable states. The fixture under
 `src/test/fixtures/bundle` is an unmodified replay output; nothing in it is hand
 written.
 

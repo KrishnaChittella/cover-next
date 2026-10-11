@@ -9,7 +9,10 @@ const AVAILABLE = [
 ] as const;
 
 const NOT_YET = [
-  ["Event heat", "No event detection exists. The score reports that attention moved, not why."],
+  [
+    "Event heat",
+    "An internal, uncalibrated engine exists, but no event source is collected. It is unavailable for every game and is not in the score.",
+  ],
   ["Multi-source agreement", "One source is collected, so nothing is corroborated."],
   ["Creator supply gap", "No creator-supply data is collected."],
   ["Final opportunity score", "Not defined yet. The current score is an attention measure only."],

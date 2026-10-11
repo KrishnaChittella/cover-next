@@ -6,6 +6,7 @@ internal domain models reach an artifact only through `publishing/mapping.py`.
 
 import hashlib
 import json
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Any
 
@@ -14,6 +15,9 @@ from metaspike.domain.observations import TimeSeries
 from metaspike.domain.signals import CollectionStatus, Signal
 from metaspike.domain.source_policy import SourcePolicy
 from metaspike.domain.timeseries import Granularity
+from metaspike.events.heat import EventIntelligence
+from metaspike.events.model import CoverageCheck, EventRecord
+from metaspike.events.rules import EVENT_HEAT_RULES_V1, EventHeatRules
 from metaspike.features.attention import (
     FEATURE_DEFINITIONS,
     HISTORY_DAYS,
@@ -28,6 +32,7 @@ from metaspike.publishing.artifacts import (
     CONTRACT_STATUS,
     CURRENT_FILE,
     METHODOLOGY_FILE,
+    RADAR_FILE,
     SCHEMA_VERSION,
     SCOPE_NOTE,
     SOURCE_HEALTH_FILE,
@@ -44,6 +49,7 @@ from metaspike.publishing.artifacts import (
     ManifestPaths,
     MethodologyArtifact,
     MethodologyRef,
+    RadarArtifact,
     RelationshipView,
     ScoreMethodology,
     SignalView,
@@ -56,6 +62,14 @@ from metaspike.publishing.artifacts import (
     SourceStatusView,
     UnrankedEntry,
     game_file,
+)
+from metaspike.publishing.event_views import (
+    assess_catalogue,
+    build_radar,
+    event_as_of,
+    event_heat_methodology,
+    event_intelligence_view,
+    event_views,
 )
 from metaspike.publishing.mapping import (
     confidence_view,
@@ -101,12 +115,28 @@ LIMITATIONS: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class EventInputs:
+    """What is known about events for a run. The default is: nothing has been collected.
+
+    With no records and no coverage checks every game's event intelligence is
+    unavailable, which is the truth while no event source exists.
+    """
+
+    records: tuple[EventRecord, ...] = ()
+    checks: tuple[CoverageCheck, ...] = ()
+    # When to evaluate. None: the end of the run's window (see `event_as_of`).
+    as_of: datetime | None = None
+    rules: EventHeatRules = field(default=EVENT_HEAT_RULES_V1)
+
+
 def build_bundle(
     catalogue: Catalogue,
     report: CollectionReport,
     assessments: tuple[GameAssessment, ...],
     registry: SourceRegistry,
     generated_at: datetime,
+    events: EventInputs | None = None,
 ) -> ArtifactBundle:
     # Nothing computed from a source may be published unless its policy says so
     # explicitly. An unanswered permission blocks publication; it is never assumed.
@@ -114,19 +144,35 @@ def build_bundle(
         raise SourcePolicyError(f"{source}: {refusal}")
     by_game = {assessment.canonical_game_id: assessment for assessment in assessments}
     ranks = _ranks(catalogue, by_game)
+    # Event intelligence is evaluated beside the score and never reaches it: ranks and
+    # assessments are already fixed above, from attention alone.
+    inputs = events or EventInputs()
+    as_of = inputs.as_of or event_as_of(report)
+    intelligence = assess_catalogue(catalogue, inputs.records, inputs.checks, as_of, inputs.rules)
 
     drafts = {
         game.slug: _game_artifact(
-            game, catalogue, by_game[game.canonical_game_id], report, registry, ranks, generated_at
+            game,
+            catalogue,
+            by_game[game.canonical_game_id],
+            report,
+            registry,
+            ranks,
+            generated_at,
+            intelligence[game.canonical_game_id],
         )
         for game in catalogue.games
     }
-    methodology = _methodology(registry, generated_at)
-    content_hash = _content_hash(drafts, methodology)
+    methodology = _methodology(registry, generated_at, inputs.rules)
+    radar_draft = build_radar(
+        catalogue, intelligence, as_of, inputs.rules, _header(generated_at, _PENDING_RUN_ID)
+    )
+    content_hash = _content_hash(drafts, methodology, radar_draft)
     run_id = f"{generated_at:%Y%m%dT%H%M%SZ}-{content_hash[:8]}"
 
     games = {slug: draft.model_copy(update={"run_id": run_id}) for slug, draft in drafts.items()}
     methodology = methodology.model_copy(update={"run_id": run_id})
+    radar = radar_draft.model_copy(update={"run_id": run_id})
     current = _current(games, report, generated_at, run_id)
     source_health = _source_health(catalogue, report, registry, generated_at, run_id)
     version_path = f"{VERSIONS_DIR}/{run_id}"
@@ -138,6 +184,7 @@ def build_bundle(
             current=f"{version_path}/{CURRENT_FILE}",
             source_health=f"{version_path}/{SOURCE_HEALTH_FILE}",
             methodology=f"{version_path}/{METHODOLOGY_FILE}",
+            radar=f"{version_path}/{RADAR_FILE}",
             games={slug: f"{version_path}/{game_file(slug)}" for slug in sorted(games)},
         ),
         game_count=len(games),
@@ -149,6 +196,7 @@ def build_bundle(
         games=games,
         source_health=source_health,
         methodology=methodology,
+        radar=radar,
     )
 
 
@@ -187,6 +235,7 @@ def _game_artifact(
     registry: SourceRegistry,
     ranks: dict[str, int],
     generated_at: datetime,
+    intelligence: EventIntelligence,
 ) -> GameArtifact:
     history: tuple[HistorySeries, ...] = ()
     series = assessment.scored_series
@@ -222,6 +271,8 @@ def _game_artifact(
         explanation=explanation_view(assessment.explanation),
         history=history,
         source_coverage=_coverage(game, report, registry),
+        events=event_views(intelligence),
+        event_intelligence=event_intelligence_view(intelligence),
         methodology=MethodologyRef(
             score_version=SCORE_VERSION, path=METHODOLOGY_FILE, scope_note=SCOPE_NOTE
         ),
@@ -419,7 +470,9 @@ def _source_health_entry(
     )
 
 
-def _methodology(registry: SourceRegistry, generated_at: datetime) -> MethodologyArtifact:
+def _methodology(
+    registry: SourceRegistry, generated_at: datetime, rules: EventHeatRules
+) -> MethodologyArtifact:
     return MethodologyArtifact(
         **_header(generated_at, _PENDING_RUN_ID),
         scope_note=SCOPE_NOTE,
@@ -438,6 +491,7 @@ def _methodology(registry: SourceRegistry, generated_at: datetime) -> Methodolog
             },
             terms=tuple(term_view(term) for term in CONFIDENCE_TERMS),
         ),
+        event_heat=event_heat_methodology(rules),
         features=FeatureMethodology(
             granularity="daily",
             history_days=HISTORY_DAYS,
@@ -469,8 +523,11 @@ def _methodology(registry: SourceRegistry, generated_at: datetime) -> Methodolog
     )
 
 
-def _content_hash(games: dict[str, GameArtifact], methodology: MethodologyArtifact) -> str:
+def _content_hash(
+    games: dict[str, GameArtifact], methodology: MethodologyArtifact, radar: RadarArtifact
+) -> str:
     payload = {
+        "radar": radar.model_dump(mode="json", exclude=_VOLATILE_FIELDS),
         "games": [
             games[slug].model_dump(mode="json", exclude=_VOLATILE_FIELDS) for slug in sorted(games)
         ],

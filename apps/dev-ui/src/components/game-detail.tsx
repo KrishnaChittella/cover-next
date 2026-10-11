@@ -21,6 +21,7 @@ import {
 } from "@/lib/format";
 
 import { DataState } from "./data-state";
+import { EventPanel } from "./event-panel";
 import { FeaturePanel } from "./feature-panel";
 import { HistoryChart } from "./history-chart";
 import { RunNote } from "./run-note";
@@ -103,7 +104,6 @@ function Headline({ game }: { game: GameArtifact }) {
 function GameBody({ game }: { game: GameArtifact }) {
   const components = game.score.components;
   const confidence = game.confidence;
-  const events = game.events ?? [];
   return (
     <>
       <nav aria-label="Breadcrumb" className="mb-4 text-sm">
@@ -273,24 +273,13 @@ function GameBody({ game }: { game: GameArtifact }) {
         )}
       </Section>
 
-      {events.length > 0 ? (
-        <Section id="events" title="Recorded events" note="Events carried by the artifact. They do not enter score v0.">
-          <ul className="panel divide-y divide-line">
-            {events.map((event) => (
-              <li key={`${event.event_type}-${event.starts_on}-${event.title}`} className="flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 text-sm">
-                <span className="num text-muted">
-                  {formatDay(event.starts_on)}
-                  {event.ends_on ? ` to ${formatDay(event.ends_on)}` : ""}
-                </span>
-                <span className="text-ink">{event.title}</span>
-                <span className="text-xs text-muted">
-                  {humanize(event.event_type)} · {humanize(event.source)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      ) : null}
+      <Section
+        id="events"
+        title="Event intelligence"
+        note="What is known to be happening to this game, and how much it matters now. Separate from score v0."
+      >
+        <EventPanel events={game.event_intelligence} />
+      </Section>
 
       <Section id="method" title="Method">
         <ScopeNotice scopeNote={game.methodology.scope_note} scoreVersion={game.methodology.score_version} />

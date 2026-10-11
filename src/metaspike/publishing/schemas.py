@@ -9,6 +9,7 @@ from metaspike.publishing.artifacts import (
     GameArtifact,
     Manifest,
     MethodologyArtifact,
+    RadarArtifact,
     SourceHealthArtifact,
 )
 
@@ -18,6 +19,7 @@ ARTIFACT_MODELS: dict[str, type[ContractModel]] = {
     "game": GameArtifact,
     "source-health": SourceHealthArtifact,
     "methodology": MethodologyArtifact,
+    "radar": RadarArtifact,
 }
 
 

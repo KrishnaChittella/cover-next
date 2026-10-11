@@ -69,6 +69,174 @@
       "title": "DisplayRulesView",
       "type": "object"
     },
+    "EventHeatMethodology": {
+      "additionalProperties": false,
+      "properties": {
+        "aggregation": {
+          "title": "Aggregation",
+          "type": "string"
+        },
+        "availability": {
+          "items": {
+            "$ref": "#/$defs/TermView"
+          },
+          "title": "Availability",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ParameterView"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "radar_windows_hours": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Radar Windows Hours",
+          "type": "array"
+        },
+        "range": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Range",
+          "type": "array"
+        },
+        "scope_note": {
+          "title": "Scope Note",
+          "type": "string"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/TermView"
+          },
+          "title": "Terms",
+          "type": "array"
+        },
+        "types": {
+          "items": {
+            "$ref": "#/$defs/EventTypeRuleView"
+          },
+          "title": "Types",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "status",
+        "scope_note",
+        "range",
+        "terms",
+        "aggregation",
+        "availability",
+        "parameters",
+        "types",
+        "radar_windows_hours",
+        "limitations"
+      ],
+      "title": "EventHeatMethodology",
+      "type": "object"
+    },
+    "EventTypeRuleView": {
+      "additionalProperties": false,
+      "properties": {
+        "active_floor": {
+          "title": "Active Floor",
+          "type": "number"
+        },
+        "decay_window_days": {
+          "title": "Decay Window Days",
+          "type": "number"
+        },
+        "default_duration_days": {
+          "title": "Default Duration Days",
+          "type": "number"
+        },
+        "event_type": {
+          "enum": [
+            "release",
+            "major_patch",
+            "minor_patch",
+            "season",
+            "wipe",
+            "expansion",
+            "dlc",
+            "expedition",
+            "beta",
+            "playtest",
+            "free_weekend",
+            "trailer",
+            "showcase",
+            "platform_release",
+            "major_in_game_event"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "half_life_days": {
+          "title": "Half Life Days",
+          "type": "number"
+        },
+        "importance": {
+          "title": "Importance",
+          "type": "number"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "pre_event_peak": {
+          "title": "Pre Event Peak",
+          "type": "number"
+        },
+        "ramp_days": {
+          "title": "Ramp Days",
+          "type": "number"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "label",
+        "importance",
+        "ramp_days",
+        "pre_event_peak",
+        "default_duration_days",
+        "half_life_days",
+        "active_floor",
+        "decay_window_days",
+        "rationale"
+      ],
+      "title": "EventTypeRuleView",
+      "type": "object"
+    },
     "FeatureDefinitionView": {
       "additionalProperties": false,
       "properties": {
@@ -204,6 +372,30 @@
         "granularities"
       ],
       "title": "MetricView",
+      "type": "object"
+    },
+    "ParameterView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "rationale"
+      ],
+      "title": "ParameterView",
       "type": "object"
     },
     "QuotaView": {
@@ -604,6 +796,9 @@
       "title": "Contract Status",
       "type": "string"
     },
+    "event_heat": {
+      "$ref": "#/$defs/EventHeatMethodology"
+    },
     "explanations": {
       "title": "Explanations",
       "type": "string"
@@ -668,6 +863,7 @@
     "scope_note",
     "score",
     "confidence",
+    "event_heat",
     "features",
     "explanations",
     "metrics",

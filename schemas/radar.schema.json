@@ -1,0 +1,246 @@
+{
+  "$defs": {
+    "RadarItemView": {
+      "additionalProperties": false,
+      "properties": {
+        "artifact_path": {
+          "title": "Artifact Path",
+          "type": "string"
+        },
+        "canonical_game_id": {
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "contribution": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Contribution",
+          "type": "number"
+        },
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "enum": [
+            "release",
+            "major_patch",
+            "minor_patch",
+            "season",
+            "wipe",
+            "expansion",
+            "dlc",
+            "expedition",
+            "beta",
+            "playtest",
+            "free_weekend",
+            "trailer",
+            "showcase",
+            "platform_release",
+            "major_in_game_event"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "game_event_heat": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Game Event Heat",
+          "type": "number"
+        },
+        "hours_until_start": {
+          "minimum": 0,
+          "title": "Hours Until Start",
+          "type": "number"
+        },
+        "in_ramp": {
+          "title": "In Ramp",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "starts_at": {
+          "format": "date-time",
+          "title": "Starts At",
+          "type": "string"
+        },
+        "strength": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Strength",
+          "type": "number"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "time_precision": {
+          "enum": [
+            "day",
+            "exact"
+          ],
+          "title": "Time Precision",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "window_hours": {
+          "title": "Window Hours",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "slug",
+        "name",
+        "event_id",
+        "event_type",
+        "title",
+        "starts_at",
+        "time_precision",
+        "hours_until_start",
+        "window_hours",
+        "in_ramp",
+        "strength",
+        "contribution",
+        "game_event_heat",
+        "sources",
+        "text",
+        "artifact_path"
+      ],
+      "title": "RadarItemView",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Dated events that have not started, for games with event coverage.\n\n\"unavailable\" means no game has event coverage, so nothing is known. It is not an\nempty radar: an available radar with no items is.",
+  "properties": {
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "availability": {
+      "enum": [
+        "available",
+        "unavailable"
+      ],
+      "title": "Availability",
+      "type": "string"
+    },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
+    },
+    "games_with_coverage": {
+      "minimum": 0,
+      "title": "Games With Coverage",
+      "type": "integer"
+    },
+    "games_without_coverage": {
+      "minimum": 0,
+      "title": "Games Without Coverage",
+      "type": "integer"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/RadarItemView"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "rules_status": {
+      "title": "Rules Status",
+      "type": "string"
+    },
+    "rules_version": {
+      "title": "Rules Version",
+      "type": "string"
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope_note": {
+      "title": "Scope Note",
+      "type": "string"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "unavailable_reasons": {
+      "items": {
+        "enum": [
+          "no_event_coverage",
+          "event_coverage_stale"
+        ],
+        "type": "string"
+      },
+      "title": "Unavailable Reasons",
+      "type": "array"
+    },
+    "windows_hours": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Windows Hours",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_status",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "scope_note",
+    "availability",
+    "rules_version",
+    "rules_status",
+    "as_of",
+    "windows_hours",
+    "games_with_coverage",
+    "games_without_coverage",
+    "unavailable_reasons",
+    "summary",
+    "items"
+  ],
+  "title": "RadarArtifact",
+  "type": "object"
+}

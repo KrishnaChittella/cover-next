@@ -9,6 +9,7 @@ from metaspike.publishing.artifacts import (
     GAMES_DIR,
     MANIFEST_FILE,
     METHODOLOGY_FILE,
+    RADAR_FILE,
     SCHEMA_VERSION,
     SOURCE_HEALTH_FILE,
     ContractModel,
@@ -16,6 +17,7 @@ from metaspike.publishing.artifacts import (
     GameArtifact,
     Manifest,
     MethodologyArtifact,
+    RadarArtifact,
     SourceHealthArtifact,
     game_file,
 )
@@ -44,6 +46,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
     current = read_artifact(version_dir / CURRENT_FILE, CurrentArtifact)
     health = read_artifact(version_dir / SOURCE_HEALTH_FILE, SourceHealthArtifact)
     methodology = read_artifact(version_dir / METHODOLOGY_FILE, MethodologyArtifact)
+    radar = read_artifact(version_dir / RADAR_FILE, RadarArtifact)
 
     listed = [entry.slug for entry in current.entries] + [e.slug for e in current.unranked]
     _require(len(listed) == len(set(listed)), "current.json lists a game more than once")
@@ -51,7 +54,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
     _require(on_disk == sorted(listed), "game files do not match the games in current.json")
     games = {slug: read_artifact(version_dir / game_file(slug), GameArtifact) for slug in listed}
 
-    for artifact in (current, health, methodology, *games.values()):
+    for artifact in (current, health, methodology, radar, *games.values()):
         _require(artifact.schema_version == SCHEMA_VERSION, "unexpected schema_version")
         _require(artifact.run_id == current.run_id, "artifacts come from different runs")
 
@@ -70,6 +73,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
             entry.confidence <= current.confidence_ceiling,
             f"{entry.slug}: confidence exceeds the ceiling",
         )
+    _validate_events(games, methodology, radar)
     for unranked in current.unranked:
         game = games[unranked.slug]
         _require(
@@ -94,6 +98,7 @@ def validate_published(root: Path) -> Manifest:
         manifest.artifacts.current,
         manifest.artifacts.source_health,
         manifest.artifacts.methodology,
+        manifest.artifacts.radar,
         *manifest.artifacts.games.values(),
     ]
     for relative in referenced:
@@ -105,6 +110,64 @@ def validate_published(root: Path) -> Manifest:
             f"top-level copy is out of date: {mirror.relative_to(root)}",
         )
     return manifest
+
+
+def _validate_events(
+    games: dict[str, GameArtifact], methodology: MethodologyArtifact, radar: RadarArtifact
+) -> None:
+    """Event intelligence agrees with itself, with the rules and with the radar.
+
+    Above all: unavailable is never a number, and a number is never unavailable.
+    """
+    rules = methodology.event_heat
+    slugs_with_coverage = set()
+    for slug, game in games.items():
+        events = game.event_intelligence
+        _require(
+            events.rules_version == rules.version,
+            f"{slug}: event intelligence uses rules the methodology does not describe",
+        )
+        _require(events.as_of == radar.as_of, f"{slug}: events and radar differ on as_of")
+        if events.availability == "unavailable":
+            _require(
+                events.event_heat is None and not events.contributions and not game.events,
+                f"{slug}: unavailable event intelligence carries a heat or events",
+            )
+            continue
+        slugs_with_coverage.add(slug)
+        _require(events.event_heat is not None, f"{slug}: available without a heat")
+        counted = [item for item in events.contributions if item.counted]
+        _require(
+            [item.rank for item in counted] == list(range(1, len(counted) + 1)),
+            f"{slug}: counted events are not ranked from 1",
+        )
+        _require(
+            (events.top_event_id is None) == (not counted)
+            and (not counted or counted[0].event_id == events.top_event_id),
+            f"{slug}: top event is not the strongest counted event",
+        )
+        _require(
+            (events.event_heat == 0) == (not counted),
+            f"{slug}: heat and counted events disagree",
+        )
+    _require(
+        radar.games_with_coverage == len(slugs_with_coverage)
+        and radar.games_with_coverage + radar.games_without_coverage == len(games),
+        "radar coverage counts disagree with the games",
+    )
+    _require(
+        (radar.availability == "available") == bool(slugs_with_coverage),
+        "radar availability disagrees with the games' event coverage",
+    )
+    for item in radar.items:
+        _require(item.slug in slugs_with_coverage, f"radar lists {item.slug} without coverage")
+        _require(
+            any(
+                contribution.event_id == item.event_id and contribution.phase == "upcoming"
+                for contribution in games[item.slug].event_intelligence.contributions
+            ),
+            f"radar lists an event {item.slug} does not carry as upcoming",
+        )
 
 
 def _require(condition: bool, message: str) -> None:

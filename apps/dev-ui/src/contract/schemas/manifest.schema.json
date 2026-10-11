@@ -18,6 +18,10 @@
           "title": "Methodology",
           "type": "string"
         },
+        "radar": {
+          "title": "Radar",
+          "type": "string"
+        },
         "source_health": {
           "title": "Source Health",
           "type": "string"
@@ -27,6 +31,7 @@
         "current",
         "source_health",
         "methodology",
+        "radar",
         "games"
       ],
       "title": "ManifestPaths",

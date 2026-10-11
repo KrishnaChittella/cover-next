@@ -19,6 +19,8 @@ export type {
   HistoryPoint,
   RelationshipView,
   EventView,
+  EventIntelligenceView,
+  EventContributionView,
   MethodologyRef,
 } from "./types/game";
 export type { Manifest, ManifestPaths } from "./types/manifest";
@@ -29,11 +31,14 @@ export type {
   MetricView,
   SourceMethodology,
   SourcePolicyView,
+  EventHeatMethodology,
+  EventTypeRuleView,
 } from "./types/methodology";
+export type { RadarArtifact, RadarItemView } from "./types/radar";
 export type {
   SourceHealthArtifact,
   SourceHealthEntry,
   SourceFailure,
 } from "./types/source-health";
 
-export type ArtifactKind = "manifest" | "current" | "game" | "source-health" | "methodology";
+export type ArtifactKind = "manifest" | "current" | "game" | "source-health" | "methodology" | "radar";

@@ -23,5 +23,6 @@ export interface ManifestPaths {
     [k: string]: string;
   };
   methodology: string;
+  radar: string;
   source_health: string;
 }

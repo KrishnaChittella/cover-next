@@ -619,6 +619,8 @@ def test_no_public_artifact_can_carry_a_normalised_record() -> None:
         "assessments",
         "registry",
         "generated_at",
+        # Event records and coverage checks, evaluated beside the score. Not signals.
+        "events",
     ]
 
 

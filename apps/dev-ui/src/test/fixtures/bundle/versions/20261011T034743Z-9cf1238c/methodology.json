@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T02:51:33.475940Z",
-  "run_id": "20261011T025133Z-a8861c54",
+  "generated_at": "2026-10-11T03:47:43.777313Z",
+  "run_id": "20261011T034743Z-9cf1238c",
   "score_version": "metaspike_score_v0",
   "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply.",
   "score": {
@@ -81,6 +81,283 @@
         "formula": "100 * source_ceiling * freshness * history * completeness * samples",
         "rationale": "Multiplicative, so any single weakness lowers confidence and none can be averaged away by the others."
       }
+    ]
+  },
+  "event_heat": {
+    "version": "event_heat_rules_v1",
+    "status": "internal_uncalibrated",
+    "scope_note": "Event Heat is internal and uncalibrated (event_heat_rules_v1). It is reported beside metaspike_score_v0 and is not part of it. Unavailable means no source has looked at a game's events recently; it never means zero.",
+    "range": [
+      0.0,
+      100.0
+    ],
+    "terms": [
+      {
+        "name": "strength, before the start",
+        "formula": "pre_event_peak * (1 - days_to_start / ramp_days), inside the ramp; else 0",
+        "rationale": "Anticipation builds as a dated event approaches. Outside the ramp an event is scheduled and has no strength yet."
+      },
+      {
+        "name": "strength, while running",
+        "formula": "max(0.5 ^ (days_since_start / half_life_days), active_floor)",
+        "rationale": "The start is the peak. Novelty then halves every half-life, but an event that is still running never falls below its floor."
+      },
+      {
+        "name": "strength, after the end",
+        "formula": "strength_at_end * 0.5 ^ (days_since_end / half_life_days), until decay_window_days; then 0",
+        "rationale": "Influence fades from where it stood when the event ended and stops counting once the window has passed."
+      },
+      {
+        "name": "contribution",
+        "formula": "importance * strength",
+        "rationale": "A type's importance is also the most one event of it can contribute."
+      },
+      {
+        "name": "event_heat",
+        "formula": "scale * (1 - product(1 - contribution)), over the largest max_contributing_events contributions",
+        "rationale": "Each event contributes importance x strength, between 0 and 1. Events of the same type starting on the same UTC day count once, at the larger contribution, so an unmerged duplicate cannot count twice. The max_contributing_events largest contributions c are combined as heat = scale x (1 - product(1 - c)). The result is never below the largest single contribution, never reaches the scale unless one contribution is 1, and adding an event never lowers it."
+      }
+    ],
+    "aggregation": "Each event contributes importance x strength, between 0 and 1. Events of the same type starting on the same UTC day count once, at the larger contribution, so an unmerged duplicate cannot count twice. The max_contributing_events largest contributions c are combined as heat = scale x (1 - product(1 - c)). The result is never below the largest single contribution, never reaches the scale unless one contribution is 1, and adding an event never lowers it.",
+    "availability": [
+      {
+        "name": "available, heat 0",
+        "formula": "a source looked within coverage_max_age_days; no relevant event",
+        "rationale": "A finding: someone looked and there is nothing."
+      },
+      {
+        "name": "available, heat above 0",
+        "formula": "a source looked within coverage_max_age_days; relevant events exist",
+        "rationale": "The events and each one's contribution are listed."
+      },
+      {
+        "name": "unavailable",
+        "formula": "no source has looked, or the last look is older than coverage_max_age_days",
+        "rationale": "Not knowing is never reported as zero. The heat is null and the reason is given."
+      }
+    ],
+    "parameters": [
+      {
+        "name": "scale",
+        "value": "100",
+        "rationale": "The same 0 to 100 scale as the score and confidence, so the three read alike. It is a different quantity and is not added to either."
+      },
+      {
+        "name": "max_contributing_events",
+        "value": "3",
+        "rationale": "A game is rarely about more than a few things at once. Counting only the three strongest stops a pile of small events from looking like one large one."
+      },
+      {
+        "name": "coverage_max_age_days",
+        "value": "14",
+        "rationale": "Dates move. If no source has looked at a game's events for two weeks, what is known may be out of date, and heat is reported as unavailable, never as zero."
+      },
+      {
+        "name": "horizon_days",
+        "value": "30",
+        "rationale": "A month is as far ahead as a dated announcement is useful for planning content, and the longest ramp any type has."
+      },
+      {
+        "name": "radar_windows_hours",
+        "value": "24, 168, 720",
+        "rationale": "The next day, the next week and the next month: what can still be prepared for today, this week, and with planning."
+      }
+    ],
+    "types": [
+      {
+        "event_type": "release",
+        "label": "Release",
+        "importance": 1.0,
+        "ramp_days": 30.0,
+        "pre_event_peak": 0.6,
+        "default_duration_days": 0.0,
+        "half_life_days": 7.0,
+        "active_floor": 0.0,
+        "decay_window_days": 30.0,
+        "rationale": "The largest moment a game has. Anticipation builds for a month, the day itself is the peak, and interest halves about weekly for a month after."
+      },
+      {
+        "event_type": "expansion",
+        "label": "Expansion",
+        "importance": 0.85,
+        "ramp_days": 21.0,
+        "pre_event_peak": 0.55,
+        "default_duration_days": 0.0,
+        "half_life_days": 6.0,
+        "active_floor": 0.0,
+        "decay_window_days": 21.0,
+        "rationale": "A second launch for an existing audience: nearly as large as a release, with a shorter build-up and tail."
+      },
+      {
+        "event_type": "platform_release",
+        "label": "Platform release",
+        "importance": 0.6,
+        "ramp_days": 14.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 0.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.0,
+        "decay_window_days": 14.0,
+        "rationale": "A launch for a new audience only. Real, but smaller than the original."
+      },
+      {
+        "event_type": "season",
+        "label": "New season",
+        "importance": 0.7,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 60.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.15,
+        "decay_window_days": 3.0,
+        "rationale": "A season's start is the event; the season then runs for weeks. Strength halves every five days and holds at a low floor until the season ends."
+      },
+      {
+        "event_type": "wipe",
+        "label": "Wipe",
+        "importance": 0.65,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.6,
+        "default_duration_days": 14.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.1,
+        "decay_window_days": 2.0,
+        "rationale": "A reset everyone plays through at once. Sharp, anticipated a few days ahead, and largely over within two weeks."
+      },
+      {
+        "event_type": "major_patch",
+        "label": "Major update",
+        "importance": 0.6,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 0.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.0,
+        "decay_window_days": 10.0,
+        "rationale": "Changes what there is to say about a game. Usually dated a few days ahead; interest fades within about ten days."
+      },
+      {
+        "event_type": "dlc",
+        "label": "DLC",
+        "importance": 0.5,
+        "ramp_days": 10.0,
+        "pre_event_peak": 0.45,
+        "default_duration_days": 0.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.0,
+        "decay_window_days": 10.0,
+        "rationale": "New content smaller than an expansion."
+      },
+      {
+        "event_type": "expedition",
+        "label": "Expedition",
+        "importance": 0.45,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 42.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.1,
+        "decay_window_days": 2.0,
+        "rationale": "A time-limited community event that runs for weeks, strongest at its start."
+      },
+      {
+        "event_type": "major_in_game_event",
+        "label": "In-game event",
+        "importance": 0.55,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 3.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.25,
+        "decay_window_days": 3.0,
+        "rationale": "A live moment inside the game. Short, so it stays near full strength while it runs and fades within days."
+      },
+      {
+        "event_type": "beta",
+        "label": "Beta",
+        "importance": 0.5,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.45,
+        "default_duration_days": 7.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.2,
+        "decay_window_days": 4.0,
+        "rationale": "First hands-on access for a wide audience, for a limited time."
+      },
+      {
+        "event_type": "playtest",
+        "label": "Playtest",
+        "importance": 0.35,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 4.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.2,
+        "decay_window_days": 3.0,
+        "rationale": "Limited access, smaller than a beta."
+      },
+      {
+        "event_type": "free_weekend",
+        "label": "Free weekend",
+        "importance": 0.4,
+        "ramp_days": 3.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 3.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.4,
+        "decay_window_days": 2.0,
+        "rationale": "A few days in which anyone can play. It matters while it lasts and little after."
+      },
+      {
+        "event_type": "showcase",
+        "label": "Showcase",
+        "importance": 0.45,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 1.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.5,
+        "decay_window_days": 4.0,
+        "rationale": "A dated presentation. Speculation builds for a week and the reaction is spent within days."
+      },
+      {
+        "event_type": "trailer",
+        "label": "Trailer",
+        "importance": 0.4,
+        "ramp_days": 2.0,
+        "pre_event_peak": 0.3,
+        "default_duration_days": 0.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.0,
+        "decay_window_days": 5.0,
+        "rationale": "Often a surprise, so there is little build-up. Reaction content has a short life."
+      },
+      {
+        "event_type": "minor_patch",
+        "label": "Minor update",
+        "importance": 0.15,
+        "ramp_days": 1.0,
+        "pre_event_peak": 0.2,
+        "default_duration_days": 0.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.0,
+        "decay_window_days": 3.0,
+        "rationale": "Routine maintenance. Recorded, and deliberately worth little: three of them together stay well under one major patch."
+      }
+    ],
+    "radar_windows_hours": [
+      24,
+      168,
+      720
+    ],
+    "limitations": [
+      "Internal and uncalibrated: every value is an engineering prior, not fitted to outcomes and not backtested.",
+      "No event source is collected yet. Until one is, event intelligence is unavailable for every game.",
+      "Event Heat is not part of metaspike_score_v0 and does not affect any rank.",
+      "Events are matched by exact rules only. Two reports of one event that share no id, reference or title stay separate; heat counts one event per type and start day so that such a duplicate cannot count twice.",
+      "A source without native event ids that moves a date is seen as reporting a new event.",
+      "Importance is per type, not per game: a small game's release and a large game's are treated alike.",
+      "All days are UTC. An event known only to the day starts at 00:00 UTC."
     ]
   },
   "features": {

@@ -15,16 +15,34 @@ payloads, secrets or exception traces.
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
     "single source (Wikimedia pageviews, daily). It is not a complete measure of creator "
     "demand or supply."
+)
+
+EVENT_SCOPE_NOTE = (
+    "Event Heat is internal and uncalibrated (event_heat_rules_v1). It is reported beside "
+    "metaspike_score_v0 and is not part of it. Unavailable means no source has looked at a "
+    "game's events recently; it never means zero."
+)
+RADAR_SCOPE_NOTE = (
+    "The radar lists dated events that have not started, with their timing. It ranks "
+    "nothing and recommends nothing: an event being scheduled is not, by itself, a content "
+    "opportunity."
 )
 
 SemVer = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
@@ -78,6 +96,13 @@ EventTypeView = Literal[
     "platform_release",
     "major_in_game_event",
 ]
+
+
+EventPhaseView = Literal["upcoming", "active", "decaying", "expired", "called_off"]
+EventAvailabilityView = Literal["available", "unavailable"]
+EventUnavailableReasonView = Literal["no_event_coverage", "event_coverage_stale"]
+EventStatusView = Literal["scheduled", "cancelled", "withdrawn"]
+TimePrecisionView = Literal["day", "exact"]
 
 
 class ContractModel(BaseModel):
@@ -248,6 +273,63 @@ class EventView(ContractModel):
     reference: str | None = None
 
 
+class EventContributionView(ContractModel):
+    """One event at the evaluation moment, and its part in the game's Event Heat."""
+
+    event_id: str
+    event_type: EventTypeView
+    title: str
+    starts_at: AwareDatetime
+    # The end used for evaluation. When `end_assumed`, the source gave none and this is
+    # the start plus the type's default duration.
+    ends_at: AwareDatetime
+    end_assumed: bool
+    time_precision: TimePrecisionView
+    status: EventStatusView
+    phase: EventPhaseView
+    in_ramp: bool
+    strength: float = Field(ge=0, le=1)
+    importance: float = Field(gt=0, le=1)
+    contribution: float = Field(ge=0, le=1)
+    counted: bool
+    rank: int | None = Field(default=None, ge=1)
+    not_counted_because: str | None = None
+    sources: tuple[str, ...]
+    text: str | None = None
+
+
+class EventIntelligenceView(ContractModel):
+    """A game's event intelligence: available with a heat, or explicitly unavailable.
+
+    `event_heat` is null exactly when `availability` is "unavailable". A heat of 0 is a
+    finding (a source looked and nothing is relevant); null is the absence of one.
+    """
+
+    availability: EventAvailabilityView
+    rules_version: str
+    rules_status: str
+    as_of: AwareDatetime
+    event_heat: float | None = Field(default=None, ge=0, le=100)
+    top_event_id: str | None = None
+    summary: str
+    reasons: tuple[ReasonView, ...]
+    unavailable_reasons: tuple[EventUnavailableReasonView, ...]
+    coverage_checked_at: AwareDatetime | None = None
+    coverage_sources: tuple[str, ...]
+    contributions: tuple[EventContributionView, ...]
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        available = self.availability == "available"
+        if available != (self.event_heat is not None):
+            raise ValueError("event_heat is a number exactly when availability is available")
+        if available == bool(self.unavailable_reasons):
+            raise ValueError("unavailable_reasons are given exactly when unavailable")
+        if not available and (self.contributions or self.top_event_id is not None):
+            raise ValueError("unavailable event intelligence carries no events")
+        return self
+
+
 class MethodologyRef(ContractModel):
     score_version: str
     path: str
@@ -269,6 +351,7 @@ class GameArtifact(ArtifactHeader):
     history: tuple[HistorySeries, ...]
     source_coverage: tuple[SourceCoverage, ...]
     events: tuple[EventView, ...] = ()
+    event_intelligence: EventIntelligenceView
     methodology: MethodologyRef
     updated_at: AwareDatetime
 
@@ -426,10 +509,44 @@ class SourceMethodology(ContractModel):
     policy: SourcePolicyView
 
 
+class EventTypeRuleView(ContractModel):
+    event_type: EventTypeView
+    label: str
+    importance: float
+    ramp_days: float
+    pre_event_peak: float
+    default_duration_days: float
+    half_life_days: float
+    active_floor: float
+    decay_window_days: float
+    rationale: str
+
+
+class ParameterView(ContractModel):
+    name: str
+    value: str
+    rationale: str
+
+
+class EventHeatMethodology(ContractModel):
+    version: str
+    status: str
+    scope_note: str
+    range: tuple[float, float]
+    terms: tuple[TermView, ...]
+    aggregation: str
+    availability: tuple[TermView, ...]
+    parameters: tuple[ParameterView, ...]
+    types: tuple[EventTypeRuleView, ...]
+    radar_windows_hours: tuple[int, ...]
+    limitations: tuple[str, ...]
+
+
 class MethodologyArtifact(ArtifactHeader):
     scope_note: str
     score: ScoreMethodology
     confidence: ConfidenceMethodology
+    event_heat: EventHeatMethodology
     features: FeatureMethodology
     explanations: str
     metrics: tuple[MetricView, ...]
@@ -437,10 +554,60 @@ class MethodologyArtifact(ArtifactHeader):
     limitations: tuple[str, ...]
 
 
+class RadarItemView(ContractModel):
+    canonical_game_id: GameIdView
+    slug: SlugView
+    name: str
+    event_id: str
+    event_type: EventTypeView
+    title: str
+    starts_at: AwareDatetime
+    time_precision: TimePrecisionView
+    hours_until_start: float = Field(ge=0)
+    window_hours: int
+    in_ramp: bool
+    strength: float = Field(ge=0, le=1)
+    contribution: float = Field(ge=0, le=1)
+    game_event_heat: float = Field(ge=0, le=100)
+    sources: tuple[str, ...]
+    text: str
+    artifact_path: str
+
+
+class RadarArtifact(ArtifactHeader):
+    """Dated events that have not started, for games with event coverage.
+
+    "unavailable" means no game has event coverage, so nothing is known. It is not an
+    empty radar: an available radar with no items is.
+    """
+
+    scope_note: str
+    availability: EventAvailabilityView
+    rules_version: str
+    rules_status: str
+    as_of: AwareDatetime
+    windows_hours: tuple[int, ...]
+    games_with_coverage: int = Field(ge=0)
+    games_without_coverage: int = Field(ge=0)
+    unavailable_reasons: tuple[EventUnavailableReasonView, ...]
+    summary: str
+    items: tuple[RadarItemView, ...]
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        available = self.availability == "available"
+        if available == bool(self.unavailable_reasons):
+            raise ValueError("unavailable_reasons are given exactly when unavailable")
+        if not available and self.items:
+            raise ValueError("an unavailable radar carries no items")
+        return self
+
+
 class ManifestPaths(ContractModel):
     current: str
     source_health: str
     methodology: str
+    radar: str
     games: dict[str, str]
 
 
@@ -455,6 +622,7 @@ class Manifest(ArtifactHeader):
 CURRENT_FILE = "current.json"
 SOURCE_HEALTH_FILE = "source-health.json"
 METHODOLOGY_FILE = "methodology.json"
+RADAR_FILE = "radar.json"
 MANIFEST_FILE = "manifest.json"
 GAMES_DIR = "games"
 VERSIONS_DIR = "versions"
@@ -473,6 +641,7 @@ class ArtifactBundle:
     games: dict[str, GameArtifact]
     source_health: SourceHealthArtifact
     methodology: MethodologyArtifact
+    radar: RadarArtifact
 
     def version_files(self) -> dict[str, ContractModel]:
         """Path relative to the version directory -> artifact."""
@@ -480,6 +649,7 @@ class ArtifactBundle:
             CURRENT_FILE: self.current,
             SOURCE_HEALTH_FILE: self.source_health,
             METHODOLOGY_FILE: self.methodology,
+            RADAR_FILE: self.radar,
         }
         for slug, game in sorted(self.games.items()):
             files[game_file(slug)] = game

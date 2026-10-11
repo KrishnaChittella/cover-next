@@ -8,6 +8,7 @@ export interface MethodologyArtifact {
    * INTERNAL / non-binding engineering contract; not the public contract.
    */
   contract_status: "internal";
+  event_heat: EventHeatMethodology;
   explanations: string;
   features: FeatureMethodology;
   generated_at: string;
@@ -35,6 +36,55 @@ export interface ConfidenceMethodology {
 export interface TermView {
   formula: string;
   name: string;
+  rationale: string;
+}
+export interface EventHeatMethodology {
+  aggregation: string;
+  availability: TermView[];
+  limitations: string[];
+  parameters: ParameterView[];
+  radar_windows_hours: number[];
+  /**
+   * @minItems 2
+   * @maxItems 2
+   */
+  range: [number, number];
+  scope_note: string;
+  status: string;
+  terms: TermView[];
+  types: EventTypeRuleView[];
+  version: string;
+}
+export interface ParameterView {
+  name: string;
+  rationale: string;
+  value: string;
+}
+export interface EventTypeRuleView {
+  active_floor: number;
+  decay_window_days: number;
+  default_duration_days: number;
+  event_type:
+    | "release"
+    | "major_patch"
+    | "minor_patch"
+    | "season"
+    | "wipe"
+    | "expansion"
+    | "dlc"
+    | "expedition"
+    | "beta"
+    | "playtest"
+    | "free_weekend"
+    | "trailer"
+    | "showcase"
+    | "platform_release"
+    | "major_in_game_event";
+  half_life_days: number;
+  importance: number;
+  label: string;
+  pre_event_peak: number;
+  ramp_days: number;
   rationale: string;
 }
 export interface FeatureMethodology {

@@ -25,6 +25,7 @@ from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.domain.source_records import SourceRecord
+from metaspike.events.store import EventStore
 from metaspike.jobs import commands as job_commands
 from metaspike.pipeline.collection import (
     CollectionReport,
@@ -43,6 +44,8 @@ from metaspike.pipeline.sampling import (
     run_sampling_slot,
     target_health,
 )
+from metaspike.publishing.build import EventInputs
+from metaspike.publishing.event_views import event_as_of
 from metaspike.publishing.publisher import to_json
 from metaspike.publishing.schemas import export_schemas, stale_schemas
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
@@ -91,6 +94,7 @@ EXIT_SOURCE_UNAVAILABLE = 6
 DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_CACHE_DIR = Path(".metaspike/cache")
+DEFAULT_EVENTS_DIR = Path(".metaspike/events")
 DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
 DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
 DEFAULT_RECORDED_DIRECTORIES = (
@@ -149,11 +153,13 @@ def _parser() -> argparse.ArgumentParser:
     build = commands.add_parser("build", help="build and publish artifacts from the cache")
     build.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     build.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
+    build.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
     build.set_defaults(handler=_build)
 
     run = commands.add_parser("run", help="collect, score and publish in one step")
     _add_collection_options(run)
     run.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
+    run.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -317,6 +323,17 @@ def _collect(args: argparse.Namespace) -> int:
     return EXIT_OK if report.any_success else EXIT_COLLECTION_FAILED
 
 
+def _event_inputs(args: argparse.Namespace, report: CollectionReport) -> EventInputs:
+    """What the local event store knew at the run's evaluation moment.
+
+    No event source is collected yet, so the store is normally absent and every game's
+    event intelligence is published as unavailable. Nothing here contacts a network.
+    """
+    as_of = event_as_of(report)
+    store = EventStore(args.events_dir)
+    return EventInputs(records=store.events(as_of), checks=store.checks(as_of), as_of=as_of)
+
+
 def _build(args: argparse.Namespace) -> int:
     snapshot = args.cache_dir / _SNAPSHOT_FILE
     if not snapshot.is_file():
@@ -324,7 +341,12 @@ def _build(args: argparse.Namespace) -> int:
     report = CollectionReport.model_validate_json(snapshot.read_bytes())
     with build_client() as client:  # the registry needs an adapter; no request is made
         result = build_and_publish(
-            load_seed_catalogue(), report, default_registry(client), args.artifacts_dir, _now()
+            load_seed_catalogue(),
+            report,
+            default_registry(client),
+            args.artifacts_dir,
+            _now(),
+            _event_inputs(args, report),
         )
     _print_summary(result, args.artifacts_dir)
     return EXIT_OK
@@ -335,7 +357,12 @@ def _run(args: argparse.Namespace) -> int:
         registry = default_registry(client)
         report = _collect_report(args, registry)
         result = build_and_publish(
-            load_seed_catalogue(), report, registry, args.artifacts_dir, _now()
+            load_seed_catalogue(),
+            report,
+            registry,
+            args.artifacts_dir,
+            _now(),
+            _event_inputs(args, report),
         )
     _print_summary(result, args.artifacts_dir)
     return EXIT_OK

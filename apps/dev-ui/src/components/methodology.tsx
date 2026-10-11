@@ -1,9 +1,9 @@
 "use client";
 
-import type { MethodologyArtifact, SourceMethodology, TermView } from "@/contract";
+import type { EventHeatMethodology, MethodologyArtifact, SourceMethodology, TermView } from "@/contract";
 import { loadMethodology } from "@/lib/data/client";
 import { useArtifact } from "@/lib/data/use-artifact";
-import { formatConfidence, formatCount, formatDay, humanize } from "@/lib/format";
+import { formatConfidence, formatCount, formatDay, formatDecimal, humanize } from "@/lib/format";
 
 import { DataState } from "./data-state";
 import { RunNote } from "./run-note";
@@ -123,6 +123,97 @@ function SourceBlock({ source }: { source: SourceMethodology }) {
   );
 }
 
+function days(value: number): string {
+  return value === 0 ? "none" : `${formatCount(value)} d`;
+}
+
+function EventHeatSection({ rules }: { rules: EventHeatMethodology }) {
+  return (
+    <Section
+      id="event-heat"
+      title={`Event Heat: ${rules.version}`}
+      note={`A value from ${formatCount(rules.range[0])} to ${formatCount(rules.range[1])}. ${humanize(rules.status)}: every number below is an engineering prior.`}
+    >
+      <aside aria-label="Status of Event Heat" className="panel mb-4 border-l-2 border-l-signal px-5 py-4">
+        <p className="eyebrow text-signal">Internal, uncalibrated, and not in score v0</p>
+        <p className="mt-1.5 max-w-4xl text-sm text-ink-soft">{rules.scope_note}</p>
+      </aside>
+      <Terms terms={rules.terms} caption="Event Heat terms" />
+      <h3 className="eyebrow mt-6 mb-2">Availability</h3>
+      <Terms terms={rules.availability} caption="Event Heat availability" />
+      <h3 className="eyebrow mt-6 mb-2">Parameters</h3>
+      <div className="panel overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Event Heat parameters</caption>
+          <thead>
+            <tr className="border-b border-line text-xs text-muted">
+              <th scope="col" className="px-4 py-2 text-left font-medium">Parameter</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">Value</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.parameters.map((parameter) => (
+              <tr key={parameter.name} className="border-b border-line align-top last:border-b-0">
+                <th scope="row" className="px-4 py-3 text-left font-mono text-xs font-medium text-ink">
+                  {parameter.name}
+                </th>
+                <td className="num px-4 py-3 font-mono text-xs whitespace-nowrap text-signal">{parameter.value}</td>
+                <td className="max-w-xl px-4 py-3 text-ink-soft">{parameter.rationale}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h3 className="eyebrow mt-6 mb-2">Rules by event type</h3>
+      <div className="panel overflow-x-auto">
+        <table className="w-full border-collapse text-sm">
+          <caption className="sr-only">Event Heat rules by event type</caption>
+          <thead>
+            <tr className="border-b border-line text-xs text-muted">
+              <th scope="col" className="px-4 py-2 text-left font-medium">Type</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Importance</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Ramp</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Pre-event peak</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Default length</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Half-life</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Floor</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">Decay window</th>
+              <th scope="col" className="px-4 py-2 text-left font-medium">Why</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.types.map((rule) => (
+              <tr key={rule.event_type} className="border-b border-line align-top last:border-b-0">
+                <th scope="row" className="px-4 py-3 text-left font-normal whitespace-nowrap">
+                  <span className="text-ink">{rule.label}</span>
+                  <span className="block font-mono text-xs text-muted">{rule.event_type}</span>
+                </th>
+                <td className="num px-3 py-3 text-right font-mono">{formatDecimal(rule.importance)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{days(rule.ramp_days)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{formatDecimal(rule.pre_event_peak)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{days(rule.default_duration_days)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{days(rule.half_life_days)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{formatDecimal(rule.active_floor)}</td>
+                <td className="num px-3 py-3 text-right font-mono">{days(rule.decay_window_days)}</td>
+                <td className="min-w-64 px-4 py-3 text-xs text-ink-soft">{rule.rationale}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h3 className="eyebrow mt-6 mb-2">Event Heat limitations</h3>
+      <ul className="panel list-disc space-y-2 py-4 pr-5 pl-9 text-sm text-ink-soft marker:text-muted">
+        {rules.limitations.map((limitation) => (
+          <li key={limitation} className="max-w-3xl">
+            {limitation}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
+
 function Body({ methodology }: { methodology: MethodologyArtifact }) {
   return (
     <>
@@ -170,6 +261,8 @@ function Body({ methodology }: { methodology: MethodologyArtifact }) {
         </dl>
         <Terms terms={methodology.confidence.terms} caption="Confidence terms" />
       </Section>
+
+      <EventHeatSection rules={methodology.event_heat} />
 
       <Section
         id="features"

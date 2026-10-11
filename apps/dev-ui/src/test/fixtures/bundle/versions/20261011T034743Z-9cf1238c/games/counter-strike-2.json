@@ -1,14 +1,16 @@
 {
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T02:51:33.475940Z",
-  "run_id": "20261011T025133Z-a8861c54",
+  "generated_at": "2026-10-11T03:47:43.777313Z",
+  "run_id": "20261011T034743Z-9cf1238c",
   "score_version": "metaspike_score_v0",
-  "canonical_game_id": "86d32c9a-afbe-4220-94c3-52dbf2489f04",
-  "slug": "elden-ring",
-  "name": "Elden Ring",
-  "aliases": [],
-  "lifecycle_state": "RELEASED",
+  "canonical_game_id": "cc600051-5a1b-458f-8cd0-cf1324bc44df",
+  "slug": "counter-strike-2",
+  "name": "Counter-Strike 2",
+  "aliases": [
+    "CS2"
+  ],
+  "lifecycle_state": "LIVE_SERVICE",
   "relationships": [],
   "rank": null,
   "score": {
@@ -45,10 +47,31 @@
     }
   ],
   "events": [],
+  "event_intelligence": {
+    "availability": "unavailable",
+    "rules_version": "event_heat_rules_v1",
+    "rules_status": "internal_uncalibrated",
+    "as_of": "2026-10-04T00:00:00Z",
+    "event_heat": null,
+    "top_event_id": null,
+    "summary": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "reasons": [
+      {
+        "code": "no_event_coverage",
+        "text": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events."
+      }
+    ],
+    "unavailable_reasons": [
+      "no_event_coverage"
+    ],
+    "coverage_checked_at": null,
+    "coverage_sources": [],
+    "contributions": []
+  },
   "methodology": {
     "score_version": "metaspike_score_v0",
     "path": "methodology.json",
     "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
   },
-  "updated_at": "2026-10-11T02:51:33.475940Z"
+  "updated_at": "2026-10-11T03:47:43.777313Z"
 }
