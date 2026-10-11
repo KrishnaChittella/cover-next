@@ -31,6 +31,24 @@ export function formatUnit(value: number | null | undefined): string {
   return present(value) ? twoDecimal.format(value) : ABSENT;
 }
 
+/**
+ * Event Heat on 0 to 100. Zero is a finding of its own ("a source looked and nothing
+ * contributes"), so a heat that is positive but below the displayed precision is never
+ * shown as 0.0: it reads "<0.1". The artifact keeps the exact number.
+ */
+export function formatHeat(value: number | null | undefined): string {
+  if (!present(value)) return ABSENT;
+  if (value > 0 && value < 0.05) return "<0.1";
+  return oneDecimal.format(value);
+}
+
+/** A strength or contribution on 0 to 1. A positive value never reads as 0.00. */
+export function formatShare(value: number | null | undefined): string {
+  if (!present(value)) return ABSENT;
+  if (value > 0 && value < 0.005) return "<0.01";
+  return twoDecimal.format(value);
+}
+
 /** A signed percentage change. Zero carries no sign; the minus is a real minus sign. */
 export function formatSignedPercent(value: number | null | undefined): string {
   if (!present(value)) return ABSENT;

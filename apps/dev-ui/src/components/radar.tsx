@@ -6,7 +6,7 @@ import type { RadarArtifact, RadarItemView } from "@/contract";
 import { loadRadar } from "@/lib/data/client";
 import { useArtifact } from "@/lib/data/use-artifact";
 import { eventTypeLabel, formatEventMoment, formatHoursAhead, unavailableLabel, windowLabel } from "@/lib/events";
-import { formatCount, formatScore, formatTimestamp, formatUnit, humanize } from "@/lib/format";
+import { formatCount, formatHeat, formatShare, formatTimestamp, humanize } from "@/lib/format";
 
 import { DataState } from "./data-state";
 import { RunNote } from "./run-note";
@@ -64,7 +64,7 @@ function Item({ item }: { item: RadarItemView }) {
         <Badge>{eventTypeLabel(item.event_type)}</Badge>
         <Badge tone={item.in_ramp ? "signal" : "neutral"}>{item.in_ramp ? "In its ramp" : "Scheduled"}</Badge>
         <span className="num w-full text-xs text-muted md:text-right">
-          contribution {formatUnit(item.contribution)} · game event heat {formatScore(item.game_event_heat)}
+          contribution {formatShare(item.contribution)} · game event heat {formatHeat(item.game_event_heat)}
         </span>
       </div>
     </li>

@@ -1,6 +1,6 @@
 import type { EventIntelligenceView } from "@/contract";
 import { eventHeatState, eventTiming, eventTypeLabel, phaseLabel, unavailableLabel } from "@/lib/events";
-import { formatScore, formatTimestamp, formatUnit, humanize } from "@/lib/format";
+import { formatHeat, formatShare, formatTimestamp, humanize } from "@/lib/format";
 
 import { Badge } from "./ui";
 
@@ -62,7 +62,7 @@ export function EventPanel({ events }: { events: EventIntelligenceView }) {
         <div>
           <dt className="eyebrow">Event Heat</dt>
           <dd className="num mt-1 font-mono text-3xl font-semibold text-ink">
-            {formatScore(state.heat)}
+            {formatHeat(state.heat)}
             <span className="ml-1 text-sm font-normal text-muted">/ 100</span>
           </dd>
           <dd className="mt-1.5 text-xs text-muted">
@@ -120,8 +120,8 @@ export function EventPanel({ events }: { events: EventIntelligenceView }) {
                       {phaseLabel(event.phase)}
                     </Badge>
                   </td>
-                  <td className="num px-4 py-3 text-right font-mono">{formatUnit(event.strength)}</td>
-                  <td className="num px-4 py-3 text-right font-mono">{formatUnit(event.contribution)}</td>
+                  <td className="num px-4 py-3 text-right font-mono">{formatShare(event.strength)}</td>
+                  <td className="num px-4 py-3 text-right font-mono">{formatShare(event.contribution)}</td>
                   <td className="py-3 pl-4 text-xs text-ink-soft">
                     {event.counted ? (
                       <span className="num">Yes, #{event.rank}</span>

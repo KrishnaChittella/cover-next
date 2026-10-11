@@ -48,7 +48,7 @@ class MatchRule(StrEnum):
     # Nothing matched: this observation is the first of a new event.
     NEW_EVENT = "new_event"
     SAME_SOURCE_NATIVE_ID = "same_source_native_id"
-    SAME_SOURCE_TYPE_AND_DAY = "same_source_type_and_day"
+    SAME_SOURCE_TYPE_DAY_AND_TITLE = "same_source_type_day_and_title"
     CROSS_SOURCE_SAME_REFERENCE = "cross_source_same_reference"
     CROSS_SOURCE_SAME_TYPE_DAY_AND_TITLE = "cross_source_same_type_day_and_title"
 

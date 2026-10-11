@@ -11,10 +11,13 @@ that applies, strongest first:
 
 1. `same_source_native_id`: the same source reports the same source-native event id.
    The date, the title and the end may all have changed; it is still that event.
-2. `same_source_type_and_day`: the same source reports the same type of event starting
-   on the same UTC day, and the two statements do not carry different native ids.
-   Covers a source that repeats itself, rewords a title, adds an end date later or
-   starts supplying an id. Two different native ids on one day are two events.
+2. `same_source_type_day_and_title`: the fallback when rule 1 has nothing to go on. The
+   same source reports the same type of event starting on the same UTC day under the
+   same title, compared after folding case, accents and punctuation, and the two
+   statements do not carry different native ids. Covers a source that repeats itself,
+   changes only the punctuation or case of a title, adds an end date later or starts
+   supplying an id. A different title is a different event here, and so are two
+   different native ids on one day.
 3. `cross_source_same_reference`: a different source cites exactly the same reference
    for the same type of event.
 4. `cross_source_same_type_day_and_title`: a different source reports the same type of
@@ -28,8 +31,9 @@ the heat aggregation, which counts one event per type and start day.
 
 Consequences worth knowing:
 
-- A source without native ids that moves an event's date is seen as reporting a new
-  event. The old one stays until that source withdraws or cancels it.
+- A source without native ids that moves an event's date, or gives it a substantively
+  different title, is seen as reporting a new event. The old one stays until that
+  source withdraws or cancels it. Only a native id can carry such a revision.
 - Events of different types are never merged, whatever else they share.
 - Events of different games are never merged.
 
@@ -203,6 +207,7 @@ def _match(observation: EventObservation, drafts: list[_Draft]) -> tuple[_Draft,
         for draft in same_game:
             if key in draft.native_ids():
                 return draft, MatchRule.SAME_SOURCE_NATIVE_ID
+    title = normalise_title(observation.title)
     for draft in same_game:
         claim = draft.current_of(observation.source)
         if (
@@ -210,8 +215,10 @@ def _match(observation: EventObservation, drafts: list[_Draft]) -> tuple[_Draft,
             and (claim.source_event_id is None or observation.source_event_id is None)
             and claim.event_type is observation.event_type
             and claim.start_day == observation.start_day
+            and title != ""
+            and normalise_title(claim.title) == title
         ):
-            return draft, MatchRule.SAME_SOURCE_TYPE_AND_DAY
+            return draft, MatchRule.SAME_SOURCE_TYPE_DAY_AND_TITLE
     others = [draft for draft in same_game if draft.current_of(observation.source) is None]
     if observation.reference is not None:
         wanted = normalise_reference(observation.reference)
@@ -222,7 +229,6 @@ def _match(observation: EventObservation, drafts: list[_Draft]) -> tuple[_Draft,
                 for member in draft.members
             ):
                 return draft, MatchRule.CROSS_SOURCE_SAME_REFERENCE
-    title = normalise_title(observation.title)
     for draft in others:
         current = draft.current
         if (

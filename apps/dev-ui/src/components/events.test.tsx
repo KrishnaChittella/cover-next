@@ -7,8 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { eventIntelligenceViolations, radarViolations, violations } from "@/contract/validate";
 import { loadGame, loadRadar } from "@/lib/data/client";
 import { eventHeatState, eventTiming, formatHoursAhead, windowLabel } from "@/lib/events";
+import { formatHeat, formatShare } from "@/lib/format";
 import { bundleFetcher, game, manifest, methodology, radar, type Overrides } from "@/test/bundle";
 import {
+  AVAILABLE_TINY_POSITIVE,
   AVAILABLE_WITH_EVENTS,
   AVAILABLE_WITH_NOTHING,
   RADAR_ITEMS,
@@ -51,7 +53,7 @@ beforeEach(() => {
 
 describe("the synthetic fixtures", () => {
   it("are valid instances of the contract, so the tests exercise real shapes", () => {
-    for (const events of [AVAILABLE_WITH_EVENTS, AVAILABLE_WITH_NOTHING, UNAVAILABLE_STALE]) {
+    for (const events of [AVAILABLE_WITH_EVENTS, AVAILABLE_WITH_NOTHING, AVAILABLE_TINY_POSITIVE, UNAVAILABLE_STALE]) {
       expect(violations("game", { ...game("minecraft"), event_intelligence: events })).toEqual([]);
       expect(eventIntelligenceViolations(events)).toEqual([]);
     }
@@ -189,6 +191,44 @@ describe("the event panel with events (synthetic)", () => {
     expect(panel).toHaveTextContent("this is a finding, not a gap");
     expect(panel).not.toHaveTextContent("Unavailable");
     expect(screen.queryByTestId("event-timeline")).not.toBeInTheDocument();
+  });
+
+  it("never shows a tiny positive heat as zero", () => {
+    render(<EventPanel events={AVAILABLE_TINY_POSITIVE} />);
+    const panel = screen.getByTestId("event-panel");
+    const heat = within(panel).getByText("Event Heat").closest("div")!;
+    expect(heat).toHaveTextContent("<0.1/ 100");
+    expect(heat).not.toHaveTextContent("0.0");
+    // It is not described as a zero finding, and its event is shown as counted.
+    expect(panel).not.toHaveTextContent("A source looked; nothing is relevant now.");
+    expect(panel).toHaveTextContent("Internal and uncalibrated.");
+    expect(within(panel).getByText("Strongest event").closest("div")).toHaveTextContent("Synthetic Edge Update");
+    const row = within(screen.getByTestId("event-timeline")).getAllByRole("row")[1]!;
+    expect(row).toHaveTextContent("Yes, #1");
+    const cells = within(row).getAllByRole("cell").map((cell) => cell.textContent);
+    expect(cells.filter((text) => text === "<0.01")).toHaveLength(2); // strength and contribution
+    expect(cells).not.toContain("0.00");
+    // The three states read differently on screen.
+    expect(eventHeatState(AVAILABLE_TINY_POSITIVE)).toEqual({ kind: "available", heat: 5.555555555e-5 });
+    expect([formatHeat(5.555555555e-5), formatHeat(0), formatHeat(null)]).toEqual(["<0.1", "0.0", "—"]);
+  });
+
+  it("formats heat and shares without ever rounding a positive value to zero", () => {
+    expect(formatHeat(0)).toBe("0.0");
+    expect(formatHeat(1e-9)).toBe("<0.1");
+    expect(formatHeat(0.0499)).toBe("<0.1");
+    expect(formatHeat(0.05)).toBe("0.1");
+    expect(formatHeat(0.1)).toBe("0.1");
+    expect(formatHeat(46.864)).toBe("46.9");
+    expect(formatHeat(100)).toBe("100.0");
+    expect(formatHeat(undefined)).toBe("—");
+    expect(formatShare(0)).toBe("0.00");
+    expect(formatShare(5.5e-7)).toBe("<0.01");
+    expect(formatShare(0.0049)).toBe("<0.01");
+    expect(formatShare(0.005)).toBe("0.01");
+    expect(formatShare(0.4243)).toBe("0.42");
+    expect(formatShare(1)).toBe("1.00");
+    expect(formatShare(null)).toBe("—");
   });
 
   it("shows stale coverage as unavailable, with when it was last looked at", () => {

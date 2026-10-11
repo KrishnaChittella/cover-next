@@ -27,6 +27,17 @@ started yet.
 | B | No source has looked, or not recently enough | `unavailable`, `event_heat: null`, with a reason |
 | C | Events are known and current | `available`, `event_heat` above 0, with each contribution |
 
+The three are distinct in every artifact: available with no contribution is exactly
+`0`; available with any contribution is above `0`, however small; unavailable is `null`.
+
+**Artifacts carry the computed values unrounded.** A heat one second into a ramp is
+real and tiny (about 0.00006). Rounding it for publication would write `0`, which means
+"a source looked and nothing contributes", so nothing at the contract boundary rounds
+Event Heat, strength, contribution or hours. The validator refuses a zero heat beside a
+counted event. How a number is shown is the interface's business: the developer UI
+shows a positive heat below its display precision as `<0.1`, and a positive strength or
+contribution as `<0.01`, never as zero.
+
 B never becomes a number. The engine's result model, the artifact view, the artifact
 validator and the developer UI each refuse a heat on unavailable intelligence
 independently. Reasons: `no_event_coverage`, `event_coverage_stale`.
@@ -75,19 +86,28 @@ of the same game, by the first rule that applies, or starts a new one.
 | Rule | An observation is the same event when |
 |---|---|
 | `same_source_native_id` | the same source reports the same native event id. Date, title and end may all have changed |
-| `same_source_type_and_day` | the same source reports the same type starting on the same UTC day, and the two do not carry different native ids |
+| `same_source_type_day_and_title` | the fallback when there is no shared native id: the same source reports the same type, the same UTC start day and the same title after folding case, accents and punctuation, and the two do not carry different native ids |
 | `cross_source_same_reference` | another source cites exactly the same reference for the same type |
 | `cross_source_same_type_day_and_title` | another source reports the same type, the same UTC start day and the same title after folding case, accents and punctuation. Equality, not similarity |
 
 Anything else is a new event. **A safe non-merge is preferred to a wrong merge.**
 
 - An event's id comes from its first observation and never changes.
-- A revised date, a reworded title, an end date arriving later and a cancellation are
-  all revisions of the same event, each recorded with what changed.
+- With a stable source-native id, a revised date, a changed title (however different),
+  an end date arriving later and a cancellation are all revisions of the same event,
+  each recorded with what changed.
+- Without one, the same-source fallback needs an equal normalised title as well as the
+  same type and start day. "Free Weekend" and "Free weekend!" are one event; "Winter
+  Event" and "Holiday Event" on the same day are two. A substantive title change with
+  no native id is therefore, safely, a separate event.
+- A source that starts supplying a native id joins its earlier report of the same
+  event only where that fallback evidence agrees; from then on the id carries
+  revisions.
 - A source that gives no end does not erase an end another source still states.
 - Different types, different games, or a similar-but-not-equal title: never merged.
-- A source with no native ids that moves a date is seen as reporting a new event; the
-  old one stays until that source cancels or withdraws it.
+- A source with no native ids that moves a date, or retitles an event substantively,
+  is seen as reporting a new event; the old one stays until that source cancels or
+  withdraws it.
 - Two reports of one event that share no id, reference or title stay separate. The
   heat aggregation counts one event per type and start day, so such a duplicate cannot
   count twice.
@@ -233,7 +253,8 @@ No cloud resource was created for any of this.
 - Importance is per type, not per game: a small game's release and a large game's are
   treated alike.
 - Exact matching only, so some duplicates stay unmerged (bounded in the heat, as above).
-- A date moved by a source without native ids looks like a new event.
+- A date moved, or a title substantively changed, by a source without native ids looks
+  like a new event.
 - All days are UTC; an event known only to the day starts at 00:00 UTC.
 - References are stored but not yet published, pending each source's policy.
 - The radar's "opportunity" in its name is aspirational: it lists events, nothing more.

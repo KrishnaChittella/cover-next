@@ -78,6 +78,7 @@ def report_for(
     starts: datetime,
     ends: datetime | None = None,
     status: EventStatus = EventStatus.SCHEDULED,
+    precision: TimePrecision = TimePrecision.DAY,
 ) -> EventReport:
     game = next(game for game in catalogue.games if game.slug == slug)
     return EventReport(
@@ -86,7 +87,7 @@ def report_for(
         title=title,
         starts_at=starts,
         ends_at=ends,
-        time_precision=TimePrecision.DAY,
+        time_precision=precision,
         status=status,
     )
 
@@ -303,6 +304,130 @@ def test_synthetic_events_publish_heat_contributions_and_a_radar(tmp_path: Path)
     )
     assert launch["game_event_heat"] == games["gta-vi"]["event_intelligence"]["event_heat"]
     assert "ranks nothing and recommends nothing" in radar["scope_note"]
+
+
+# --- a positive heat is never published as zero ---------------------------------------
+
+
+def ramp_edge_events(offset: timedelta) -> EventInputs:
+    """One synthetic major patch starting `offset` after the end of its five-day ramp."""
+    catalogue = load_seed_catalogue()
+    ramp = timedelta(days=EVENT_HEAT_RULES_V1.rule(EventType.MAJOR_PATCH).ramp_days)
+    report = report_for(
+        catalogue,
+        "minecraft",
+        EventType.MAJOR_PATCH,
+        "Synthetic Edge Update",
+        AS_OF + ramp + offset,
+        precision=TimePrecision.EXACT,
+    )
+    return EventInputs(records=reconcile([observe(report, catalogue, AS_OF - DAY)]))
+
+
+@pytest.mark.parametrize("offset", [timedelta(0), timedelta(seconds=1), timedelta(hours=3)])
+def test_at_or_before_the_ramp_boundary_the_published_heat_is_exactly_zero(
+    tmp_path: Path, offset: timedelta
+) -> None:
+    run_with(tmp_path, ramp_edge_events(offset))
+    validate_published(tmp_path)
+    events = load(tmp_path / "games" / "minecraft.json")["event_intelligence"]
+    assert events["availability"] == "available"
+    assert events["event_heat"] == 0 and events["top_event_id"] is None
+    (upcoming,) = events["contributions"]
+    assert (upcoming["phase"], upcoming["in_ramp"], upcoming["counted"]) == (
+        "upcoming",
+        False,
+        False,
+    )
+    assert upcoming["strength"] == 0 and upcoming["contribution"] == 0
+
+
+def test_one_second_inside_the_ramp_publishes_a_heat_above_zero(tmp_path: Path) -> None:
+    result = run_with(tmp_path, ramp_edge_events(timedelta(seconds=-1)))
+    validate_published(tmp_path)  # zero heat with a counted event would be refused here
+    rule = EVENT_HEAT_RULES_V1.rule(EventType.MAJOR_PATCH)
+    strength = rule.pre_event_peak * (1 / 86400) / rule.ramp_days
+    expected = 100 * rule.importance * strength
+
+    events = load(tmp_path / "games" / "minecraft.json")["event_intelligence"]
+    (edge,) = events["contributions"]
+    assert (edge["phase"], edge["in_ramp"], edge["counted"], edge["rank"]) == (
+        "upcoming",
+        True,
+        True,
+        1,
+    )
+    assert 0 < edge["strength"] < 1e-5 and edge["strength"] == pytest.approx(strength, rel=1e-6)
+    assert 0 < edge["contribution"] < 1e-5
+    assert events["event_heat"] > 0  # and not the 0.0 that rounding to a decimal would give
+    assert events["event_heat"] == pytest.approx(expected, rel=1e-6)
+    assert round(events["event_heat"], 1) == 0.0  # which is exactly why it must not be rounded
+    assert events["top_event_id"] == edge["event_id"]
+    # The file holds the engine's own number, unrounded, and the model round-trips it.
+    intelligence = result.bundle.games["minecraft"].event_intelligence
+    assert intelligence.event_heat == events["event_heat"]
+    assert (
+        GameArtifact.model_validate(load(tmp_path / "games" / "minecraft.json")).event_intelligence
+        == intelligence
+    )
+    raw = (tmp_path / "games" / "minecraft.json").read_text()
+    assert '"event_heat": 0.0' not in raw and '"event_heat": 0,' not in raw
+    # The radar carries the same unrounded figures.
+    (item,) = load(tmp_path / "radar.json")["items"]
+    assert (
+        item["game_event_heat"] == events["event_heat"]
+        and item["contribution"] == edge["contribution"]
+    )
+    assert item["hours_until_start"] == pytest.approx(120 - 1 / 3600)
+    # Score v0 beside it is what it always was.
+    game = load(tmp_path / "games" / "minecraft.json")
+    assert all(game[field] == GOLDEN["games"]["minecraft"][field] for field in SCORE_FIELDS)
+
+
+def test_the_three_published_states_stay_distinct(tmp_path: Path) -> None:
+    catalogue = load_seed_catalogue()
+    by_slug = {game.slug: game.canonical_game_id for game in catalogue.games}
+    inputs = ramp_edge_events(timedelta(seconds=-1))
+    looked = CoverageCheck(
+        canonical_game_id=by_slug["gta-v"], source="synthetic_events", checked_at=AS_OF - DAY
+    )
+    run_with(tmp_path, EventInputs(records=inputs.records, checks=(looked,)))
+    validate_published(tmp_path)
+    games = games_of(tmp_path)
+    positive = games["minecraft"]["event_intelligence"]
+    zero = games["gta-v"]["event_intelligence"]
+    unknown = games["rust"]["event_intelligence"]
+    assert positive["availability"] == "available" and positive["event_heat"] > 0
+    assert zero["availability"] == "available" and zero["event_heat"] == 0
+    assert isinstance(zero["event_heat"], float) and zero["contributions"] == []
+    assert unknown["availability"] == "unavailable" and unknown["event_heat"] is None
+    assert (
+        len(
+            {
+                repr(positive["event_heat"] > 0),
+                repr(zero["event_heat"]),
+                repr(unknown["event_heat"]),
+            }
+        )
+        == 3
+    )
+
+
+def test_validation_refuses_a_zero_heat_beside_a_counted_event(tmp_path: Path) -> None:
+    run_with(tmp_path, ramp_edge_events(timedelta(seconds=-1)))
+    version = tmp_path / load(tmp_path / "manifest.json")["version_path"]
+    for root in (version, tmp_path):
+        document = load(root / "games" / "minecraft.json")
+        document["event_intelligence"]["event_heat"] = 0.0  # what rounding used to publish
+        (root / "games" / "minecraft.json").write_text(json.dumps(document, indent=2) + "\n")
+    with pytest.raises(ArtifactValidationError, match="heat and counted events disagree"):
+        validate_published(tmp_path)
+
+
+def test_nothing_at_the_contract_boundary_rounds_an_event_value() -> None:
+    source = (REPO / "src" / "metaspike" / "publishing" / "event_views.py").read_text()
+    code = "\n".join(line.split("#")[0] for line in source.splitlines())
+    assert "round(" not in code and "_DECIMALS" not in code
 
 
 def test_every_published_file_matches_its_checked_in_schema_with_and_without_events(

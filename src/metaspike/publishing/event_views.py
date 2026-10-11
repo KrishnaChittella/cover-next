@@ -31,9 +31,10 @@ from metaspike.publishing.artifacts import (
     game_file,
 )
 
-HEAT_DECIMALS = 1
-SHARE_DECIMALS = 4
-HOURS_DECIMALS = 1
+# Event values are published exactly as computed. Nothing here is rounded: a heat one
+# second into a ramp is tiny but positive, and rounding it would publish 0, which means
+# "a source looked and nothing contributes". How a number is shown is the interface's
+# concern, never the contract's.
 
 
 def event_as_of(report: CollectionReport) -> datetime:
@@ -83,9 +84,9 @@ def _contribution_view(item: EventContribution, as_of: datetime) -> EventContrib
         status=evaluation.status.value,
         phase=evaluation.phase.value,
         in_ramp=evaluation.in_ramp,
-        strength=round(evaluation.strength, SHARE_DECIMALS),
+        strength=evaluation.strength,
         importance=evaluation.importance,
-        contribution=round(evaluation.contribution, SHARE_DECIMALS),
+        contribution=evaluation.contribution,
         counted=item.counted,
         rank=item.rank,
         not_counted_because=item.not_counted_because,
@@ -101,7 +102,7 @@ def event_intelligence_view(result: EventIntelligence) -> EventIntelligenceView:
         rules_version=result.rules_version,
         rules_status=result.rules_status,
         as_of=result.as_of,
-        event_heat=None if heat is None else round(heat, HEAT_DECIMALS),
+        event_heat=heat,
         top_event_id=result.top_event_id,
         summary=result.summary,
         reasons=tuple(ReasonView(code=r.code, text=r.text) for r in result.reasons),
@@ -159,12 +160,12 @@ def build_radar(
                 title=item.title,
                 starts_at=item.starts_at,
                 time_precision=item.time_precision.value,
-                hours_until_start=round(item.hours_until_start, HOURS_DECIMALS),
+                hours_until_start=item.hours_until_start,
                 window_hours=item.window_hours,
                 in_ramp=item.in_ramp,
-                strength=round(item.strength, SHARE_DECIMALS),
-                contribution=round(item.contribution, SHARE_DECIMALS),
-                game_event_heat=round(item.game_event_heat, HEAT_DECIMALS),
+                strength=item.strength,
+                contribution=item.contribution,
+                game_event_heat=item.game_event_heat,
                 sources=item.sources,
                 text=item.text,
                 artifact_path=game_file(game.slug),

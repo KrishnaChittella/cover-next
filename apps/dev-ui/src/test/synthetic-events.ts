@@ -105,6 +105,34 @@ export const AVAILABLE_WITH_EVENTS: EventIntelligenceView = {
   contributions: [SYNTHETIC_PATCH, SYNTHETIC_SHOWCASE, SYNTHETIC_TRAILER],
 };
 
+/** One second inside a five-day ramp: a real, positive heat far below display precision. */
+export const SYNTHETIC_EDGE = contribution({
+  event_id: "evt_000000000000000000000007",
+  title: "Synthetic Edge Update",
+  starts_at: "2026-10-08T23:59:59Z",
+  ends_at: "2026-10-08T23:59:59Z",
+  time_precision: "exact",
+  phase: "upcoming",
+  in_ramp: true,
+  strength: 9.259259259e-7,
+  importance: 0.6,
+  contribution: 5.555555555e-7,
+  text: "Major update launches in 4 days: Synthetic Edge Update.",
+});
+
+export const AVAILABLE_TINY_POSITIVE: EventIntelligenceView = {
+  ...base,
+  availability: "available",
+  event_heat: 5.555555555e-5,
+  top_event_id: SYNTHETIC_EDGE.event_id,
+  summary: SYNTHETIC_EDGE.text ?? "",
+  reasons: [{ code: "event_upcoming", text: SYNTHETIC_EDGE.text ?? "" }],
+  unavailable_reasons: [],
+  coverage_checked_at: "2026-10-03T00:00:00Z",
+  coverage_sources: ["synthetic_events"],
+  contributions: [SYNTHETIC_EDGE],
+};
+
 /** Available, and a source found nothing relevant: a real zero. */
 export const AVAILABLE_WITH_NOTHING: EventIntelligenceView = {
   ...base,

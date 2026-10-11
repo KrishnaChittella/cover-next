@@ -146,6 +146,12 @@ def _validate_events(
             and (not counted or counted[0].event_id == events.top_event_id),
             f"{slug}: top event is not the strongest counted event",
         )
+        # Three states, never two: no counted event is exactly 0, and any counted event
+        # is above 0 however small. A positive heat is never published as zero.
+        _require(
+            all(item.contribution > 0 for item in counted),
+            f"{slug}: a counted event contributes nothing",
+        )
         _require(
             (events.event_heat == 0) == (not counted),
             f"{slug}: heat and counted events disagree",

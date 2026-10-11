@@ -280,10 +280,104 @@ def test_identity_is_stable_and_does_not_depend_on_order_or_repetition() -> None
     assert first.observation_id != again.observation_id
 
 
-def test_a_repeat_without_a_native_id_is_matched_by_source_type_and_day() -> None:
+def test_a_repeat_without_a_native_id_is_matched_by_source_type_day_and_title() -> None:
     record = one(seen(observed=T0), seen(observed=T0 + HOUR), seen(observed=T0 + DAY))
-    assert [r.matched_by for r in record.revisions][1:] == [MatchRule.SAME_SOURCE_TYPE_AND_DAY] * 2
+    assert [r.matched_by for r in record.revisions][1:] == [
+        MatchRule.SAME_SOURCE_TYPE_DAY_AND_TITLE
+    ] * 2
     assert record.sources == (A,)
+    assert MatchRule.SAME_SOURCE_TYPE_DAY_AND_TITLE.value == "same_source_type_day_and_title"
+
+
+def test_the_same_source_fallback_merges_only_an_equal_normalised_title() -> None:
+    # Case and punctuation only: the same event, and the change is recorded.
+    first = seen(kind=EventType.FREE_WEEKEND, title="Free Weekend", starts=at(10, 16))
+    reworded = seen(
+        kind=EventType.FREE_WEEKEND, title="free  weekend!", starts=at(10, 16), observed=T0 + HOUR
+    )
+    record = one(first, reworded)
+    assert record.revisions[1].matched_by is MatchRule.SAME_SOURCE_TYPE_DAY_AND_TITLE
+    assert record.revisions[1].changed == ("title",) and record.title == "free  weekend!"
+
+    # Materially different titles, same source, type and day, no native id: two events.
+    winter = seen(kind=EventType.MAJOR_IN_GAME_EVENT, title="Winter Event", starts=at(12, 20))
+    holiday = seen(
+        kind=EventType.MAJOR_IN_GAME_EVENT,
+        title="Holiday Event",
+        starts=at(12, 20),
+        observed=T0 + HOUR,
+    )
+    records = reconcile([winter, holiday])
+    assert [record.title for record in records] == ["Holiday Event", "Winter Event"]
+    assert len({record.event_id for record in records}) == 2
+    assert all(
+        [r.matched_by for r in record.revisions] == [MatchRule.NEW_EVENT] for record in records
+    )
+    # Each then repeats cleanly into its own event, and nothing crosses over.
+    again = reconcile(
+        [
+            winter,
+            holiday,
+            seen(
+                kind=EventType.MAJOR_IN_GAME_EVENT,
+                title="WINTER EVENT",
+                starts=at(12, 20),
+                observed=T0 + DAY,
+            ),
+        ]
+    )
+    assert sorted(len(record.revisions) for record in again) == [1, 2]
+    assert {record.event_id for record in again} == {record.event_id for record in records}
+
+
+def test_a_native_id_carries_a_material_title_change_as_a_revision() -> None:
+    first = seen(native="evt-9", kind=EventType.MAJOR_IN_GAME_EVENT, title="Winter Event")
+    renamed = seen(
+        native="evt-9",
+        kind=EventType.MAJOR_IN_GAME_EVENT,
+        title="Holiday Event",
+        observed=T0 + DAY,
+    )
+    record = one(first, renamed)
+    assert record.event_id == one(first).event_id and record.title == "Holiday Event"
+    assert record.revisions[1].matched_by is MatchRule.SAME_SOURCE_NATIVE_ID
+    assert record.revisions[1].changed == ("title",)
+    assert one(first, renamed, as_of=T0).title == "Winter Event"
+
+
+def test_a_native_id_added_later_joins_only_where_the_fallback_evidence_agrees() -> None:
+    plain = seen(kind=EventType.DLC, title="Map Pack", starts=at(10, 25))
+    with_id = seen(
+        kind=EventType.DLC, title="map pack", starts=at(10, 25), native="dlc-7", observed=T0 + DAY
+    )
+    joined = one(plain, with_id)
+    assert joined.event_id == one(plain).event_id  # the first observation still fixes the id
+    assert joined.revisions[1].matched_by is MatchRule.SAME_SOURCE_TYPE_DAY_AND_TITLE
+    assert joined.source_event_ids == ("dlc-7",)
+    # From then on the native id carries revisions the fallback could not.
+    moved = seen(
+        kind=EventType.DLC,
+        title="Map Pack 2.0",
+        starts=at(11, 1),
+        native="dlc-7",
+        observed=T0 + 2 * DAY,
+    )
+    assert one(plain, with_id, moved).revisions[2].matched_by is MatchRule.SAME_SOURCE_NATIVE_ID
+    assert one(plain, with_id, moved).revisions[2].changed == ("title", "starts_at")
+    # A native id arriving with a different title does not join the earlier event.
+    other = seen(
+        kind=EventType.DLC, title="Skin Pack", starts=at(10, 25), native="dlc-8", observed=T0 + DAY
+    )
+    assert len(reconcile([plain, other])) == 2
+    # And two different native ids never join, even with one title.
+    twin = seen(
+        kind=EventType.DLC,
+        title="Map Pack",
+        starts=at(10, 25),
+        native="dlc-9",
+        observed=T0 + 2 * DAY,
+    )
+    assert len(reconcile([plain, with_id, twin])) == 2
 
 
 def test_a_revised_date_keeps_the_event_and_records_the_change() -> None:
@@ -390,6 +484,13 @@ def test_an_end_date_from_one_source_survives_another_source_that_gives_none() -
         ),
         # Same title and type, a day apart.
         ({"source": A, "title": "Patch"}, {"source": B, "title": "Patch", "starts": at(10, 21)}),
+        # One source, same type and day, no native id, materially different titles.
+        ({"source": A, "title": "Winter Event"}, {"source": A, "title": "Holiday Event"}),
+        # One source, a native id arriving with a different title.
+        (
+            {"source": A, "title": "Winter Event"},
+            {"source": A, "title": "Holiday Event", "native": "h"},
+        ),
         # One source, two native ids on one day.
         (
             {"source": A, "native": "dlc-1", "title": "Pack"},

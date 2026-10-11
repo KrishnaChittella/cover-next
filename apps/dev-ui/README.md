@@ -64,6 +64,10 @@ shows the word and the reason and no number. It is never shown as 0, which would
 a source looked and found nothing. The interface refuses a game artifact that carries a
 heat on unavailable intelligence.
 
+The artifact keeps Event Heat exactly as computed. A heat that is positive but below
+one decimal place is shown as `<0.1`, and a positive strength or contribution below two
+places as `<0.01`: a positive value is never displayed as zero.
+
 Event Heat is internal and uncalibrated, and is not part of score v0. No event is ever
 invented for the developer UI: the synthetic events in `src/test/synthetic-events.ts`
 exist only for tests.
@@ -124,7 +128,7 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 133 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 135 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
 confidence formatting, history gaps staying gaps, and event intelligence in its
