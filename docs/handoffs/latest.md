@@ -5,152 +5,163 @@ on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and
 touched. It supports communication only and replaces no code, test or document.
 
 Production baseline: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
-(true at 21:51 UTC on 2026-10-11: the first tick is 2026-10-12T00:00Z and no scheduler
+(true at 22:07 UTC on 2026-10-11: the first tick is 2026-10-12T00:00Z and no scheduler
 attempt has been made)
 
-Parallel checkpoint: **PRODUCT BUILD U4.1: EVENT SOURCE POLICY CLOSEOUT — CHATGPT REVIEW REQUIRED**
+Parallel checkpoint: **PRODUCT BUILD U4.2: EVENT VALIDATION PROVENANCE CLOSED — CHATGPT REVIEW REQUIRED**
 
-Offline only. No source was called, no probe or backfill was run, nothing was deployed.
+Offline only. No source was called. Provenance and policy plumbing; no intelligence
+changed.
 
-## The bypass that existed
+## The gap
 
-`publishing/build.py::_restricted_event_sources` collected the event sources in use and
-then did:
+`run_backtest` could be given an event store and would put event intelligence from
+whatever sources it held into its snapshots, with no policy consulted. The resulting
+`ValidationReport` did not record which sources those were. Handed to `build_bundle`
+later, with no current event inputs, the report went into a bundle marked `internal`.
 
-```python
-if inputs.source_policies is None:
-    return ()
-```
+No existing result was affected: no Steam observation was promoted, and the three
+coverage checks postdate the backtest's range.
 
-So when `EventInputs` carried no policy mapping, an event record, a coverage check or a
-collected source summary went into a bundle marked `internal`, with no policy consulted
-and no private-only marking. U4's handoff said "a source with no policy is refused
-outright"; that was true for an empty or incomplete mapping and false for a missing
-one. The CLI always passed `EVENT_SOURCE_POLICIES`, so the U4 probe was not affected.
+## Backtest: fail closed
 
-## The invariant now
+`run_backtest(..., event_source_policies=None, stage=None)`. Both are explicit and
+neither has a default value that grants anything.
 
-An event source is **used** when it is behind an event record or a coverage check, or
-when its summary shows it was ever asked (before or after the evaluation moment).
+For each prediction day, before that day is predicted, the sources of every event
+record and coverage check visible at that moment are collected. For each such source:
 
-- No source used: `source_policies` may be `None`; the bundle is `internal`.
-- Any source used: `source_policies` must be present and must hold a `SourcePolicy` for
-  every used source, filed under that source's own name, clearing the bundle's stage for
-  event intelligence. Otherwise `SourcePolicyError`, raised before event intelligence
-  is computed.
+- a stage must have been stated;
+- a `SourcePolicy` must be present for it;
+- `policy.source` must equal the source's name;
+- the policy must clear that stage for `EVENT_INTELLIGENCE`.
 
-A missing mapping, an empty one, and one lacking only that source are all refused. So
-is a policy filed under the wrong name. There is no path by which a caller vouches for
-event data, and no source name is exempt: the gate contains no name test at all.
+Otherwise `SourcePolicyError`, raised before `predict` is called for that day, so the
+event intelligence never enters a snapshot (a test counts the calls). If nothing is
+ever visible to any prediction, neither argument is needed.
 
-## Synthetic test policy
+No caller-vouches path, no source-name test, no default stage. The `backtest` command
+passes `EVENT_SOURCE_POLICIES` and `DeploymentStage.PRIVATE_DEVELOPMENT` explicitly.
 
-`tests/synthetic_policy.py`, test-only:
+## Provenance on the report
 
-- `synthetic_event_policy(source)`: refuses any name not starting `synthetic_`. Cleared
-  for private development only; the other three stages are explicitly not cleared, with
-  the reason "Synthetic test data. It is not real and must never leave a test."
-  Commercial use and redistribution prohibited. No endpoint, no network.
-- `synthetic_event_policies(*sources)`: the mapping tests pass as `source_policies`.
-- `with_synthetic_identifiers(catalogue)`: the same games named only by a synthetic id.
+`ValidationReport.events` (`EventBacktest`), format now `validation_report_v3`:
 
-Under `tests/`; imported by nothing in `src/`; in no runtime registry (a test asserts
-both). The U2 artifact tests now supply it. A bundle built from it is marked
-`private_development_only`, like any data not cleared for the public.
-
-One thing this surfaced: the U2 artifact tests had been attributing their invented
-events to the real Wikimedia identifier, so those records carried the source name
-`wikimedia_pageviews`. They now use the synthetic identifier, and no invented event is
-attributed to a real source.
-
-## Regression tests
-
-In `tests/test_event_sources.py`. The first and third were run against U4's gate and
-fail there ("DID NOT RAISE SourcePolicyError").
-
-| Case | Result |
+| Field | Meaning |
 |---|---|
-| A. event record, `source_policies=None` | `SourcePolicyError` |
-| B. coverage check, `None` | `SourcePolicyError` |
-| C. collected summary, `None` | `SourcePolicyError` |
-| D. used source, `{}` | `SourcePolicyError` |
-| E. used source, mapping missing only it | `SourcePolicyError` |
-| also: summary of a source asked only after the evaluation moment | `SourcePolicyError` |
-| also: a policy filed under the wrong name | `SourcePolicyError` |
-| also: a `synthetic_` source with no policy | `SourcePolicyError` |
-| F. nothing used, `None` (and `{}`, and a never-asked summary) | builds; `internal` |
-| G. synthetic source with the test policy | builds; `private_development_only`; U2 tests pass |
-| H. Steam News, real policy, private development | builds; `private_development_only` |
-| I. same at private collection / public launch / commercial | refused, each for its own reason |
+| `event_sources_used: tuple[str, ...]` | **New.** Sorted set. Every source whose record or coverage check was visible to at least one prediction. Not every registered source; not every source in the store |
+| `snapshots_with_positive_event_heat: int` | **New.** Snapshots where an event actually counted |
+| `snapshots_with_event_intelligence: int` | Unchanged: snapshots with event coverage, heat 0 included |
+| `real_event_history: bool` | Meaning made explicit: at least one event *observation* was visible to at least one prediction |
 
-## Validator
+Two things about `real_event_history`. It used to be "the store holds any observation",
+which was true even when every observation postdated the range; it now requires
+visibility. And coverage alone leaves it false while still putting the source in
+`event_sources_used`.
 
-Kept: private exactly when a source is restricted; a collected source not cleared for
-public launch must be named as restricted.
+The model refuses a report whose snapshots carried event intelligence and that names no
+source, and one whose list is not a sorted set. The sources are part of the
+`report_id`. The report's note and its event limitation line now state the sources when
+any were used; with none, both read exactly as before.
 
-Added, with no change to the contract: every source that an event contribution, a
-game's coverage or a radar item is attributed to must be either named in
-`restricted_sources` or described on source-health as cleared for public launch.
-Otherwise the bundle is refused as carrying an undeclared event source. Tested by
-tampering with a published bundle.
+## Publishing
 
-The frontend validator was not changed: it reads one artifact at a time and cannot make
-that cross-file check.
+`_restricted_event_sources(inputs, stage, validation)` adds the report's
+`event_sources_used` to the sources the bundle uses, and every one goes through the
+same gate with the same mapping, `EventInputs.source_policies`. There is one mapping
+for current event intelligence and historical provenance, handed in by the caller; no
+global lookup.
 
-## Confirmations
+One implementation: `event_sources/gate.py::require_event_source`, called by the
+backtest and by the build.
+
+| Stage | Report used a source not cleared for public launch |
+|---|---|
+| private development, cleared | builds; `private_development_only`; source in `restricted_sources` |
+| private collection | refused unless that stage is cleared |
+| public launch | refused unless that stage and its permissions are cleared |
+| commercial production | refused unless that stage and its permissions are cleared |
+| any, with no policy for the source | refused |
+
+A report derived from `steam_news` cannot enter an `internal` bundle, with current
+event inputs empty or absent.
+
+The artifact validator also counts the report's sources among those that must be
+declared, and refuses a published report that carried event intelligence but names no
+source.
+
+Stored reports in an earlier format stay on disk and are never read as current: a v2
+report cannot say which event sources it used.
+
+## Schema
+
+Internal contract **1.4.0 → 1.5.0**, Python models → JSON Schema → generated
+TypeScript. `/validation` gained one line: "Event sources used: …", or that no event
+source took part, and the count of snapshots with a heat above 0. No redesign; no title
+or candidate text.
+
+## Tests added
+
+Backend (8 new, plus existing ones moved onto the policy path):
+
+| Case | Where |
+|---|---|
+| A. visible record, no policy → fail | `test_a_backtest_refuses_visible_event_data_without_a_policy` (nine refusal variants: nothing stated; stage only; `{}`; policy only; other sources' policies; wrong-name policy; three stages not cleared) |
+| B. visible coverage check, no policy → fail | same test; also proves refusal happens before `predict` |
+| C. data never visible is not provenance | `test_event_data_never_visible_to_a_prediction_is_not_provenance`: report **equal** to the no-event report |
+| D, E, F, K | `test_a_report_records_exactly_the_event_sources_its_predictions_saw` |
+| J. coverage alone is provenance | `test_coverage_alone_is_provenance` |
+| G, I | `test_a_report_that_used_an_event_source_carries_its_policy_into_the_bundle` |
+| H. Steam News policy at public launch → refused | `test_a_backtest_report_that_used_steam_news_cannot_enter_an_internal_bundle` (synthetic posts, real policy) |
+| no-event result unchanged | `test_the_no_event_fixture_backtest_is_exactly_what_it_was` |
+| earlier-format report not read | `test_a_report_from_before_provenance_is_kept_and_never_read_as_current` |
+| L | U3.1's `test_a_period_that_had_ended_but_was_not_yet_published_is_withheld`, untouched and passing |
+
+Frontend: 4 new (the line in both states; three contradictions refused).
+
+Synthetic policy: every backtest test that feeds invented events passes
+`synthetic_event_policies()` at `PRIVATE_DEVELOPMENT`. `tests/synthetic_policy.py` is
+imported by nothing in `src/`; the backtest and the gate contain no source name and no
+name test (asserted).
+
+## Proofs of no change
 
 | | |
 |---|---|
-| Private-development-only design | unchanged; cases G and H |
-| Steam News policy | unchanged: private development cleared; the other three blocked; derived and commercial unknown |
-| Internal schema | **1.4.0**, unchanged; generated schemas and types have no diff |
-| U4 probe numbers | unchanged: 3 requests, 15 posts, 0 classified, 0 promoted, 3 coverage checks. Local quota ledger still 3 |
-| `event_classification_rules_v1` | unchanged; fingerprint `20103a107c30…1772` test passes; `src/metaspike/event_sources` has no diff |
-| `event_heat_rules_v1` / event engine | unchanged; `events/` `333373c61ae6c37f`, `rules.py` `7358ea6563ddcad9` |
-| Score v0 | unchanged; `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`; golden replay bit-for-bit |
-| U3.1 | unchanged; `validation/` has no diff; the publication-lag regression passes |
-| UI | unchanged; `apps/` has no diff |
+| No-event fixture backtest | `snapshot_set_hash` `8a0f192d…e748` and `label_set_hash` `6b8aa3ce…abdf`, identical to U3.1; pinned in a test. Every metric as before (v0 top-1 +114.4% / 82%, association +0.62; lift +0.71). `report_id` changed with the format: `report_9e3a97a9725a587c5570ba2e42e7cd1a` |
+| Score v0 | `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`; golden replay bit-for-bit; identical with and without event intelligence in three tests |
+| U3.1 leakage behaviour | `validation/history.py`, `snapshot.py`, `outcomes.py`, `metrics.py`, `rules.py`: no diff. Only `backtest.py`, `report.py`, `store.py` changed. Five leakage checks unchanged |
+| `outcome_rules_v1`, `validation_protocol_v1` | fingerprint tests pass |
+| `event_classification_rules_v1` | `event_sources/` unchanged apart from the new `gate.py`; fingerprint `20103a107c30…1772` test passes |
+| `event_heat_rules_v1` / event engine | `events/` `333373c61ae6c37f`, `rules.py` `7358ea6563ddcad9` |
+| U4 probe | unchanged: 3 requests, 15 posts, 0 classified, 0 promoted, 3 coverage checks. Local Steam quota ledger still 3 |
 
 ## Gates
 
-Backend: `ruff format --check` clean; `ruff check` clean; `mypy` clean (201 files);
-`pytest` **1,455 passed**, 5 deselected (slow marker).
-Frontend: `contract:check`, `typecheck`, `lint`, `test` (175 passed), `build` all pass.
+Backend: `ruff format --check` clean; `ruff check` clean; `mypy` clean (202 files);
+`pytest` **1,463 passed**, 5 deselected (slow marker).
+Frontend: `contract:check`, `typecheck`, `lint`, `test` (**179 passed**), `build` all
+pass.
 
-## A neighbouring gap, not changed
-
-Found while checking where else event data reaches an artifact. `metaspike backtest`
-reads the event store and puts event intelligence into its snapshots with no policy
-check, and the published validation report then carries `real_event_history` and a
-count of snapshots that had event intelligence. That report can appear in a bundle
-marked `internal` even if the events behind it came from a restricted source, because
-the report does not say which sources its events came from.
-
-It has had no effect so far: the store holds no promoted Steam observation, and the
-three coverage checks are dated after the backtest's last prediction day. I left it
-alone because closing it means either changing U3.1's report or adding a gate to the
-backtest command, and both are outside this closeout. It needs a ruling before real
-events are backtested.
-
-## C2-F status and production isolation (read-only, 21:51 UTC 2026-10-11)
+## C2-F status and production isolation (read-only, 22:07 UTC 2026-10-11)
 
 C2-F has **not begun**; there is no autonomous activity to report. Scheduler ENABLED,
 `0 * 12-18 10 *`, next run 2026-10-12T00:00:00Z, no attempt. Control generation
 `1791684706340016`, unchanged. Terraform state unchanged (latest generation
-`1791685217422653`, the launch apply). Executions 35, last `ms-warehouse-lxqp9`. Seven
-jobs, generation 6, image `sha256:a8680b2be8b5…`. Ten alert policies; IAM, schemas,
-secrets and alerts identical to the previous snapshot. 0 secret versions, 0 user keys.
-Repository variables unchanged. Last workflow run still 38104941975. `main` =
-`cb33198`, level with origin, clean. No pull request. No Wikimedia, Steam or IGDB call
-was made in U4.1. The portfolio repository was not touched.
+`1791685217422653`). Executions 35, last `ms-warehouse-lxqp9`. Seven jobs, generation
+6, image `sha256:a8680b2be8b5…`. Ten alert policies; IAM, schemas, secrets and alerts
+identical to the previous snapshot. 0 secret versions, 0 user keys. Repository
+variables unchanged. Last workflow run still 38104941975. `main` = `cb33198`, level
+with origin, clean. No pull request. No Wikimedia, Steam or IGDB call was made in U4.2.
+The portfolio repository was not touched.
 
 ## Commits
 
-The fix commit "fix: fail closed on unpolicied event artifacts", then this handoff.
-Pushed to `origin/product/local-ui` only. No PR, no merge to `main`.
+"fix: preserve event-source provenance in validation", then this handoff. Pushed to
+`origin/product/local-ui` only. No PR, no merge to `main`.
 
 ## Exact next approval required
 
-ChatGPT review of U4.1, and a ruling on the backtest gap above.
+ChatGPT review of U4.2.
 
 STOP. U5 has not been started.
