@@ -287,6 +287,22 @@ violation, `6` a catalogue source was unavailable (for example missing credentia
 The Wikimedia User-Agent identifies MetaSpike with a contact URL. Override the
 contact with the `METASPIKE_CONTACT` environment variable. No secret is needed.
 
+## Private developer UI
+
+`apps/dev-ui/` is a local, private interface over the published artifacts: the
+leaderboard, a page per game with its history, source health and the methodology. It
+reads the artifact bundle and computes nothing itself. It is internal development, it
+is not deployed, and score v0 is not the final opportunity score.
+
+```
+cd apps/dev-ui
+npm install
+npm run data:replay     # offline: recorded responses only
+npm run dev             # http://localhost:3000
+```
+
+See [apps/dev-ui/README.md](apps/dev-ui/README.md).
+
 ## Architecture
 
 ```

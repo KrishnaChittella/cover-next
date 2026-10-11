@@ -1,0 +1,288 @@
+{
+  "schema_version": "1.0.0",
+  "contract_status": "internal",
+  "generated_at": "2026-10-11T02:51:33.475940Z",
+  "run_id": "20261011T025133Z-a8861c54",
+  "score_version": "metaspike_score_v0",
+  "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply.",
+  "score": {
+    "version": "metaspike_score_v0",
+    "range": [
+      0.0,
+      100.0
+    ],
+    "terms": [
+      {
+        "name": "significance",
+        "formula": "clamp(robust_z_score / 7, 0, 1)",
+        "rationale": "How unusual the latest day is against the game's own day-to-day variability. A robust z of 3.5 is the conventional outlier threshold and earns half credit; twice that saturates."
+      },
+      {
+        "name": "magnitude",
+        "formula": "clamp(log2(lift_ratio) / 3, 0, 1)",
+        "rationale": "How far the 3-day average sits above the game's own 28-day median, in doublings because attention grows multiplicatively. 8x normal saturates."
+      },
+      {
+        "name": "anomaly",
+        "formula": "sqrt(significance * magnitude)",
+        "rationale": "Geometric mean, so an anomaly must be BOTH statistically unusual and large. Significance alone over-rewards tiny moves in very stable series; magnitude alone over-rewards noise in small, volatile ones."
+      },
+      {
+        "name": "momentum",
+        "formula": "clamp(log2(velocity_ratio) / 1, 0, 1)",
+        "rationale": "Whether attention is still accelerating: the 3-day average against the preceding 3 days. Doubling saturates. Undefined velocity counts as 0."
+      },
+      {
+        "name": "score",
+        "formula": "100 * (0.7 * anomaly + 0.3 * momentum)",
+        "rationale": "Anomaly is the primary signal and momentum the secondary one. The weights are stated priors, not fitted values. Declines clamp to 0: v0 scores upward attention only."
+      }
+    ]
+  },
+  "confidence": {
+    "range": [
+      0.0,
+      100.0
+    ],
+    "current_ceiling": 60.0,
+    "bands": {
+      "low": "< 30",
+      "medium": "30 to 60",
+      "high": "> 60 (unreachable with one source)"
+    },
+    "terms": [
+      {
+        "name": "source_ceiling",
+        "formula": "1 - 0.4 ^ n_sources",
+        "rationale": "Independent corroboration is the main driver of confidence. With one source the ceiling is 0.60, so confidence can never exceed 60."
+      },
+      {
+        "name": "freshness",
+        "formula": "max(0, 1 - staleness_days / 4)",
+        "rationale": "Data that lags the expected latest day says less about 'right now'."
+      },
+      {
+        "name": "history",
+        "formula": "min(1, history_span_days / 90)",
+        "rationale": "A short history gives a weaker picture of what is normal for the game."
+      },
+      {
+        "name": "completeness",
+        "formula": "observed_days / history_span_days",
+        "rationale": "Missing days inside the history weaken every statistic built on it."
+      },
+      {
+        "name": "samples",
+        "formula": "min(baseline_samples / 28, recent_7d_samples / 7)",
+        "rationale": "Whether the windows the score depends on were actually fully populated."
+      },
+      {
+        "name": "confidence",
+        "formula": "100 * source_ceiling * freshness * history * completeness * samples",
+        "rationale": "Multiplicative, so any single weakness lowers confidence and none can be averaged away by the others."
+      }
+    ]
+  },
+  "features": {
+    "granularity": "daily",
+    "history_days": 90,
+    "principle": "Each game is compared against its own recent normal, never against other games' raw popularity. All windows are anchored on t, the latest observed day; missing days are excluded from every window, never counted as zero.",
+    "definitions": [
+      {
+        "name": "latest_views",
+        "unit": "views/day",
+        "definition": "x[t]: pageviews on t, the latest day with an observation.",
+        "valid_when": "at least one observed day in the window"
+      },
+      {
+        "name": "avg_3d",
+        "unit": "views/day",
+        "definition": "Mean of observed days in [t-2, t].",
+        "valid_when": ">= 2 observed days of 3"
+      },
+      {
+        "name": "avg_7d",
+        "unit": "views/day",
+        "definition": "Mean of observed days in [t-6, t].",
+        "valid_when": ">= 5 observed days of 7"
+      },
+      {
+        "name": "baseline_mean_28d / baseline_std_28d",
+        "unit": "views/day",
+        "definition": "Rolling mean and sample standard deviation (n-1) of observed days in the baseline window [t-34, t-7].",
+        "valid_when": ">= 14 observed days of 28"
+      },
+      {
+        "name": "baseline_median_28d / baseline_mad_28d",
+        "unit": "views/day",
+        "definition": "Median m of the baseline window, and MAD = median(|x_i - m|) over the same days. The median is the game's 'normal' level; it is unaffected by old spikes.",
+        "valid_when": ">= 14 observed days of 28"
+      },
+      {
+        "name": "lift_ratio / lift_pct",
+        "unit": "ratio / percent",
+        "definition": "lift_ratio = avg_3d / baseline_median_28d; lift_pct = (lift_ratio - 1) * 100.",
+        "valid_when": "avg_3d valid and baseline_median_28d > 0"
+      },
+      {
+        "name": "lift_7d_pct",
+        "unit": "percent",
+        "definition": "(avg_7d / baseline_median_28d - 1) * 100.",
+        "valid_when": "avg_7d valid and baseline_median_28d > 0"
+      },
+      {
+        "name": "velocity_ratio / velocity_pct",
+        "unit": "ratio / percent",
+        "definition": "velocity_ratio = avg_3d / prior_avg_3d, where prior_avg_3d is the mean of observed days in [t-5, t-3]; velocity_pct = (velocity_ratio - 1) * 100.",
+        "valid_when": "both 3-day windows have >= 2 observed days and prior_avg_3d > 0"
+      },
+      {
+        "name": "consecutive_rising_days",
+        "unit": "days",
+        "definition": "Number of consecutive day-over-day increases ending at t. A missing day ends the run.",
+        "valid_when": "always (0 when there is no run)"
+      },
+      {
+        "name": "z_score",
+        "unit": "standard deviations",
+        "definition": "(x[t] - baseline_mean_28d) / baseline_std_28d.",
+        "valid_when": "baseline valid and baseline_std_28d > 0"
+      },
+      {
+        "name": "robust_z_score",
+        "unit": "robust standard deviations",
+        "definition": "(x[t] - baseline_median_28d) / s, with s = 1.4826 * MAD. If MAD is 0, s = 1.2533 * mean(|x_i - m|) instead (robust_scale_method = 'mean_ad'). Unlike z_score it is not inflated or masked by earlier outliers.",
+        "valid_when": "baseline valid and s > 0"
+      },
+      {
+        "name": "history_percentile",
+        "unit": "percentile (0-100)",
+        "definition": "Mid-rank percentile of x[t] among all observed days before t in the fetched window: 100 * (count(x_i < x[t]) + 0.5 * count(x_i = x[t])) / n.",
+        "valid_when": "n >= 30 prior observed days"
+      },
+      {
+        "name": "staleness_days",
+        "unit": "days",
+        "definition": "Days by which t trails the latest day the source was due to have published, given its expected publication lag. Never negative.",
+        "valid_when": "at least one observed day in the window"
+      },
+      {
+        "name": "missing_days",
+        "unit": "days",
+        "definition": "Days with no observation between the first observed day and t.",
+        "valid_when": "always"
+      }
+    ]
+  },
+  "explanations": "Deterministic templates rendered from computed features. A sentence appears only when its backing feature crosses a fixed threshold. No language model.",
+  "metrics": [
+    {
+      "metric_id": "pageviews",
+      "display_name": "Pageviews",
+      "unit": "views",
+      "description": "Human (non-bot) views of the page that represents the game.",
+      "role": "demand",
+      "aggregation": "sum",
+      "granularities": [
+        "daily"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "source": "wikimedia_pageviews",
+      "signals": [
+        {
+          "metric": "pageviews",
+          "granularity": "daily"
+        }
+      ],
+      "description": "Daily human (non-bot) pageviews of the game's English Wikipedia article, all access methods, from the Wikimedia Analytics API.",
+      "policy": {
+        "source": "wikimedia_pageviews",
+        "raw_storage_allowed": "allowed",
+        "retention_days": null,
+        "historical_storage_allowed": "allowed",
+        "derived_metrics_allowed": "allowed",
+        "commercial_use_allowed": "allowed",
+        "redistribution_allowed": "allowed",
+        "attribution_required": "not_required",
+        "attribution_text": "Pageview data from the Wikimedia Analytics API (CC0 1.0).",
+        "approval_required": "not_required",
+        "approval_status": "not_required",
+        "commercial_approval_required": "not_required",
+        "commercial_approval_status": "not_required",
+        "stage_clearance": [
+          {
+            "stage": "private_development",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "private_collection",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "public_launch",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "commercial_production",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          }
+        ],
+        "operations": {
+          "budget_group": "wikimedia",
+          "rate_limit": {
+            "max_requests": 200,
+            "per_seconds": 60,
+            "max_concurrency": 1,
+            "basis": "documented",
+            "note": "200 requests/minute for unauthenticated clients with a compliant User-Agent. The Analytics API asks clients to wait for each request to finish before sending another, hence a concurrency of 1."
+          },
+          "quota": null,
+          "cache_max_age_seconds": null,
+          "expected_publication_lag_seconds": 86400,
+          "publication_lag_basis": "observed"
+        },
+        "display": {
+          "link_back_required": "not_required",
+          "branding_required": "not_required",
+          "note": "CC0 data carries no display condition. Wikimedia marks must not be used in a way that implies endorsement."
+        },
+        "field_rules": [
+          {
+            "field": "pageviews",
+            "storage_allowed": "allowed",
+            "display_allowed": "allowed",
+            "note": "Aggregate daily counts; no personal data."
+          }
+        ],
+        "reviewed_at": "2026-10-04",
+        "references": [
+          "https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/documentation/access-policy.html",
+          "https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy",
+          "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+          "https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits"
+        ],
+        "notes": "API data is published under CC0 1.0. Use is subject to the Wikimedia Terms of Use: a descriptive User-Agent with contact information is mandatory, requests must be made one at a time, and clients that endanger service stability may be blocked. No publication schedule is documented for daily data: one hour after a day ended it was not yet available, so a 24-hour lag is allowed for until measured."
+      }
+    }
+  ],
+  "limitations": [
+    "Single source: only Wikimedia pageviews are collected, so nothing is corroborated and confidence is capped at 60.",
+    "Wikipedia readership is a proxy for general public attention. It is not player counts, viewership, search demand or creator supply.",
+    "Daily granularity in UTC. The newest point is the last complete day, typically 1 day old.",
+    "English Wikipedia only, so attention from non-English audiences is under-represented.",
+    "Views of redirect titles are counted separately by the source and are not included.",
+    "A game with no article of its own (for example FiveM) has no coverage and is unranked.",
+    "A day the source omits is treated as missing, not as zero views.",
+    "No event detection yet: the score reports that attention moved, not what caused it.",
+    "Weekly seasonality is not modelled; the 28-day baseline spans four whole weeks to limit, but not remove, its effect.",
+    "Score weights and saturation points are stated priors, not values fitted to outcomes.",
+    "The score rewards upward attention only; declines score 0 rather than negative."
+  ]
+}
