@@ -102,9 +102,11 @@ export interface OutcomeSummaryView {
   minimum?: number | null;
 }
 export interface EventBacktestView {
+  event_sources_used: string[];
   note: string;
   real_event_history: boolean;
   snapshots_with_event_intelligence: number;
+  snapshots_with_positive_event_heat: number;
 }
 export interface EvidenceView {
   checks: StatusCheckView[];

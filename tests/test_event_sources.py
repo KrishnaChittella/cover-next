@@ -85,6 +85,7 @@ from metaspike.sources.registry import SourcePolicyError
 from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY
 from metaspike.sources.steam_players import STEAM_CURRENT_PLAYERS_POLICY
 from metaspike.storage.base import StoragePolicyError
+from metaspike.validation.report import ValidationReport
 from tests.conftest import make_id
 from tests.synthetic_policy import (
     SYNTHETIC_EVENT_SOURCE,
@@ -1422,8 +1423,35 @@ def test_the_backtest_can_read_an_ingested_event_store_and_score_v0_does_not_cha
 
     plain = run_backtest(catalogue, report, history_day(40), history_day(60), WHEN, ZERO)
     eventful = run_backtest(
-        catalogue, report, history_day(40), history_day(60), WHEN, ZERO, event_store=events
+        catalogue,
+        report,
+        history_day(40),
+        history_day(60),
+        WHEN,
+        ZERO,
+        event_store=events,
+        event_source_policies=EVENT_SOURCE_POLICIES,
+        stage=DeploymentStage.PRIVATE_DEVELOPMENT,
     )
+    # The report says which source its event intelligence came from.
+    assert eventful.report.events.event_sources_used == (SOURCE_ID,)
+    assert plain.report.events.event_sources_used == ()
+    # Without the policy, or at a stage it does not clear, the backtest refuses.
+    for refused in (
+        {},
+        {"event_source_policies": EVENT_SOURCE_POLICIES},
+        {"stage": DeploymentStage.PRIVATE_DEVELOPMENT},
+        {"event_source_policies": EVENT_SOURCE_POLICIES, "stage": DeploymentStage.PUBLIC_LAUNCH},
+        {
+            "event_source_policies": EVENT_SOURCE_POLICIES,
+            "stage": DeploymentStage.PRIVATE_COLLECTION,
+        },
+    ):
+        with pytest.raises(SourcePolicyError, match=SOURCE_ID):
+            run_backtest(
+                catalogue, report, history_day(40), history_day(60), WHEN, ZERO,
+                event_store=events, **refused,
+            )  # fmt: skip
     by_day = {(prediction_day(s), s.slug): s for s in eventful.snapshots}
     # Before it was seen: unavailable. From the first prediction after: available, with heat.
     assert by_day[(history_day(50), "alpha")].events.availability == "unavailable"
@@ -1609,7 +1637,7 @@ def test_event_data_enters_a_bundle_only_at_a_cleared_stage_and_marks_it_private
     root = tmp_path / "artifacts"
     publish(private, root)
     manifest = validate_published(root)
-    assert manifest.schema_version == "1.4.0"
+    assert manifest.schema_version == "1.5.0"
     version = root / manifest.version_path
 
     def tampered(name: str, change: Callable[[dict[str, Any]], None], message: str) -> None:
@@ -1792,7 +1820,11 @@ def test_the_fixtures_are_synthetic_and_say_so() -> None:
 # --- fail closed: no event data without a policy --------------------------------------
 
 
-def _bundle_at(stage: DeploymentStage, inputs: EventInputs | None) -> ArtifactBundle:
+def _bundle_at(
+    stage: DeploymentStage,
+    inputs: EventInputs | None,
+    validation: ValidationReport | None = None,
+) -> ArtifactBundle:
     """Build the replay bundle at a stage, with the given event inputs. Offline."""
     from metaspike.catalogue.seed import load_seed_catalogue
     from metaspike.pipeline.assess import assess
@@ -1814,7 +1846,7 @@ def _bundle_at(stage: DeploymentStage, inputs: EventInputs | None) -> ArtifactBu
             clock=lambda: generated,
         )
         return build_bundle(
-            catalogue, report, assess(catalogue, report), registry, generated, inputs
+            catalogue, report, assess(catalogue, report), registry, generated, inputs, validation
         )
 
 
@@ -2020,7 +2052,7 @@ def test_steam_news_is_still_private_development_only_and_refused_beyond_it(
     assert [r.source for r in built.manifest.restricted_sources] == [SOURCE_ID]
     assert built.manifest.restricted_sources[0].cleared_stages == ("private_development",)
     assert built.games["counter-strike-2"].event_intelligence.coverage_sources == (SOURCE_ID,)
-    assert built.manifest.schema_version == "1.4.0"
+    assert built.manifest.schema_version == "1.5.0"
     # I. The same inputs at every further stage: refused, each for its own reason.
     reasons = {}
     for stage in (
@@ -2084,3 +2116,103 @@ def test_the_validator_refuses_an_event_source_nobody_declared(tmp_path: Path) -
         validate_published(root)
     restore()
     validate_published(root)
+
+
+def test_a_backtest_report_that_used_steam_news_cannot_enter_an_internal_bundle(
+    tmp_path: Path,
+) -> None:
+    """A report derived from a restricted source stays restricted wherever it goes.
+
+    The posts here are SYNTHETIC; the policy is the real Steam News policy.
+    """
+    from metaspike.validation.backtest import run_backtest
+    from tests.test_historical_validation import (
+        FIRST_PREDICTION,
+        LAST_PREDICTION,
+        real_recording,
+    )
+
+    catalogue, recording, lags = real_recording()
+    game = next(g for g in catalogue.games if g.slug == "counter-strike-2")
+    resolver = steam_news_resolver({APP: GameBinding(canonical_game_id=game.canonical_game_id)})
+    seen_at = datetime(2026, 9, 1, 12, tzinfo=UTC)
+    stores = Stores(tmp_path)
+    handler, _ = serving({APP: envelope([post("1", "Thanks everyone", published=seen_at - HOUR)])})
+    ingest(
+        adapter_for(handler, Ticking(seen_at)),
+        STEAM_NEWS_POLICY,
+        [APP],
+        resolver,
+        stores.sources,
+        stores.events,
+    )
+    # Coverage only: a check was recorded and no post was promoted.
+    assert stores.events.observations() == () and len(stores.events.checks()) == 1
+    private = DeploymentStage.PRIVATE_DEVELOPMENT
+    result = run_backtest(
+        catalogue,
+        recording,
+        FIRST_PREDICTION,
+        LAST_PREDICTION,
+        NOW,
+        lags,
+        event_store=stores.events,
+        event_source_policies=EVENT_SOURCE_POLICIES,
+        stage=private,
+    )
+    report = result.report
+    assert report.events.event_sources_used == (SOURCE_ID,)
+    assert report.events.real_event_history is False
+    assert report.events.snapshots_with_event_intelligence > 0
+    assert report.events.snapshots_with_positive_event_heat == 0
+    # The backtest itself is refused at any stage Steam News is not cleared for.
+    for stage in (
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+        DeploymentStage.COMMERCIAL_PRODUCTION,
+    ):
+        with pytest.raises(SourcePolicyError, match=SOURCE_ID):
+            run_backtest(
+                catalogue, recording, FIRST_PREDICTION, LAST_PREDICTION, NOW, lags,
+                event_store=stores.events, event_source_policies=EVENT_SOURCE_POLICIES, stage=stage,
+            )  # fmt: skip
+
+    # The run's own event inputs are empty. The report is what carries the source.
+    current = EventInputs(source_policies=EVENT_SOURCE_POLICIES)
+    built = _bundle_at(private, current, report)
+    assert built.manifest.distribution == "private_development_only"
+    assert [r.source for r in built.manifest.restricted_sources] == [SOURCE_ID]
+    assert built.validation.report is not None
+    assert built.validation.report.events.event_sources_used == (SOURCE_ID,)
+    assert all(g.event_intelligence.availability == "unavailable" for g in built.games.values())
+    # With no policy to answer for it, it does not go in as "internal": it does not go in.
+    for inputs in (None, EventInputs(), EventInputs(source_policies={})):
+        with pytest.raises(SourcePolicyError, match="steam_news: no source policy"):
+            _bundle_at(private, inputs, report)
+    # H. At public launch, and at every other stage it is not cleared for: refused.
+    reasons = {}
+    for stage in (
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+        DeploymentStage.COMMERCIAL_PRODUCTION,
+    ):
+        with pytest.raises(SourcePolicyError) as refused:
+            _bundle_at(stage, current, report)
+        reasons[stage] = str(refused.value)
+    assert "derived events are not explicitly allowed" in reasons[DeploymentStage.PUBLIC_LAUNCH]
+    assert "not cleared for private_collection" in reasons[DeploymentStage.PRIVATE_COLLECTION]
+    # The same build with a report that used no event source is an ordinary internal bundle.
+    plain = run_backtest(catalogue, recording, FIRST_PREDICTION, LAST_PREDICTION, NOW, lags)
+    assert plain.report.events.event_sources_used == ()
+    assert _bundle_at(private, None, plain.report).manifest.distribution == "internal"
+    assert _bundle_at(DeploymentStage.PUBLIC_LAUNCH, None, plain.report).manifest.distribution == (
+        "internal"
+    )
+    # Score v0 and every outcome are the same with and without the coverage.
+    assert plain.report.strategies == report.strategies and plain.report.overall == report.overall
+    # One gate, one implementation, used by the backtest and by the build.
+    for module in ("validation/backtest.py", "publishing/build.py"):
+        assert "require_event_source(" in (REPO / "src/metaspike" / module).read_text()
+    gate = (REPO / "src/metaspike/event_sources/gate.py").read_text()
+    assert "synthetic" not in gate.lower() and "startswith" not in gate
+    assert "EVENT_SOURCE_POLICIES" not in gate  # the caller hands the policies in

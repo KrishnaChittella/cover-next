@@ -61,6 +61,13 @@
     "EventBacktestView": {
       "additionalProperties": false,
       "properties": {
+        "event_sources_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Sources Used",
+          "type": "array"
+        },
         "note": {
           "title": "Note",
           "type": "string"
@@ -73,11 +80,18 @@
           "minimum": 0,
           "title": "Snapshots With Event Intelligence",
           "type": "integer"
+        },
+        "snapshots_with_positive_event_heat": {
+          "minimum": 0,
+          "title": "Snapshots With Positive Event Heat",
+          "type": "integer"
         }
       },
       "required": [
         "real_event_history",
         "snapshots_with_event_intelligence",
+        "snapshots_with_positive_event_heat",
+        "event_sources_used",
         "note"
       ],
       "title": "EventBacktestView",

@@ -459,7 +459,7 @@ def test_every_published_file_matches_its_checked_in_schema_with_and_without_eve
         root = tmp_path / name
         run_with(root, events)
         manifest = load(root / "manifest.json")
-        assert manifest["schema_version"] == SCHEMA_VERSION == "1.4.0"
+        assert manifest["schema_version"] == SCHEMA_VERSION == "1.5.0"
         assert manifest["artifacts"]["radar"] == f"{manifest['version_path']}/radar.json"
         validators["manifest"].validate(manifest)
         validators["radar"].validate(load(root / manifest["artifacts"]["radar"]))

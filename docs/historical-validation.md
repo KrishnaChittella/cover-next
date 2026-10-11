@@ -335,7 +335,7 @@ The evidence status is unchanged because it depends on sample size, not on resul
 
 | | |
 |---|---|
-| `report_id` | `report_ab3be39389de0313637e9518d2569722` |
+| `report_id` | `report_9e3a97a9725a587c5570ba2e42e7cd1a` |
 | `snapshot_set_hash` | `8a0f192d11aac11fd92d37736598cb3cd7ea130c253c84cac5efeb86770ee748` |
 | `label_set_hash` | `6b8aa3ce15dbe68977bf1bd68778d4ed65f0e2cfd704a94af7adf70d182cabdf` |
 
@@ -349,12 +349,53 @@ observations.
 
 ## Events
 
-The framework carries event intelligence in each snapshot, evaluated as known at T.
-**Real event backtesting is unavailable**: no historical event observations exist, so
-`event_heat_rules_v1` has not been backtested, and nothing is claimed for it. Synthetic
-event histories are used only in tests, to prove that later observations and revisions
-cannot reach an earlier snapshot. Event Heat is not part of score v0 and is not
-evaluated or tuned here.
+The framework carries event intelligence in each snapshot, evaluated as known at P.
+**Real event backtesting is unavailable**: no historical event observation has been
+visible to any prediction, so `event_heat_rules_v1` has not been backtested, and nothing
+is claimed for it. Event Heat is not part of score v0 and is not evaluated or tuned
+here.
+
+### Event data is used only under policy, and the report says whose it was
+
+A backtest may be given an event store. Event intelligence derived from a source is a
+derived output of that source, so:
+
+- If an event record or a coverage check from a source is **visible to any prediction**
+  (observed at or before that prediction's moment), the source must have a
+  `SourcePolicy`, filed under its own name, that clears the stated deployment stage for
+  event intelligence. `run_backtest` takes both as explicit arguments,
+  `event_source_policies` and `stage`, and neither has a default. Without them the
+  backtest stops with `SourcePolicyError` **before** that day is predicted, so the event
+  intelligence never enters a snapshot.
+- If nothing is ever visible, neither is needed. A store whose contents were all
+  observed after the last prediction day changes nothing and is not provenance.
+- The `backtest` command passes the registered event-source policies and
+  `private_development` explicitly, because it is a private, local command.
+
+The report records what was actually used, under `events`:
+
+| Field | Meaning |
+|---|---|
+| `event_sources_used` | Sorted. Every source whose record or coverage check was visible to at least one prediction. Not every registered source, and not every source in the store. A source used for coverage alone is included |
+| `real_event_history` | At least one event **observation** was visible to at least one prediction. Coverage alone does not make it true; nor does an observation made after the range |
+| `snapshots_with_event_intelligence` | Snapshots with event coverage, a heat of 0 included |
+| `snapshots_with_positive_event_heat` | Of those, snapshots where an event actually counted |
+
+A report cannot say its snapshots carried event intelligence and name no source: the
+model refuses it. The sources are part of what the `report_id` is computed from.
+
+When the report is published, each source it names goes through the **same** gate as the
+run's own event data, with the same policy mapping (see
+[event-sources.md](event-sources.md)). A report that used a source not cleared for
+public launch makes the bundle `private_development_only` even when the run itself has
+no event data at all; with no policy for that source, or at a stage it does not clear,
+the build refuses. One function, `event_sources.gate.require_event_source`, is the gate
+for both the backtest and the build.
+
+The fixture backtest used no event source: `event_sources_used` is empty, and its
+snapshot and label set hashes are the same as before this was added. Synthetic event
+histories are used only in tests, under a test-only policy, to prove that later
+observations and revisions cannot reach an earlier snapshot.
 
 ## The accountability store
 
@@ -400,7 +441,7 @@ Known bottlenecks, none addressed because none bites at the present size:
 - the store finds existing records by reading all of them, on every add and audit;
 - each day re-filters the whole recording per game, where an index by day would do.
 
-## In the artifacts (contract 1.3.0, internal)
+## In the artifacts (contract 1.5.0, internal)
 
 `validation.json`, named by `manifest.artifacts.validation`: the outcome definition
 always, and the report when a backtest has been run. With none, `availability` is
@@ -412,6 +453,11 @@ performs a backtest; it publishes the latest report in the store if there is one
 `publication_lag_hours`, `snapshot_set_hash` and `label_set_hash`; each inspection day
 gains `latest_due_day`, `primary_window_start` and `primary_window_end`. The change
 went Python contract → JSON Schema → generated TypeScript.
+
+1.5.0 adds `events.event_sources_used` and `events.snapshots_with_positive_event_heat`
+to the report (format `validation_report_v3`). The report id changed with the format;
+the snapshot and label set hashes did not. A stored report in an earlier format stays
+on disk and is never read as current: it cannot say which event sources it used.
 
 ## Limitations
 

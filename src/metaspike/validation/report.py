@@ -10,8 +10,9 @@ import hashlib
 import statistics
 from collections.abc import Iterable, Sequence
 from datetime import date
+from typing import Self
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, model_validator
 
 from metaspike.domain.model import FrozenModel
 from metaspike.validation.metrics import (
@@ -37,7 +38,7 @@ from metaspike.validation.rules import (
 )
 from metaspike.validation.snapshot import content_id
 
-REPORT_FORMAT = "validation_report_v2"
+REPORT_FORMAT = "validation_report_v3"
 
 
 def set_hash(ids: Iterable[str]) -> str:
@@ -89,9 +90,34 @@ class Spread(FrozenModel):
 class EventBacktest(FrozenModel):
     """Whether events took any part. With no real event history they cannot be judged."""
 
+    # True when at least one event observation was visible to at least one prediction.
+    # An observation made after the last prediction, or a store holding only coverage
+    # checks, does not make it true.
     real_event_history: bool
+    # Snapshots whose event intelligence was available: a source had looked. That is
+    # coverage, and it includes snapshots with a heat of exactly 0.
     snapshots_with_event_intelligence: int = Field(ge=0)
+    # Of those, the snapshots with a heat above 0: an event actually counted.
+    snapshots_with_positive_event_heat: int = Field(ge=0)
+    # Every event source whose record or coverage check was visible to at least one
+    # prediction, sorted. Not every source that exists: only those actually used. A
+    # source used for coverage alone is here too. Each was cleared by policy when the
+    # backtest ran, and must be cleared again wherever this report is published.
+    event_sources_used: tuple[str, ...]
     note: str
+
+    @model_validator(mode="after")
+    def _provenance_is_complete(self) -> Self:
+        if list(self.event_sources_used) != sorted(set(self.event_sources_used)):
+            raise ValueError("event_sources_used must be sorted and without repeats")
+        if self.snapshots_with_positive_event_heat > self.snapshots_with_event_intelligence:
+            raise ValueError("more snapshots with heat than with event intelligence")
+        carried = self.real_event_history or self.snapshots_with_event_intelligence > 0
+        if carried and not self.event_sources_used:
+            raise ValueError(
+                "snapshots carry event intelligence, but no event source is named as used"
+            )
+        return self
 
 
 class InspectionEntry(FrozenModel):
@@ -326,6 +352,7 @@ def build_report(
     real_event_history: bool,
     data_through: date,
     created_at: AwareDatetime,
+    event_sources_used: Sequence[str] = (),
 ) -> ValidationReport:
     """Summarise a backtest. Deterministic: the same pairs give the same report."""
     if not pairs:
@@ -353,6 +380,30 @@ def build_report(
     )
     sources = len({s.scored_signal.source for s in snapshots if s.scored_signal is not None})
     with_events = sum(1 for snapshot in snapshots if snapshot.events.availability == "available")
+    with_heat = sum(1 for snapshot in snapshots if (snapshot.events.event_heat or 0) > 0)
+    used = tuple(sorted(set(event_sources_used)))
+    if used:
+        events_limitation = (
+            f"Event intelligence from {', '.join(used)} was carried in the snapshots. It "
+            "took no part in score v0 or in any outcome, and event_heat_rules_v1 is not "
+            "evaluated or tuned here: nothing is claimed for it."
+        )
+        events_note = (
+            f"Event sources used: {', '.join(used)}. Their event intelligence was visible "
+            f"to {with_events} snapshot(s), {with_heat} with a heat above 0. Event Heat is "
+            "carried in a snapshot when it was available at that moment, is not part of "
+            "score v0, and is neither evaluated nor tuned here."
+        )
+    else:
+        events_limitation = (
+            "Event intelligence took no part. There is no real historical event source, so "
+            "event_heat_rules_v1 has not been backtested and nothing is claimed for it."
+        )
+        events_note = (
+            "Real event backtesting is unavailable: no historical event observations "
+            "exist. Event Heat is carried in a snapshot when it was available at that "
+            "moment, is not part of score v0, and is neither evaluated nor tuned here."
+        )
     inspection, truncated = _inspection(pairs, protocol.inspection_days)
     limitations = [
         "In-sample only: one period, one protocol, no held-out data.",
@@ -372,8 +423,7 @@ def build_report(
         "observations are not independent and the counts overstate the evidence.",
         "No confidence intervals are reported. With this sample they would imply a "
         "precision that does not exist.",
-        "Event intelligence took no part. There is no real historical event source, so "
-        "event_heat_rules_v1 has not been backtested and nothing is claimed for it.",
+        events_limitation,
         "metaspike_score_v0 is an internal attention measure, not the final "
         "creator-opportunity score. A result here is about v0 only.",
     ]
@@ -419,11 +469,9 @@ def build_report(
         "events": EventBacktest(
             real_event_history=real_event_history,
             snapshots_with_event_intelligence=with_events,
-            note=(
-                "Real event backtesting is unavailable: no historical event observations "
-                "exist. Event Heat is carried in a snapshot when it was available at that "
-                "moment, is not part of score v0, and is neither evaluated nor tuned here."
-            ),
+            snapshots_with_positive_event_heat=with_heat,
+            event_sources_used=used,
+            note=events_note,
         ),
         "limitations": tuple(limitations),
         "inspection": inspection,

@@ -127,7 +127,7 @@ describe("the real replay backtest", () => {
     expect(provenance).toHaveTextContent(report.snapshot_set_hash);
     expect(provenance).toHaveTextContent(report.label_set_hash);
     expect(provenance).toHaveTextContent(report.report_id);
-    expect(provenance).toHaveTextContent("validation_report_v2");
+    expect(provenance).toHaveTextContent("validation_report_v3");
     expect(provenance).toHaveTextContent("Snapshots (1,365)");
   });
 
@@ -219,6 +219,11 @@ describe("the real replay backtest", () => {
     const events = await screen.findByRole("complementary", { name: "Event backtesting" });
     expect(events).toHaveTextContent("Event backtesting unavailable");
     expect(events).toHaveTextContent(report.events.note);
+    // The real backtest used no event source, and says so.
+    expect(report.events.event_sources_used).toEqual([]);
+    expect(report.events.snapshots_with_positive_event_heat).toBe(0);
+    expect(screen.getByTestId("event-sources-used")).toHaveTextContent("No event source took part");
+    expect(events).toHaveTextContent("with a heat above 0: 0.");
     expect(events).toHaveTextContent("0 of 1,365");
     expect(events).toHaveTextContent("event_heat_rules_v1");
     const limitations = screen.getByRole("region", { name: "Limitations" });
@@ -287,6 +292,28 @@ describe("other states (synthetic, tests only)", () => {
     expect(screen.getByTestId("evidence-status")).toHaveTextContent("Framework only");
   });
 
+  it("names the event sources a backtest used, and nothing of what they said", () => {
+    const eventful = withReport((draft) => {
+      draft.events = {
+        ...draft.events,
+        real_event_history: false,
+        snapshots_with_event_intelligence: 35,
+        snapshots_with_positive_event_heat: 0,
+        event_sources_used: ["steam_news"],
+        note: "Event sources used: steam_news. Their event intelligence was visible to 35 snapshot(s), 0 with a heat above 0.",
+      };
+    });
+    expect(violations("validation", eventful)).toEqual([]);
+    expect(validationViolations(eventful)).toEqual([]);
+    render(<ValidationBody validation={eventful} />);
+    const used = screen.getByTestId("event-sources-used");
+    expect(used).toHaveTextContent("Event sources used: steam_news");
+    const events = screen.getByRole("complementary", { name: "Event backtesting" });
+    expect(events).toHaveTextContent("Snapshots that carried event intelligence: 35 of 1,365; with a heat above 0: 0.");
+    // Coverage alone is not event history.
+    expect(events).toHaveTextContent("Event backtesting unavailable");
+  });
+
   it("shows 'not run' as its own state with no result at all", () => {
     const notRun: ValidationArtifact = { ...structuredClone(real), availability: "not_run", report: null };
     expect(violations("validation", notRun)).toEqual([]);
@@ -352,6 +379,24 @@ describe("refusing a report that claims more than it shows", () => {
       "/report/inspection/0/primary_window_start",
     ],
     ["a provenance hash that is not one", (draft) => void (draft.report!.snapshot_set_hash = "unknown"), "/report/snapshot_set_hash"],
+    [
+      "event intelligence with no event source named",
+      (draft) => void (draft.report!.events.snapshots_with_event_intelligence = 3),
+      "/report/events/event_sources_used",
+    ],
+    [
+      "event sources that are not a sorted set",
+      (draft) => {
+        draft.report!.events.event_sources_used = ["steam_news", "steam_news"];
+        draft.report!.events.snapshots_with_event_intelligence = 3;
+      },
+      "/report/events/event_sources_used",
+    ],
+    [
+      "more snapshots with heat than with event intelligence",
+      (draft) => void (draft.report!.events.snapshots_with_positive_event_heat = 1),
+      "/report/events/snapshots_with_positive_event_heat",
+    ],
     ["'not run' that still carries a report", (draft) => void (draft.availability = "not_run"), "/report"],
     ["'available' with no report", (draft) => void (draft.report = null), "/report"],
   ];

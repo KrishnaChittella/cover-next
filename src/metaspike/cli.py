@@ -555,6 +555,9 @@ def _backtest(args: argparse.Namespace) -> int:
             created_at=started,
             publication_lag=lags,
             event_store=events,
+            # A private, local command: event data is used at this stage or not at all.
+            event_source_policies=EVENT_SOURCE_POLICIES,
+            stage=DeploymentStage.PRIVATE_DEVELOPMENT,
         )
     except ValueError as error:  # a range the recording cannot stand in for
         return _fail(EXIT_INVALID_CATALOGUE, f"backtest range: {error}")
@@ -618,6 +621,8 @@ def _print_backtest(report: ValidationReport, seconds: float) -> None:
     print(f"  {report.evidence.conclusion}")
     passed = sum(check.passed for check in report.leakage_checks)
     print(f"  Leakage checks passed: {passed} of {len(report.leakage_checks)}")
+    used = ", ".join(report.events.event_sources_used) or "none"
+    print(f"  Event sources used by the backtest: {used}")
     print(f"  Events: {report.events.note}")
 
 

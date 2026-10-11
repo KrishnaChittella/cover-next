@@ -30,7 +30,7 @@ const SCHEMAS: Record<ArtifactKind, object> = {
 };
 
 // The contract version this build of the UI was generated from.
-export const SUPPORTED_SCHEMA_VERSION = "1.4.0";
+export const SUPPORTED_SCHEMA_VERSION = "1.5.0";
 
 let ajv: Ajv2020 | null = null;
 const compiled = new Map<ArtifactKind, ValidateFunction>();
@@ -181,6 +181,18 @@ export function validationViolations(validation: ValidationArtifact): Violation[
   }
   if (report.leakage_checks.length === 0 || report.leakage_checks.some((check) => !check.passed)) {
     found.push({ path: "/report/leakage_checks", message: "every leakage check must be present and passed" });
+  }
+  // Event-source provenance: a report cannot carry event intelligence and name no source.
+  const events = report.events;
+  const sources = events.event_sources_used;
+  if (sources.some((source, index) => index > 0 && sources[index - 1]! >= source)) {
+    found.push({ path: "/report/events/event_sources_used", message: "must be sorted and without repeats" });
+  }
+  if ((events.real_event_history || events.snapshots_with_event_intelligence > 0) && sources.length === 0) {
+    found.push({ path: "/report/events/event_sources_used", message: "event intelligence was carried but no event source is named" });
+  }
+  if (events.snapshots_with_positive_event_heat > events.snapshots_with_event_intelligence) {
+    found.push({ path: "/report/events/snapshots_with_positive_event_heat", message: "exceeds the snapshots with event intelligence" });
   }
   if (!report.leakage_checks.some((check) => check.name === "source_publication_lag_respected")) {
     found.push({ path: "/report/leakage_checks", message: "the source publication lag was not checked" });

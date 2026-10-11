@@ -24,6 +24,7 @@ from metaspike.domain.events import EventType
 from metaspike.domain.games import CanonicalGame, Catalogue, LifecycleState, SourceIdentifier
 from metaspike.domain.observations import Freshness, Observation, ObservationStatus
 from metaspike.domain.signals import CollectionStatus, Signal
+from metaspike.domain.source_policy import DeploymentStage
 from metaspike.domain.timeseries import Granularity, TimeWindow, start_of_day
 from metaspike.events.model import CoverageCheck, EventReport, TimePrecision, observe
 from metaspike.events.rules import EVENT_HEAT_RULES_V1
@@ -32,11 +33,15 @@ from metaspike.pipeline.assess import assess
 from metaspike.pipeline.collection import CollectionReport, SourceRun, collect, window_ending
 from metaspike.pipeline.normalize import build_time_series
 from metaspike.pipeline.run import build_and_publish
-from metaspike.publishing.artifacts import SCHEMA_VERSION, ValidationArtifact
+from metaspike.publishing.artifacts import SCHEMA_VERSION, ArtifactBundle, ValidationArtifact
+from metaspike.publishing.build import EventInputs, build_bundle
+from metaspike.publishing.publisher import publish as publish_bundle
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
-from metaspike.sources.registry import default_registry
+from metaspike.sources.registry import SourcePolicyError, default_registry
 from metaspike.sources.replay import replay_client
+from metaspike.storage.base import StorageCorruptionError
+from metaspike.validation import backtest as backtest_module
 from metaspike.validation import snapshot as snapshot_module
 from metaspike.validation.backtest import (
     BacktestResult,
@@ -84,6 +89,11 @@ from metaspike.validation.rules import (
 from metaspike.validation.snapshot import RecommendationSnapshot, predict
 from metaspike.validation.store import STORE_GENERATION, AccountabilityStore
 from tests.conftest import RECORDED_END, RECORDINGS, RUN_TIME, make_id, steady
+from tests.synthetic_policy import (
+    SYNTHETIC_EVENT_SOURCE,
+    synthetic_event_policies,
+    synthetic_event_policy,
+)
 
 REPO = Path(__file__).parent.parent
 GOLDEN = json.loads((REPO / "tests" / "fixtures" / "score_v0_replay_golden.json").read_text())
@@ -632,6 +642,14 @@ def test_nothing_that_predicts_can_be_handed_or_can_import_an_outcome() -> None:
 # --- events at a past moment ----------------------------------------------------------
 
 
+# Invented events go through the same policy gate as real ones: the test-only policy,
+# at the one stage it clears.
+SYNTHETIC_USE: dict[str, Any] = {
+    "event_source_policies": synthetic_event_policies(),
+    "stage": DeploymentStage.PRIVATE_DEVELOPMENT,
+}
+
+
 def event_store(root: Path, catalogue: Catalogue, *, with_revision: bool) -> EventStore:
     """Synthetic: a patch announced on day 40 for day 62, later moved to day 75."""
     store = EventStore(root)
@@ -681,7 +699,9 @@ def test_an_event_or_revision_seen_later_cannot_rewrite_event_intelligence_at_t(
     early = event_store(tmp_path / "early", catalogue, with_revision=False)
     revised = event_store(tmp_path / "revised", catalogue, with_revision=True)
     runs = {
-        name: run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store)
+        name: run_backtest(
+            catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store, **SYNTHETIC_USE
+        )
         for name, store in (("early", early), ("revised", revised))
     }
 
@@ -714,7 +734,9 @@ def test_events_add_nothing_to_score_v0_in_a_backtest(tmp_path: Path) -> None:
     catalogue, report = recording({"alpha": [*steady(60), *([260.0] * 25)], "beta": steady(85)})
     store = event_store(tmp_path, catalogue, with_revision=True)
     plain = run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO)
-    eventful = run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store)
+    eventful = run_backtest(
+        catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store, **SYNTHETIC_USE
+    )
     assert any(item.events.event_heat for item in eventful.snapshots)
     score_side = {"score", "rank", "confidence", "features", "explanation", "ranked_count"}
     for without, with_events in zip(plain.snapshots, eventful.snapshots, strict=True):
@@ -733,6 +755,389 @@ def test_events_add_nothing_to_score_v0_in_a_backtest(tmp_path: Path) -> None:
             WHEN,
             event_records=store.events(),
         )
+
+
+# --- event-source provenance and policy in a backtest ----------------------------------
+
+
+def coverage_only_store(root: Path, catalogue: Catalogue, *indices: int) -> EventStore:
+    """Synthetic: a source that looked at alpha on the given days and reported nothing."""
+    store = EventStore(root)
+    store.record_checks(
+        CoverageCheck(
+            canonical_game_id=catalogue.games[0].canonical_game_id,
+            source=SYNTHETIC_EVENT_SOURCE,
+            checked_at=start_of_day(day(index)),
+        )
+        for index in indices
+    )
+    return store
+
+
+def test_a_backtest_refuses_visible_event_data_without_a_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gap: event data reached snapshots, and so a report, with no policy consulted."""
+    catalogue, report = recording({"alpha": steady(85), "beta": steady(85)})
+    with_record = event_store(tmp_path / "record", catalogue, with_revision=False)
+    only_checks = coverage_only_store(tmp_path / "checks", catalogue, 47, 54, 61)
+    policies = synthetic_event_policies()
+    private = DeploymentStage.PRIVATE_DEVELOPMENT
+    refusals: tuple[dict[str, Any], ...] = (
+        {},  # nothing stated at all
+        {"stage": private},  # a stage, no policy
+        {"event_source_policies": {}, "stage": private},
+        {"event_source_policies": policies},  # a policy, no stage: nothing is assumed
+        {
+            "event_source_policies": synthetic_event_policies("synthetic_other"),
+            "stage": private,
+        },  # every policy but this source's
+        {
+            "event_source_policies": {
+                SYNTHETIC_EVENT_SOURCE: synthetic_event_policy("synthetic_other")
+            },
+            "stage": private,
+        },  # a policy filed under the wrong name
+        # The policy does not clear these stages.
+        {"event_source_policies": policies, "stage": DeploymentStage.PRIVATE_COLLECTION},
+        {"event_source_policies": policies, "stage": DeploymentStage.PUBLIC_LAUNCH},
+        {"event_source_policies": policies, "stage": DeploymentStage.COMMERCIAL_PRODUCTION},
+    )
+    # A. a visible event record; B. a visible coverage check alone.
+    for store in (with_record, only_checks):
+        for options in refusals:
+            with pytest.raises(SourcePolicyError, match=SYNTHETIC_EVENT_SOURCE):
+                run_backtest(
+                    catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store, **options
+                )
+    # Refused before any of it could reach a snapshot: prediction itself was never asked.
+    asked: list[object] = []
+    real_predict = snapshot_module.predict
+
+    def counting(*args: Any, **kwargs: Any) -> Any:
+        asked.append(args[1].as_of)
+        return real_predict(*args, **kwargs)
+
+    monkeypatch.setattr(backtest_module, "predict", counting)
+    with pytest.raises(SourcePolicyError):
+        run_backtest(catalogue, report, day(47), day(60), WHEN, ZERO, event_store=only_checks)
+    assert asked == []  # the check of day 47 is already visible at 00:00 that day
+    with pytest.raises(SourcePolicyError):
+        run_backtest(catalogue, report, day(45), day(60), WHEN, ZERO, event_store=only_checks)
+    # Days 45 and 46 see nothing and are predicted; the first day that would see the
+    # check is refused before it is predicted.
+    assert asked == [moment(45), moment(46)]
+    monkeypatch.undo()
+    # There is no default and no name test in the backtest.
+    parameters = inspect.signature(run_backtest).parameters
+    assert parameters["event_source_policies"].default is None
+    assert parameters["stage"].default is None
+    source = Path(backtest_module.__file__).read_text()
+    assert "PRIVATE_DEVELOPMENT" not in source and "synthetic" not in source.lower()
+    assert "startswith" not in source
+
+
+def test_event_data_never_visible_to_a_prediction_is_not_provenance(tmp_path: Path) -> None:
+    catalogue, report = recording({"alpha": steady(85), "beta": steady(85)})
+    plain = run_backtest(catalogue, report, day(37), day(60), WHEN, ZERO)
+    # The store holds an observation and checks, all made after the last prediction.
+    later = EventStore(tmp_path / "later")
+    full = event_store(tmp_path / "full", catalogue, with_revision=True)
+    after = moment(60)
+    later.append(item for item in full.observations() if item.observed_at > after)
+    later.record_checks(check for check in full.checks() if check.checked_at > after)
+    assert later.observations() and later.checks()  # it is not an empty store
+    # C. Nothing is visible to any prediction, so no policy is needed...
+    unused = run_backtest(catalogue, report, day(37), day(60), WHEN, ZERO, event_store=later)
+    # ...and nothing is recorded as used. Having a store is not having used it.
+    assert unused.report.events.event_sources_used == ()
+    assert unused.report.events.real_event_history is False
+    assert unused.report.events.snapshots_with_event_intelligence == 0
+    assert unused.report.events.snapshots_with_positive_event_heat == 0
+    # The result is the no-event result, to the report id.
+    assert [s.snapshot_id for s in unused.snapshots] == [s.snapshot_id for s in plain.snapshots]
+    assert unused.report == plain.report
+    assert "took no part" in " ".join(plain.report.limitations)
+    assert "Real event backtesting is unavailable" in plain.report.events.note
+    # One day further and the first later check is visible: now policy is required.
+    with pytest.raises(SourcePolicyError, match=SYNTHETIC_EVENT_SOURCE):
+        run_backtest(catalogue, report, day(37), day(62), WHEN, ZERO, event_store=later)
+
+
+def test_a_report_records_exactly_the_event_sources_its_predictions_saw(tmp_path: Path) -> None:
+    catalogue, report = recording({"alpha": steady(85), "beta": steady(85)})
+    store = event_store(tmp_path / "events", catalogue, with_revision=True)
+    # A second synthetic source that only looks after the range: never visible.
+    store.record_checks(
+        [
+            CoverageCheck(
+                canonical_game_id=catalogue.games[1].canonical_game_id,
+                source="synthetic_latecomer",
+                checked_at=start_of_day(day(84)),
+            )
+        ]
+    )
+    # D. With the test-only policy at the stage it clears, the backtest runs. The
+    # latecomer needs no policy, because it is never used.
+    result = run_backtest(
+        catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store, **SYNTHETIC_USE
+    )
+    events = result.report.events
+    # E. Exactly the sources used: not every source in the store, and none registered.
+    assert events.event_sources_used == (SYNTHETIC_EVENT_SOURCE,)
+    assert events.real_event_history is True
+    with_coverage = [s for s in result.snapshots if s.events.availability == "available"]
+    with_heat = [s for s in result.snapshots if (s.events.event_heat or 0) > 0]
+    assert events.snapshots_with_event_intelligence == len(with_coverage) > 0
+    assert events.snapshots_with_positive_event_heat == len(with_heat) > 0
+    assert len(with_heat) < len(with_coverage)  # covered with a heat of 0 is still covered
+    assert f"Event sources used: {SYNTHETIC_EVENT_SOURCE}." in events.note
+    assert "unavailable" not in events.note
+    assert any(SYNTHETIC_EVENT_SOURCE in line for line in result.report.limitations)
+    assert not any("took no part. There is no real" in line for line in result.report.limitations)
+    # Extending the range to where the latecomer is visible makes it used, and gated.
+    with pytest.raises(SourcePolicyError, match="synthetic_latecomer"):
+        run_backtest(
+            catalogue, report, day(37), day(85), WHEN, ZERO, event_store=store, **SYNTHETIC_USE
+        )
+    both = run_backtest(
+        catalogue,
+        report,
+        day(37),
+        day(85),
+        WHEN,
+        ZERO,
+        event_store=store,
+        event_source_policies=synthetic_event_policies(
+            SYNTHETIC_EVENT_SOURCE, "synthetic_latecomer"
+        ),
+        stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+    )
+    assert both.report.events.event_sources_used == ("synthetic_events", "synthetic_latecomer")
+
+    # F. Deterministic: the same inputs give the same snapshots, labels and report.
+    again = run_backtest(
+        catalogue, report, day(37), day(81), WHEN + DAY, ZERO, event_store=store, **SYNTHETIC_USE
+    )
+    assert [s.snapshot_id for s in again.snapshots] == [s.snapshot_id for s in result.snapshots]
+    assert [item.label_id for item in again.labels] == [item.label_id for item in result.labels]
+    assert again.report.report_id == result.report.report_id
+    assert again.report.events == result.report.events
+    # The provenance is part of the report's identity.
+    plain = run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO)
+    assert plain.report.report_id != result.report.report_id
+    # K. And none of it touches score v0 or any outcome.
+    score_side = {"score", "rank", "confidence", "features", "explanation", "ranked_count"}
+    for without, with_events in zip(plain.snapshots, result.snapshots, strict=True):
+        assert without.model_dump(include=score_side) == with_events.model_dump(include=score_side)
+    assert plain.report.strategies == result.report.strategies
+    assert plain.report.overall == result.report.overall
+    assert plain.report.label_set_hash != "" and [
+        (item.realized_uplift_72h, item.movement_24h) for item in plain.labels
+    ] == [(item.realized_uplift_72h, item.movement_24h) for item in result.labels]
+
+
+def test_coverage_alone_is_provenance(tmp_path: Path) -> None:
+    catalogue, report = recording({"alpha": steady(85), "beta": steady(85)})
+    store = coverage_only_store(tmp_path, catalogue, 47, 54, 61, 68, 75)
+    assert store.observations() == ()
+    result = run_backtest(
+        catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store, **SYNTHETIC_USE
+    )
+    events = result.report.events
+    # J. No event was ever observed, and the source is still on record as used.
+    assert events.event_sources_used == (SYNTHETIC_EVENT_SOURCE,)
+    assert events.real_event_history is False
+    assert events.snapshots_with_event_intelligence > 0
+    assert events.snapshots_with_positive_event_heat == 0
+    covered = [s for s in result.snapshots if s.events.availability == "available"]
+    assert covered and all(s.events.event_heat == 0 for s in covered)
+    assert {s.slug for s in covered} == {"alpha"}
+    # A report cannot say its snapshots carried event intelligence and name no source.
+    for claim in (
+        {"event_sources_used": ()},
+        {
+            "event_sources_used": (),
+            "snapshots_with_event_intelligence": 0,
+            "real_event_history": True,
+        },
+        {"event_sources_used": ("b", "a")},
+        {"event_sources_used": ("a", "a")},
+        {"snapshots_with_positive_event_heat": events.snapshots_with_event_intelligence + 1},
+    ):
+        with pytest.raises(ValidationError):
+            type(events).model_validate({**events.model_dump(), **claim})
+    with pytest.raises(ValidationError, match="no event source is named"):
+        build_report(
+            list(result.pairs),
+            RULES,
+            PROTOCOL,
+            EVENT_HEAT_RULES_V1.version,
+            result.report.leakage_checks,
+            real_event_history=False,
+            data_through=result.report.data_through,
+            created_at=WHEN,
+        )
+
+
+def bundle_with(
+    report: ValidationReport | None,
+    events: EventInputs | None,
+    stage: DeploymentStage = DeploymentStage.PRIVATE_DEVELOPMENT,
+) -> ArtifactBundle:
+    catalogue, recording_, _ = real_recording()
+    with replay_client(RECORDINGS) as client:
+        registry = default_registry(client)
+        registry.stage = stage
+        return build_bundle(
+            catalogue, recording_, assess(catalogue, recording_), registry, RUN_TIME, events, report
+        )
+
+
+def test_a_report_that_used_an_event_source_carries_its_policy_into_the_bundle(
+    tmp_path: Path, fixture_backtest: BacktestResult
+) -> None:
+    catalogue, recording_, lags = real_recording()
+    minecraft = next(game for game in catalogue.games if game.slug == "minecraft")
+    store = EventStore(tmp_path / "events")
+    store.record_checks(
+        [
+            CoverageCheck(
+                canonical_game_id=minecraft.canonical_game_id,
+                source=SYNTHETIC_EVENT_SOURCE,
+                checked_at=datetime(2026, 9, 1, tzinfo=UTC),
+            )
+        ]
+    )
+    used = run_backtest(
+        catalogue,
+        recording_,
+        FIRST_PREDICTION,
+        LAST_PREDICTION,
+        RUN_TIME,
+        lags,
+        event_store=store,
+        **SYNTHETIC_USE,
+    )
+    report = used.report
+    assert report.events.event_sources_used == (SYNTHETIC_EVENT_SOURCE,)
+    policies = synthetic_event_policies()
+
+    # G. The run itself has no event data at all. The report alone makes the bundle private.
+    no_current_events = EventInputs(source_policies=policies)
+    assert not no_current_events.records and not no_current_events.checks
+    private = bundle_with(report, no_current_events)
+    assert private.manifest.distribution == "private_development_only"
+    (restricted,) = private.manifest.restricted_sources
+    assert restricted.source == SYNTHETIC_EVENT_SOURCE
+    assert restricted.cleared_stages == ("private_development",)
+    published = private.validation.report
+    assert published is not None
+    assert published.events.event_sources_used == (SYNTHETIC_EVENT_SOURCE,)
+    assert published.events.real_event_history is False
+    assert published.events.snapshots_with_positive_event_heat == 0
+    assert all(g.event_intelligence.availability == "unavailable" for g in private.games.values())
+    # The same report with no policy to answer for it cannot be published as internal.
+    for events in (None, EventInputs(), EventInputs(source_policies={})):
+        with pytest.raises(SourcePolicyError, match=f"{SYNTHETIC_EVENT_SOURCE}: no source policy"):
+            bundle_with(report, events)
+    with pytest.raises(SourcePolicyError, match="no source policy"):
+        bundle_with(
+            report, EventInputs(source_policies=synthetic_event_policies("synthetic_other"))
+        )
+    # And at any stage the policy does not clear, it is refused.
+    for stage in (
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+        DeploymentStage.COMMERCIAL_PRODUCTION,
+    ):
+        with pytest.raises(SourcePolicyError, match=SYNTHETIC_EVENT_SOURCE):
+            bundle_with(report, no_current_events, stage)
+
+    # I. No historical event source and no current one: the ordinary internal bundle.
+    plain_report = fixture_backtest.report
+    assert plain_report.events.event_sources_used == ()
+    for events in (None, EventInputs()):
+        ordinary = bundle_with(plain_report, events)
+        assert ordinary.manifest.distribution == "internal"
+        assert ordinary.manifest.restricted_sources == ()
+    assert bundle_with(plain_report, None, DeploymentStage.PUBLIC_LAUNCH).manifest.distribution == (
+        "internal"
+    )
+    # Coverage made no difference to any prediction's score or to any outcome.
+    assert report.snapshot_set_hash != plain_report.snapshot_set_hash  # snapshots carry it
+    assert report.strategies == plain_report.strategies
+    assert report.overall == plain_report.overall
+
+    # Published, the validator holds the same line from the outside.
+    root = tmp_path / "artifacts"
+    publish_bundle(private, root)
+    manifest = validate_published(root)
+    assert manifest.schema_version == "1.5.0"
+    original = (root / "manifest.json").read_text()
+    document = json.loads(original)
+    document["distribution"], document["restricted_sources"] = "internal", []
+    (root / "manifest.json").write_text(json.dumps(document, indent=2) + "\n")
+    with pytest.raises(
+        ArtifactValidationError, match=f"{SYNTHETIC_EVENT_SOURCE} appear in the bundle"
+    ):
+        validate_published(root)
+    (root / "manifest.json").write_text(original)
+    version = root / manifest.version_path
+    body = (version / "validation.json").read_text()
+    for path in (version / "validation.json", root / "validation.json"):
+        tampered = json.loads(body)
+        tampered["report"]["events"]["event_sources_used"] = []
+        path.write_text(json.dumps(tampered, indent=2) + "\n")
+    with pytest.raises(ArtifactValidationError, match="names no event source"):
+        validate_published(root)
+
+
+def test_the_no_event_fixture_backtest_is_exactly_what_it_was(
+    fixture_backtest: BacktestResult,
+) -> None:
+    """Provenance was added around the backtest; no prediction or outcome moved."""
+    report = fixture_backtest.report
+    # The same records as before provenance existed, by their content hashes.
+    assert report.snapshot_set_hash == (
+        "8a0f192d11aac11fd92d37736598cb3cd7ea130c253c84cac5efeb86770ee748"
+    )
+    assert report.label_set_hash == (
+        "6b8aa3ce15dbe68977bf1bd68778d4ed65f0e2cfd704a94af7adf70d182cabdf"
+    )
+    assert report.format == "validation_report_v3"
+    assert report.events.event_sources_used == ()
+    assert report.events.real_event_history is False
+    assert report.events.snapshots_with_event_intelligence == 0
+    assert report.events.snapshots_with_positive_event_heat == 0
+    assert "Real event backtesting is unavailable" in report.events.note
+    assert report.evidence.status is EvidenceStatus.FRAMEWORK_ONLY
+
+
+def test_a_report_from_before_provenance_is_kept_and_never_read_as_current(
+    tmp_path: Path, fixture_backtest: BacktestResult
+) -> None:
+    store = AccountabilityStore(tmp_path)
+    store.add_report(fixture_backtest.report)
+    reports = tmp_path / STORE_GENERATION / "reports"
+    # An earlier report: the same thing without the provenance fields.
+    older = json.loads(fixture_backtest.report.model_dump_json())
+    older["format"] = "validation_report_v2"
+    older["report_id"] = "report_" + "1" * 32
+    del older["events"]["event_sources_used"]
+    del older["events"]["snapshots_with_positive_event_heat"]
+    older["created_at"] = "2027-01-01T00:00:00Z"  # newer by the clock, older by format
+    old_path = reports / f"{older['report_id']}.json"
+    old_path.write_text(json.dumps(older, indent=2) + "\n")
+    before = old_path.read_bytes()
+    # It cannot say which event sources it used, so it is not offered for publication.
+    assert [r.report_id for r in store.reports()] == [fixture_backtest.report.report_id]
+    assert store.latest_report() == fixture_backtest.report
+    assert old_path.read_bytes() == before  # kept, untouched
+    # A current-format report that is broken is still corruption, not silently skipped.
+    (reports / "report_broken.json").write_text('{"format": "validation_report_v3"}\n')
+    with pytest.raises(StorageCorruptionError):
+        store.reports()
 
 
 # --- outcomes: exact definitions and boundaries ---------------------------------------
@@ -1473,7 +1878,7 @@ def test_validation_is_published_through_the_artifact_contract(
 ) -> None:
     root = publish(tmp_path, fixture_backtest.report)
     manifest = validate_published(root)
-    assert manifest.schema_version == SCHEMA_VERSION == "1.4.0"
+    assert manifest.schema_version == SCHEMA_VERSION == "1.5.0"
     assert manifest.artifacts.validation == f"{manifest.version_path}/validation.json"
     document = json.loads((root / "validation.json").read_text())
     schema = json.loads((REPO / "schemas" / "validation.schema.json").read_text())
@@ -1641,6 +2046,7 @@ def test_the_backtest_command_runs_offline_and_writes_the_store(
     assert "EVIDENCE STATUS: framework_only" in output
     assert "Leakage checks passed: 5 of 5" in output
     assert "Real event backtesting is unavailable" in output
+    assert "Event sources used by the backtest: none" in output
     assert "+915 snapshots, +915 labels" in output
     for strategy in STRATEGIES:
         assert strategy in output

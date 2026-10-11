@@ -123,6 +123,10 @@ def validate_published(root: Path) -> Manifest:
         game = read_artifact(root / relative, GameArtifact)
         used.update(game.event_intelligence.coverage_sources)
         used.update(name for item in game.event_intelligence.contributions for name in item.sources)
+    history = read_artifact(version_dir / VALIDATION_FILE, ValidationArtifact).report
+    if history is not None:
+        # A backtest's event sources are in the bundle as surely as the run's own.
+        used.update(history.events.event_sources_used)
     undeclared = sorted(used - named - public_sources)
     _require(
         not undeclared,
@@ -292,6 +296,22 @@ def _validate_history(validation: ValidationArtifact) -> None:
             all(item.met == (item.actual >= item.required) for item in check.requirements),
             "an evidence requirement is marked against its own numbers",
         )
+    events = report.events
+    _require(
+        list(events.event_sources_used) == sorted(set(events.event_sources_used)),
+        "the backtest's event sources are not a sorted set",
+    )
+    _require(
+        events.snapshots_with_positive_event_heat
+        <= events.snapshots_with_event_intelligence
+        <= report.recommendations,
+        "the backtest's event counts do not add up",
+    )
+    _require(
+        bool(events.event_sources_used)
+        or not (events.real_event_history or events.snapshots_with_event_intelligence),
+        "the backtest carried event intelligence but names no event source",
+    )
     _require(
         all(check.passed for check in report.leakage_checks) and bool(report.leakage_checks),
         "a leakage check did not pass",

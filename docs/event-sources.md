@@ -109,6 +109,15 @@ Unknown stays unknown. Nothing here was read as a yes.
   coverage check in the bundle is attributed to must be either named as restricted or
   described on source-health as cleared for public launch.
 
+- **A historical backtest** is held to the same gate, by the same function
+  (`event_sources/gate.py::require_event_source`). If a record or a coverage check from
+  a source is visible to any simulated prediction, that source needs a policy clearing
+  the stated stage, and neither the policy nor the stage has a default. The validation
+  report records the sources its predictions actually saw (`events.event_sources_used`),
+  and the build gates those names with the run's own: a report that used a restricted
+  source cannot enter a bundle marked `internal`. See
+  [historical-validation.md](historical-validation.md).
+
 Tests invent events, and invented events go through the same gate: `tests/
 synthetic_policy.py` holds a test-only policy (named `synthetic_...`, cleared for
 private development alone, in no runtime registry, with no endpoint). There is no
@@ -330,7 +339,7 @@ posts: an event is unavailable before it was seen and counted after, and score v
 identical with and without it. That proves the plumbing and nothing about prediction.
 Evidence status remains `framework_only`.
 
-## In the artifacts (contract 1.4.0, internal)
+## In the artifacts (contract 1.5.0, internal)
 
 - `source-health.json` gains `event_sources`: per source, its status (`not_collected`
   or `collected`), every stage clearance, checks made, games checked, posts observed,
@@ -338,6 +347,7 @@ Evidence status remains `framework_only`.
   event types, checks made after the evaluation moment, and a row per game. **Counts
   only**: no title, reference or text of a post.
 - `manifest.json` gains `distribution` and `restricted_sources`.
+- `validation.json`'s report names the event sources its backtest used (1.5.0).
 - Radar and game artifacts are unchanged in shape. They hold promoted events only.
 
 The developer interface shows the event source on the Sources page and the

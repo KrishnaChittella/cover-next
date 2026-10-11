@@ -16,6 +16,7 @@ from metaspike.domain.observations import TimeSeries
 from metaspike.domain.signals import CollectionStatus, Signal
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.timeseries import Granularity
+from metaspike.event_sources.gate import require_event_source
 from metaspike.event_sources.summary import EventSourceSummary
 from metaspike.events.heat import EventIntelligence
 from metaspike.events.model import CoverageCheck, EventRecord
@@ -168,7 +169,7 @@ def build_bundle(
     # assessments are already fixed above, from attention alone.
     inputs = events or EventInputs()
     as_of = inputs.as_of or event_as_of(report)
-    restricted = _restricted_event_sources(inputs, registry.stage)
+    restricted = _restricted_event_sources(inputs, registry.stage, validation)
     intelligence = assess_catalogue(catalogue, inputs.records, inputs.checks, as_of, inputs.rules)
 
     drafts = {
@@ -237,7 +238,7 @@ def build_bundle(
 
 
 def _restricted_event_sources(
-    inputs: EventInputs, stage: DeploymentStage
+    inputs: EventInputs, stage: DeploymentStage, validation: ValidationReport | None = None
 ) -> tuple[RestrictedSourceView, ...]:
     """Refuse event data the bundle's stage does not clear; name what is private-only.
 
@@ -249,6 +250,11 @@ def _restricted_event_sources(
     Fail closed: a used source with no policy stops the build, whether the mapping is
     missing, empty, or lacks only that source. Nothing about a source's name or the
     caller exempts it.
+
+    A source is used by the bundle in two ways, and both are held to the same policies:
+    by the run's own event intelligence, and by a backtest report whose historical
+    predictions saw that source's events or coverage. A report that used a restricted
+    source makes the bundle private even when the run itself has no event data.
     """
     used = {source for record in inputs.records for source in record.sources}
     used.update(check.source for check in inputs.checks)
@@ -258,19 +264,12 @@ def _restricted_event_sources(
         for summary in inputs.source_summaries
         if summary.collected or summary.fetches_after_as_of
     )
+    if validation is not None:
+        used.update(validation.events.event_sources_used)
     policies: Mapping[str, SourcePolicy] = inputs.source_policies or {}
     restricted = []
     for source in sorted(used):
-        policy = policies.get(source)
-        if policy is None:
-            raise SourcePolicyError(f"{source}: no source policy for this event source")
-        if policy.source != source:
-            raise SourcePolicyError(
-                f"{source}: the policy given for this event source is for '{policy.source}'"
-            )
-        refusal = policy.registration_refusal(SourcePurpose.EVENT_INTELLIGENCE, stage)
-        if refusal is not None:
-            raise SourcePolicyError(f"{source}: {refusal}")
+        policy = require_event_source(source, policies, stage, "an artifact bundle")
         public = policy.clearance(DeploymentStage.PUBLIC_LAUNCH)
         if not public.cleared:
             restricted.append(

@@ -26,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "1.5.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
@@ -757,8 +757,14 @@ class LeakageCheckView(ContractModel):
 
 
 class EventBacktestView(ContractModel):
+    # At least one event observation was visible to at least one prediction.
     real_event_history: bool
+    # Snapshots with event coverage (a source had looked), heat 0 included.
     snapshots_with_event_intelligence: int = Field(ge=0)
+    snapshots_with_positive_event_heat: int = Field(ge=0)
+    # The event sources whose data was visible to at least one prediction. Each must be
+    # cleared for the bundle this report is published in; see the manifest.
+    event_sources_used: tuple[str, ...]
     note: str
 
 

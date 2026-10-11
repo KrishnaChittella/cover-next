@@ -158,7 +158,7 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 175 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 179 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
 confidence formatting, history gaps staying gaps, event intelligence in its

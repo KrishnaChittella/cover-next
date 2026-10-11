@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.4.0",
+  "schema_version": "1.5.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T20:57:04.040769Z",
-  "run_id": "20261011T205704Z-c082f8f4",
+  "generated_at": "2026-10-11T22:06:24.937085Z",
+  "run_id": "20261011T220624Z-8234587f",
   "score_version": "metaspike_score_v0",
   "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply.",
   "expected_latest_day": "2026-10-03",
@@ -37,7 +37,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/minecraft.json"
     },
     {
@@ -66,7 +66,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/gta-vi.json"
     },
     {
@@ -95,7 +95,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/escape-from-tarkov.json"
     },
     {
@@ -124,7 +124,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/gta-v.json"
     },
     {
@@ -153,7 +153,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/no-mans-sky.json"
     },
     {
@@ -182,7 +182,7 @@
         }
       ],
       "as_of_day": "2026-10-03",
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/star-citizen.json"
     }
   ],
@@ -205,7 +205,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/baldurs-gate-3.json"
     },
     {
@@ -226,7 +226,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/counter-strike-2.json"
     },
     {
@@ -247,7 +247,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/dota-2.json"
     },
     {
@@ -268,7 +268,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/elden-ring.json"
     },
     {
@@ -289,7 +289,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/fivem.json"
     },
     {
@@ -310,7 +310,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/fortnite.json"
     },
     {
@@ -331,7 +331,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/gta-online.json"
     },
     {
@@ -352,7 +352,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/helldivers-2.json"
     },
     {
@@ -373,7 +373,7 @@
           "attribution": null
         }
       ],
-      "updated_at": "2026-10-11T20:57:04.040769Z",
+      "updated_at": "2026-10-11T22:06:24.937085Z",
       "artifact_path": "games/rust.json"
     }
   ]

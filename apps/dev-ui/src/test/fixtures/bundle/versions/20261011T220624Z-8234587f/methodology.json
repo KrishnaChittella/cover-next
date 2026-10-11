@@ -1,8 +1,8 @@
 {
-  "schema_version": "1.4.0",
+  "schema_version": "1.5.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T20:57:04.040769Z",
-  "run_id": "20261011T205704Z-c082f8f4",
+  "generated_at": "2026-10-11T22:06:24.937085Z",
+  "run_id": "20261011T220624Z-8234587f",
   "score_version": "metaspike_score_v0",
   "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply.",
   "score": {

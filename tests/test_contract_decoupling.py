@@ -149,4 +149,4 @@ def test_every_artifact_and_schema_is_marked_internal(artifacts_dir: Path) -> No
         assert schema["properties"]["contract_status"]["const"] == "internal"
         assert "INTERNAL" in schema["properties"]["contract_status"]["description"]
     assert "INTERNAL / NON-BINDING" in (artifacts.__doc__ or "")
-    assert artifacts.SCHEMA_VERSION == "1.4.0"  # 1.1 events, 1.2 validation, 1.3 lag-safe
+    assert artifacts.SCHEMA_VERSION == "1.5.0"  # 1.1 events, 1.2 validation, 1.3 lag-safe

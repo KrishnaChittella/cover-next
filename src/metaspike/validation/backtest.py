@@ -22,7 +22,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 from metaspike.domain.games import Catalogue
+from metaspike.domain.source_policy import DeploymentStage, SourcePolicy
 from metaspike.domain.timeseries import start_of_day
+from metaspike.event_sources.gate import require_event_source
 from metaspike.events.model import CoverageCheck, EventRecord
 from metaspike.events.rules import EVENT_HEAT_RULES_V1, EventHeatRules
 from metaspike.events.store import EventStore
@@ -123,12 +125,21 @@ def run_backtest(
     outcome_rules: OutcomeRules = OUTCOME_RULES_V1,
     protocol: ValidationProtocol = VALIDATION_PROTOCOL_V1,
     event_rules: EventHeatRules = EVENT_HEAT_RULES_V1,
+    event_source_policies: Mapping[str, SourcePolicy] | None = None,
+    stage: DeploymentStage | None = None,
 ) -> BacktestResult:
     """Walk forward over prediction days `[first_day, last_day]` and report.
 
     Deterministic and offline. `publication_lag` is required: there is no default,
     because assuming a source publishes sooner than it does is exactly the leak this
     exists to prevent.
+
+    Event data is used only under policy. If an event record or a coverage check from
+    a source is visible to any prediction, that source must have a policy in
+    `event_source_policies` that clears `stage` for event intelligence, or the backtest
+    stops before that event intelligence enters a snapshot. Neither has a default: with
+    no stage or no policy, visible event data is refused. When nothing is ever visible,
+    neither is needed. The sources actually used are recorded in the report.
     """
     history = RecordedHistory(recording, publication_lag)
     days = days_between(first_day, last_day)
@@ -142,10 +153,19 @@ def run_backtest(
     # --- prediction side: nothing below may see what a source had not published -------
     by_day: dict[date, tuple[RecommendationSnapshot, ...]] = {}
     series_checked = 0
+    event_sources_used: set[str] = set()
+    event_records_seen = False
     for day in days:
         inputs = history.inputs_at(prediction_moment(day))
         series_checked += ensure_available(inputs)
         records, checks = _events_at(event_store, inputs.as_of)
+        visible = {source for record in records for source in record.sources}
+        visible.update(check.source for check in checks)
+        for source in sorted(visible - event_sources_used):
+            # Before any of it reaches a snapshot.
+            require_event_source(source, event_source_policies, stage, "a historical backtest")
+        event_sources_used |= visible
+        event_records_seen = event_records_seen or bool(records)
         by_day[day] = predict(catalogue, inputs, created_at, records, checks, event_rules)
     snapshots = tuple(snapshot for day in days for snapshot in by_day[day])
 
@@ -261,15 +281,15 @@ def run_backtest(
         ),
     )
     pairs: Sequence[Pair] = tuple(zip(snapshots, labels, strict=True))
-    real_events = event_store is not None and bool(event_store.observations())
     report = build_report(
         pairs,
         outcome_rules,
         protocol,
         event_rules.version,
         leakage_checks,
-        real_event_history=real_events,
+        real_event_history=event_records_seen,
         data_through=history.last_day,
         created_at=created_at,
+        event_sources_used=sorted(event_sources_used),
     )
     return BacktestResult(snapshots=snapshots, labels=labels, report=report)

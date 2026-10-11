@@ -16,6 +16,7 @@ never read as current results.
 """
 
 import hashlib
+import json
 from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
@@ -25,10 +26,23 @@ from pydantic import ValidationError
 from metaspike.storage.base import StorageCorruptionError
 from metaspike.validation.metrics import prediction_day
 from metaspike.validation.outcomes import OutcomeLabel
-from metaspike.validation.report import ValidationReport, set_hash
+from metaspike.validation.report import REPORT_FORMAT, ValidationReport, set_hash
 from metaspike.validation.snapshot import RecommendationSnapshot
 
 STORE_GENERATION = "point-in-time-v2"
+
+
+def _is_current(body: bytes) -> bool:
+    """Whether a stored report is in the format this code writes.
+
+    A report in an earlier format stays on disk and is never read as a current result.
+    In particular, one written before reports recorded their event sources cannot say
+    which sources it used, so it must not be published as though it used none.
+    """
+    try:
+        return bool(json.loads(body).get("format") == REPORT_FORMAT)
+    except (ValueError, AttributeError):
+        return True  # not even JSON: let validation report it as corruption
 
 
 class AccountabilityStore:
@@ -125,8 +139,9 @@ class AccountabilityStore:
             return ()
         try:
             loaded = [
-                ValidationReport.model_validate_json(path.read_bytes())
-                for path in sorted(directory.glob("report_*.json"))
+                ValidationReport.model_validate_json(body)
+                for body in (path.read_bytes() for path in sorted(directory.glob("report_*.json")))
+                if _is_current(body)
             ]
         except ValidationError as error:
             raise StorageCorruptionError(f"a stored report is unreadable: {error}") from None

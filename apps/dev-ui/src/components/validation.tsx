@@ -484,10 +484,21 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
           <p className="eyebrow text-info">
             {report.events.real_event_history ? "Event history present" : "Event backtesting unavailable"}
           </p>
+          <p data-testid="event-sources-used" className="mt-1.5 max-w-4xl text-sm text-ink">
+            {report.events.event_sources_used.length > 0 ? (
+              <>
+                Event sources used:{" "}
+                <span className="font-mono text-xs">{report.events.event_sources_used.join(", ")}</span>
+              </>
+            ) : (
+              "No event source took part: no historical prediction saw an event or an event-source check."
+            )}
+          </p>
           <p className="mt-1.5 max-w-4xl text-sm text-ink-soft">{report.events.note}</p>
           <p className="num mt-1.5 text-xs text-muted">
             Snapshots that carried event intelligence: {formatCount(report.events.snapshots_with_event_intelligence)} of{" "}
-            {formatCount(report.recommendations)}. Rules: <span className="font-mono">{report.event_rules_version}</span>.
+            {formatCount(report.recommendations)}; with a heat above 0:{" "}
+            {formatCount(report.events.snapshots_with_positive_event_heat)}. Rules: <span className="font-mono">{report.event_rules_version}</span>.
           </p>
         </aside>
       </Section>
