@@ -1,5 +1,6 @@
 """Validate artifacts as written on disk, against the contract and against each other."""
 
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -219,6 +220,43 @@ def _validate_history(validation: ValidationArtifact) -> None:
     _require(
         all(check.passed for check in report.leakage_checks) and bool(report.leakage_checks),
         "a leakage check did not pass",
+    )
+    _require(
+        any(check.name == "source_publication_lag_respected" for check in report.leakage_checks),
+        "the source publication lag was not checked",
+    )
+    # Point-in-time: nothing a recommendation saw may be newer than its source had
+    # published by then, and nothing it is judged on may start before it was made.
+    _require(bool(report.publication_lag_hours), "no source publication lag is stated")
+    _require(
+        all(hours >= 0 for hours in report.publication_lag_hours.values()),
+        "a source publication lag is negative",
+    )
+    shortest = timedelta(hours=min(report.publication_lag_hours.values()))
+    _require(
+        report.first_prediction_day <= report.last_prediction_day
+        and report.first_latest_due_day <= report.last_latest_due_day
+        and report.first_latest_due_day < report.first_prediction_day
+        and report.last_latest_due_day < report.last_prediction_day,
+        "the newest visible day is not before the day of the recommendation",
+    )
+    for day in report.inspection:
+        published = datetime.combine(day.latest_due_day, time(), UTC) + timedelta(days=1)
+        _require(
+            day.as_of.astimezone(UTC).date() == day.day and published + shortest <= day.as_of,
+            f"{day.day}: the newest visible day had not been published at the recommendation",
+        )
+        _require(
+            datetime.combine(day.primary_window_start, time(), UTC) >= day.as_of
+            and day.primary_window_start <= day.primary_window_end,
+            f"{day.day}: the outcome window does not start after the recommendation",
+        )
+    _require(
+        all(
+            len(value) == 64 and all(character in "0123456789abcdef" for character in value)
+            for value in (report.snapshot_set_hash, report.label_set_hash)
+        ),
+        "a provenance hash is not a SHA-256 digest",
     )
 
 

@@ -139,6 +139,21 @@
           "title": "Day",
           "type": "string"
         },
+        "latest_due_day": {
+          "format": "date",
+          "title": "Latest Due Day",
+          "type": "string"
+        },
+        "primary_window_end": {
+          "format": "date",
+          "title": "Primary Window End",
+          "type": "string"
+        },
+        "primary_window_start": {
+          "format": "date",
+          "title": "Primary Window Start",
+          "type": "string"
+        },
         "ranked": {
           "items": {
             "$ref": "#/$defs/InspectionEntryView"
@@ -157,6 +172,9 @@
       "required": [
         "day",
         "as_of",
+        "latest_due_day",
+        "primary_window_start",
+        "primary_window_end",
         "ranked",
         "unranked"
       ],
@@ -768,9 +786,14 @@
         "evidence": {
           "$ref": "#/$defs/EvidenceView"
         },
-        "first_snapshot_day": {
+        "first_latest_due_day": {
           "format": "date",
-          "title": "First Snapshot Day",
+          "title": "First Latest Due Day",
+          "type": "string"
+        },
+        "first_prediction_day": {
+          "format": "date",
+          "title": "First Prediction Day",
           "type": "string"
         },
         "format": {
@@ -800,9 +823,18 @@
           "title": "Inspection Truncated",
           "type": "boolean"
         },
-        "last_snapshot_day": {
+        "label_set_hash": {
+          "title": "Label Set Hash",
+          "type": "string"
+        },
+        "last_latest_due_day": {
           "format": "date",
-          "title": "Last Snapshot Day",
+          "title": "Last Latest Due Day",
+          "type": "string"
+        },
+        "last_prediction_day": {
+          "format": "date",
+          "title": "Last Prediction Day",
           "type": "string"
         },
         "lead_time": {
@@ -850,6 +882,13 @@
           "title": "Protocol Version",
           "type": "string"
         },
+        "publication_lag_hours": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Publication Lag Hours",
+          "type": "object"
+        },
         "ranked": {
           "title": "Ranked",
           "type": "integer"
@@ -877,6 +916,10 @@
           "title": "Snapshot Dates",
           "type": "integer"
         },
+        "snapshot_set_hash": {
+          "title": "Snapshot Set Hash",
+          "type": "string"
+        },
         "strategies": {
           "items": {
             "$ref": "#/$defs/StrategyResultView"
@@ -900,9 +943,14 @@
         "outcome_rules_version",
         "score_version",
         "event_rules_version",
-        "first_snapshot_day",
-        "last_snapshot_day",
+        "first_prediction_day",
+        "last_prediction_day",
+        "first_latest_due_day",
+        "last_latest_due_day",
+        "publication_lag_hours",
         "data_through",
+        "snapshot_set_hash",
+        "label_set_hash",
         "snapshot_dates",
         "universe_size",
         "games_ranked",

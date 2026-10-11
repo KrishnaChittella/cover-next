@@ -1,13 +1,15 @@
 {
-  "schema_version": "1.2.0",
+  "schema_version": "1.3.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T04:51:44.105207Z",
-  "run_id": "20261011T045144Z-036d3eb9",
+  "generated_at": "2026-10-11T19:48:47.101275Z",
+  "run_id": "20261011T194847Z-a687df83",
   "score_version": "metaspike_score_v0",
-  "canonical_game_id": "0ace3a7a-a923-4f5b-9e9a-fc8a88e8c1c9",
-  "slug": "dota-2",
-  "name": "Dota 2",
-  "aliases": [],
+  "canonical_game_id": "cc600051-5a1b-458f-8cd0-cf1324bc44df",
+  "slug": "counter-strike-2",
+  "name": "Counter-Strike 2",
+  "aliases": [
+    "CS2"
+  ],
   "lifecycle_state": "LIVE_SERVICE",
   "relationships": [],
   "rank": null,
@@ -71,5 +73,5 @@
     "path": "methodology.json",
     "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
   },
-  "updated_at": "2026-10-11T04:51:44.105207Z"
+  "updated_at": "2026-10-11T19:48:47.101275Z"
 }

@@ -26,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "1.3.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
@@ -726,8 +726,13 @@ class InspectionUnrankedView(ContractModel):
 
 
 class InspectionDayView(ContractModel):
+    # The UTC day the recommendation was simulated on, and the exact moment.
     day: date
     as_of: AwareDatetime
+    # The newest demand day that could be seen at that moment.
+    latest_due_day: date
+    primary_window_start: date
+    primary_window_end: date
     ranked: tuple[InspectionEntryView, ...]
     unranked: tuple[InspectionUnrankedView, ...]
 
@@ -739,9 +744,15 @@ class ValidationReportView(ContractModel):
     outcome_rules_version: str
     score_version: str
     event_rules_version: str
-    first_snapshot_day: date
-    last_snapshot_day: date
+    first_prediction_day: date
+    last_prediction_day: date
+    first_latest_due_day: date
+    last_latest_due_day: date
+    publication_lag_hours: dict[str, float]
     data_through: date
+    # Exactly which records the report summarises: SHA-256 over their sorted ids.
+    snapshot_set_hash: str
+    label_set_hash: str
     snapshot_dates: int
     universe_size: int
     games_ranked: int

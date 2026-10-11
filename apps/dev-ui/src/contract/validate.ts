@@ -23,7 +23,7 @@ const SCHEMAS: Record<ArtifactKind, object> = {
 };
 
 // The contract version this build of the UI was generated from.
-export const SUPPORTED_SCHEMA_VERSION = "1.2.0";
+export const SUPPORTED_SCHEMA_VERSION = "1.3.0";
 
 let ajv: Ajv2020 | null = null;
 const compiled = new Map<ArtifactKind, ValidateFunction>();
@@ -115,6 +115,24 @@ export function validationViolations(validation: ValidationArtifact): Violation[
   }
   if (report.leakage_checks.length === 0 || report.leakage_checks.some((check) => !check.passed)) {
     found.push({ path: "/report/leakage_checks", message: "every leakage check must be present and passed" });
+  }
+  if (!report.leakage_checks.some((check) => check.name === "source_publication_lag_respected")) {
+    found.push({ path: "/report/leakage_checks", message: "the source publication lag was not checked" });
+  }
+  // Point-in-time: a recommendation sees only days before its own, and is judged only on
+  // days at or after it. ISO days compare correctly as strings.
+  report.inspection.forEach((day, index) => {
+    if (!(day.latest_due_day < day.day)) {
+      found.push({ path: `/report/inspection/${index}/latest_due_day`, message: "is not before the recommendation day" });
+    }
+    if (!(day.primary_window_start >= day.day && day.primary_window_start <= day.primary_window_end)) {
+      found.push({ path: `/report/inspection/${index}/primary_window_start`, message: "the outcome window does not follow the recommendation" });
+    }
+  });
+  for (const field of ["snapshot_set_hash", "label_set_hash"] as const) {
+    if (!/^[0-9a-f]{64}$/.test(report[field])) {
+      found.push({ path: `/report/${field}`, message: "is not a SHA-256 digest" });
+    }
   }
   return found;
 }

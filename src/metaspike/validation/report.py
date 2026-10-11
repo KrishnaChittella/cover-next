@@ -6,8 +6,9 @@ that were run for leakage. It reports what the data shows, including when that i
 nothing, or bad.
 """
 
+import hashlib
 import statistics
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import date
 
 from pydantic import AwareDatetime, Field
@@ -24,6 +25,7 @@ from metaspike.validation.metrics import (
     confidence_bands,
     evaluate_strategy,
     lead_time,
+    prediction_day,
     score_bins,
     summarise,
 )
@@ -35,7 +37,16 @@ from metaspike.validation.rules import (
 )
 from metaspike.validation.snapshot import content_id
 
-REPORT_FORMAT = "validation_report_v1"
+REPORT_FORMAT = "validation_report_v2"
+
+
+def set_hash(ids: Iterable[str]) -> str:
+    """One hash for a set of record ids: SHA-256 over the ids, sorted, one per line.
+
+    Each id is itself a hash of its record's content, so this pins the exact records
+    without carrying any of their content.
+    """
+    return hashlib.sha256("\n".join(sorted(ids)).encode("utf-8")).hexdigest()
 
 
 class Requirement(FrozenModel):
@@ -104,10 +115,16 @@ class InspectionUnranked(FrozenModel):
 
 
 class InspectionDay(FrozenModel):
-    """One past day's leaderboard, and what followed for each game on it."""
+    """One past recommendation moment's leaderboard, and what followed for each game."""
 
+    # The UTC day the recommendation was made on, and the exact moment.
     day: date
     as_of: AwareDatetime
+    # The newest demand day that could be seen at that moment.
+    latest_due_day: date
+    # The first and last day of the primary forward window.
+    primary_window_start: date
+    primary_window_end: date
     ranked: tuple[InspectionEntry, ...]
     unranked: tuple[InspectionUnranked, ...]
 
@@ -119,9 +136,18 @@ class ValidationReport(FrozenModel):
     outcome_rules_version: str
     score_version: str
     event_rules_version: str
-    first_snapshot_day: date
-    last_snapshot_day: date
+    # The UTC days recommendations were simulated on, first and last.
+    first_prediction_day: date
+    last_prediction_day: date
+    # The newest demand day visible to the first and to the last recommendation.
+    first_latest_due_day: date
+    last_latest_due_day: date
+    # Per source: how long after a period ends the source publishes it, in hours.
+    publication_lag_hours: dict[str, float]
     data_through: date
+    # Exactly which records this report summarises: hashes of their ordered ids.
+    snapshot_set_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    label_set_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     snapshot_dates: int
     universe_size: int
     games_ranked: int
@@ -251,6 +277,9 @@ def _inspection(pairs: Sequence[Pair], limit: int) -> tuple[tuple[InspectionDay,
             InspectionDay(
                 day=day,
                 as_of=day_pairs[0][0].as_of,
+                latest_due_day=day_pairs[0][0].latest_due_day,
+                primary_window_start=day_pairs[0][1].primary_window_start,
+                primary_window_end=day_pairs[0][1].primary_window_end,
                 ranked=tuple(
                     InspectionEntry(
                         rank=snapshot.rank or 0,
@@ -313,7 +342,12 @@ def build_report(
         if outcome.availability is OutcomeAvailability.UNAVAILABLE and outcome.unavailable_reason:
             reason = outcome.unavailable_reason.value
             unavailable[reason] = unavailable.get(reason, 0) + 1
-    days = sorted({snapshot.data_cutoff_day for snapshot in snapshots})
+    days = sorted({prediction_day(snapshot) for snapshot in snapshots})
+    lags = {
+        snapshot.scored_signal.source: snapshot.publication_lag_hours
+        for snapshot in snapshots
+        if snapshot.scored_signal is not None
+    }
     games_with_outcome = len(
         {s.canonical_game_id for s, o in ranked if o.realized_uplift_72h is not None}
     )
@@ -327,8 +361,13 @@ def build_report(
         "continued, not whether a creator would have gained anything.",
         "Readership of an encyclopedia article is a proxy for demand. It is not views, "
         "players, search interest or creator supply.",
-        "Point in time is by day: a value is taken as known once its day has ended. A "
-        "recording made afterwards cannot show values the source later revised.",
+        "A value is taken as visible once its source would have published it, under the "
+        "source's stated publication lag. That lag is a policy figure, not a measured "
+        "publication time, and a recording made afterwards cannot show values the "
+        "source later revised.",
+        "Recommendations are simulated once a day, at 00:00 UTC. With a one-day lag the "
+        "day that has just ended is not yet visible, so each recommendation rests on "
+        "data two days old, and that unseen day is in neither the inputs nor the outcome.",
         "Outcomes on neighbouring days overlap (each uses the next three days), so the "
         "observations are not independent and the counts overstate the evidence.",
         "No confidence intervals are reported. With this sample they would imply a "
@@ -344,9 +383,14 @@ def build_report(
         "outcome_rules_version": rules.version,
         "score_version": snapshots[0].score_version,
         "event_rules_version": event_rules_version,
-        "first_snapshot_day": days[0],
-        "last_snapshot_day": days[-1],
+        "first_prediction_day": days[0],
+        "last_prediction_day": days[-1],
+        "first_latest_due_day": min(snapshot.latest_due_day for snapshot in snapshots),
+        "last_latest_due_day": max(snapshot.latest_due_day for snapshot in snapshots),
+        "publication_lag_hours": dict(sorted(lags.items())),
         "data_through": data_through,
+        "snapshot_set_hash": set_hash(snapshot.snapshot_id for snapshot in snapshots),
+        "label_set_hash": set_hash(outcome.label_id for _, outcome in pairs),
         "snapshot_dates": len(days),
         "universe_size": max(snapshot.universe_size for snapshot in snapshots),
         "games_ranked": len({snapshot.canonical_game_id for snapshot, _ in ranked}),

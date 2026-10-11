@@ -1,13 +1,18 @@
 """The accountability store: snapshots, labels and reports, local and append-only.
 
-    {root}/snapshots/{cutoff day}/{content hash}.ndjson
-    {root}/labels/{data through}/{content hash}.ndjson
-    {root}/reports/{report id}.json
+    {root}/point-in-time-v2/snapshots/{prediction day}/{content hash}.ndjson
+    {root}/point-in-time-v2/labels/{data through}/{content hash}.ndjson
+    {root}/point-in-time-v2/reports/{report id}.json
 
 Every record is identified by a hash of its content and written once. Writing it again
 adds nothing; nothing is rewritten or deleted. A label made later, with more future
 available, is a new record beside the earlier one: the earlier "unavailable" stays as
 evidence of what could be said then.
+
+Records are kept under the generation of the simulation that made them. The first
+generation, written directly under the root, let a day into a prediction before its
+source had published it; those records are left where they are, as history, and are
+never read as current results.
 """
 
 import hashlib
@@ -18,14 +23,17 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from metaspike.storage.base import StorageCorruptionError
+from metaspike.validation.metrics import prediction_day
 from metaspike.validation.outcomes import OutcomeLabel
-from metaspike.validation.report import ValidationReport
+from metaspike.validation.report import ValidationReport, set_hash
 from metaspike.validation.snapshot import RecommendationSnapshot
+
+STORE_GENERATION = "point-in-time-v2"
 
 
 class AccountabilityStore:
     def __init__(self, root: Path) -> None:
-        self._root = root
+        self._root = root / STORE_GENERATION
 
     def _append(self, area: str, by_day: dict[str, list[str]]) -> None:
         for day, lines in sorted(by_day.items()):
@@ -54,11 +62,11 @@ class AccountabilityStore:
         known = {item.snapshot_id for item in self.snapshots()}
         by_day: dict[str, list[str]] = {}
         added = 0
-        for item in sorted(snapshots, key=lambda s: (s.data_cutoff_day, s.snapshot_id)):
+        for item in sorted(snapshots, key=lambda s: (s.as_of, s.snapshot_id)):
             if item.snapshot_id in known:
                 continue
             known.add(item.snapshot_id)
-            by_day.setdefault(item.data_cutoff_day.isoformat(), []).append(item.model_dump_json())
+            by_day.setdefault(prediction_day(item).isoformat(), []).append(item.model_dump_json())
             added += 1
         self._append("snapshots", by_day)
         return added
@@ -87,7 +95,8 @@ class AccountabilityStore:
             return False
         return True
 
-    def snapshots(self, cutoff_day: date | None = None) -> tuple[RecommendationSnapshot, ...]:
+    def snapshots(self, day: date | None = None) -> tuple[RecommendationSnapshot, ...]:
+        """Stored snapshots, optionally only those whose recommendation was made on `day`."""
         try:
             loaded = [
                 RecommendationSnapshot.model_validate_json(line)
@@ -95,8 +104,8 @@ class AccountabilityStore:
             ]
         except ValidationError as error:
             raise StorageCorruptionError(f"stored snapshots are unreadable: {error}") from None
-        kept = [item for item in loaded if cutoff_day is None or item.data_cutoff_day == cutoff_day]
-        return tuple(sorted(kept, key=lambda s: (s.data_cutoff_day, s.rank or 10**9, s.slug)))
+        kept = [item for item in loaded if day is None or prediction_day(item) == day]
+        return tuple(sorted(kept, key=lambda s: (s.as_of, s.rank or 10**9, s.slug)))
 
     def labels(self) -> tuple[OutcomeLabel, ...]:
         try:
@@ -122,6 +131,39 @@ class AccountabilityStore:
         except ValidationError as error:
             raise StorageCorruptionError(f"a stored report is unreadable: {error}") from None
         return tuple(sorted(loaded, key=lambda report: (report.created_at, report.report_id)))
+
+    def audit(self, report: ValidationReport) -> tuple[str, ...]:
+        """Check that the store holds exactly the records a report was made from.
+
+        Returns what is wrong, as sentences; empty means the report's provenance hashes
+        match the stored snapshots and labels. A report names its records by the hashes
+        of their ordered ids, so a missing, extra or altered record shows here.
+        """
+        problems = []
+        snapshots = [
+            item
+            for item in self.snapshots()
+            if report.first_prediction_day <= prediction_day(item) <= report.last_prediction_day
+        ]
+        ids = {item.snapshot_id for item in snapshots}
+        if set_hash(ids) != report.snapshot_set_hash:
+            problems.append(
+                f"stored snapshots for the period ({len(ids)}) do not match the report's "
+                f"snapshot_set_hash ({report.recommendations} expected)"
+            )
+        labels = {
+            item.label_id
+            for item in self.labels()
+            if item.snapshot_id in ids
+            and item.data_through == report.data_through
+            and item.outcome_rules_version == report.outcome_rules_version
+        }
+        if set_hash(labels) != report.label_set_hash:
+            problems.append(
+                f"stored labels for the period ({len(labels)}) do not match the report's "
+                "label_set_hash"
+            )
+        return tuple(problems)
 
     def latest_report(self) -> ValidationReport | None:
         reports = self.reports()

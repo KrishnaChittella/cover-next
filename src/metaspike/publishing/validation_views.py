@@ -18,15 +18,27 @@ from metaspike.validation.report import ValidationReport
 from metaspike.validation.rules import OutcomeRules, ValidationProtocol
 
 
+def _forward_mean(days: int) -> str:
+    return "x[f]" if days == 1 else f"mean(x[f] .. x[f+{days - 1}])"
+
+
 def outcome_definition(rules: OutcomeRules) -> OutcomeDefinitionView:
+    """The outcomes in words and formulas.
+
+    Notation: P is the moment of the recommendation; f is the first whole UTC day that
+    begins at or after P; `[P]` marks a level as the recommendation knew it at P.
+    """
     return OutcomeDefinitionView(
         version=rules.version,
         terms=(
             TermView(
                 name="realized_uplift_72h (primary)",
-                formula=f"mean(x[t+1] .. x[t+{rules.primary_days}]) / baseline_median_28d[t] - 1",
+                formula=f"{_forward_mean(rules.primary_days)} / baseline_median_28d[P] - 1",
                 rationale=(
-                    "Did demand after the recommendation exceed the game's normal level as "
+                    "P is the moment of the recommendation; f is the first whole UTC day "
+                    "beginning at or after P; [P] marks a level as it was known at P, from "
+                    "the days its source had published by then. Did demand after the "
+                    "recommendation exceed the game's normal level as "
                     "it was known when the recommendation was made? Positive: above it. "
                     "Exactly 0: equal to it. Negative: below it. Never clipped. "
                     + rules.primary_rationale
@@ -34,13 +46,14 @@ def outcome_definition(rules: OutcomeRules) -> OutcomeDefinitionView:
             ),
             TermView(
                 name="movement_24h",
-                formula=f"mean(x[t+1] .. x[t+{rules.movement_days}]) / avg_3d[t] - 1",
+                formula=f"{_forward_mean(rules.movement_days)} / avg_3d[P] - 1",
                 rationale=rules.movement_rationale,
             ),
             TermView(
                 name="persistence_7d",
                 formula=(
-                    f"count(x[t+k] > baseline_median_28d[t] for k in 1..{rules.persistence_days})"
+                    "count(x[f+k] > baseline_median_28d[P] for k in "
+                    f"0..{rules.persistence_days - 1})"
                     f" / {rules.persistence_days}"
                 ),
                 rationale=rules.persistence_rationale,
@@ -48,8 +61,8 @@ def outcome_definition(rules: OutcomeRules) -> OutcomeDefinitionView:
             TermView(
                 name="lead_time_days",
                 formula=(
-                    f"smallest k in 1..{rules.peak_search_days} with x[t+k] > x[t+k-1] and "
-                    "x[t+k] >= x[t+k+1] and x[t+k] > baseline_median_28d[t]"
+                    f"1 + smallest k in 0..{rules.peak_search_days - 1} with x[f+k] > x[f+k-1] "
+                    "and x[f+k] >= x[f+k+1] and x[f+k] > baseline_median_28d[P]"
                 ),
                 rationale=rules.peak_rationale,
             ),

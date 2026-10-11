@@ -1,7 +1,9 @@
 """A recommendation snapshot: exactly what MetaSpike knew and said about one game at a
 moment. And `predict`, the only function that makes one.
 
-A snapshot is enough to audit a past recommendation by itself. It holds computed
+A snapshot is enough to audit a past recommendation by itself, including when it was
+made (`as_of`) and the newest demand day that could be seen at that moment
+(`latest_due_day`, and `latest_observed_day` for the game). It holds computed
 values and the versions that produced them, never a source's raw payload, and never
 anything about what happened next. Outcomes live in a separate object (`outcomes.py`)
 that points back at a snapshot by id.
@@ -22,16 +24,22 @@ from metaspike.domain.games import Catalogue
 from metaspike.domain.model import FrozenModel
 from metaspike.domain.scores import ConfidenceResult, Explanation, ScoreResult
 from metaspike.domain.signals import CollectionStatus, SignalKey
+from metaspike.domain.timeseries import Granularity
 from metaspike.events.heat import Availability, EventIntelligence
 from metaspike.events.intelligence import assess_events
 from metaspike.events.model import CoverageCheck, EventRecord
 from metaspike.events.rules import EVENT_HEAT_RULES_V1, EventHeatRules
 from metaspike.features.attention import AttentionFeatures
 from metaspike.pipeline.assess import GameAssessment, assess
-from metaspike.scoring.v0 import SCORE_VERSION
-from metaspike.validation.history import PredictionInputs, ensure_no_future
+from metaspike.scoring.v0 import SCORE_VERSION, V0_INPUT_SIGNAL
+from metaspike.validation.history import (
+    LeakageError,
+    PredictionInputs,
+    ensure_available,
+    latest_due_at,
+)
 
-SNAPSHOT_FORMAT = "recommendation_snapshot_v1"
+SNAPSHOT_FORMAT = "recommendation_snapshot_v2"
 
 
 class SourceCoverageAt(FrozenModel):
@@ -55,9 +63,19 @@ class EventSummaryAt(FrozenModel):
 class RecommendationSnapshot(FrozenModel):
     snapshot_id: str = Field(pattern=r"^snap_[0-9a-f]{32}$")
     format: str
-    # The moment the snapshot speaks for, and the last day of data it could see.
+    # When the recommendation was simulated.
     as_of: AwareDatetime
-    data_cutoff_day: date
+    # The last whole UTC day that had ended by `as_of`. A calendar fact: it says nothing
+    # about what data existed.
+    evaluation_day: date
+    # The newest day the score's input source had published by `as_of`, under its
+    # publication lag. Nothing later than this could be seen.
+    latest_due_day: date
+    # The newest day this game was actually observed on, among those visible. None when
+    # it had no visible observation. Never later than `latest_due_day`.
+    latest_observed_day: date | None = None
+    # How long after a day ends the input source publishes it, in hours.
+    publication_lag_hours: float = Field(ge=0)
     input_window_start: date
     input_window_end: date
     canonical_game_id: str
@@ -153,13 +171,19 @@ def predict(
     coverage_checks: Sequence[CoverageCheck] = (),
     event_rules: EventHeatRules = EVENT_HEAT_RULES_V1,
 ) -> tuple[RecommendationSnapshot, ...]:
-    """One snapshot per catalogue game, from what was known at `inputs.as_of`.
+    """One snapshot per catalogue game, from what could be seen at `inputs.as_of`.
 
-    This is the whole prediction side. It takes inputs that end at the cutoff and event
-    records as known then. It takes no outcome, no label and no future value, and there
-    is no parameter through which one could be passed.
+    This is the whole prediction side. It takes inputs holding only what each source had
+    published by the simulated moment, and event records as known then. It takes no
+    outcome, no label and no future value, and there is no parameter through which one
+    could be passed.
     """
-    ensure_no_future(inputs)
+    ensure_available(inputs)
+    source = V0_INPUT_SIGNAL.source
+    if source not in inputs.publication_lag:
+        raise ValueError(f"no publication lag is known for the score's input source {source}")
+    lag = inputs.publication_lag[source]
+    due_day = latest_due_at(inputs.as_of, Granularity.DAILY, lag).date()
     for record in event_records:
         if record.last_observed_at > inputs.as_of:
             raise ValueError("an event record carries an observation from after the snapshot")
@@ -177,7 +201,12 @@ def predict(
         fields: dict[str, object] = {
             "format": SNAPSHOT_FORMAT,
             "as_of": inputs.as_of,
-            "data_cutoff_day": inputs.cutoff_day,
+            "evaluation_day": inputs.evaluation_day,
+            "latest_due_day": due_day,
+            "latest_observed_day": (
+                None if assessment.scored_features is None else assessment.scored_features.as_of_day
+            ),
+            "publication_lag_hours": lag.total_seconds() / 3600,
             "input_window_start": window.start.date(),
             "input_window_end": window.end.date(),
             "canonical_game_id": game.canonical_game_id,
@@ -199,5 +228,8 @@ def predict(
         }
         draft = RecommendationSnapshot.model_validate({**fields, "snapshot_id": "snap_" + "0" * 32})
         identity = snapshot_id(draft.model_dump(mode="json"))
+        if draft.latest_observed_day is not None and draft.latest_observed_day > due_day:
+            # Cannot happen while `ensure_available` holds; checked again where it would show.
+            raise LeakageError(f"{game.slug}: scored on a day its source had not published")
         snapshots.append(draft.model_copy(update={"snapshot_id": identity}))
     return tuple(snapshots)

@@ -75,10 +75,16 @@ exist only for tests.
 
 ## Validation
 
-`/validation` shows a historical backtest: for each past day, what score v0 ranked
-using only data up to that day, and what each game's attention did over the next 72
-hours against the baseline known that day. `npm run data:replay` runs it offline over
-the recorded history before syncing.
+`/validation` shows a historical backtest: for each past day, what score v0 would have
+ranked at 00:00 UTC using only the days its source had published by then, and what
+each game's attention did over the three whole days that followed, against the
+baseline known at that moment. `npm run data:replay` runs it offline over the recorded
+history before syncing.
+
+The page states the timing outright: when each recommendation was simulated, the
+newest demand day it could see (two days back for a source with a one-day publication
+lag), and the days it is judged on. A compact provenance section gives the hashes of
+the exact snapshots and labels the report summarises.
 
 Read the evidence status first. With the recorded fixture (six games with history) it
 is `framework_only`: the machinery works and does not look ahead; the sample says
@@ -144,7 +150,7 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 157 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 163 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
 confidence formatting, history gaps staying gaps, event intelligence in its

@@ -48,14 +48,17 @@ export interface ValidationReportView {
   event_rules_version: string;
   events: EventBacktestView;
   evidence: EvidenceView;
-  first_snapshot_day: string;
+  first_latest_due_day: string;
+  first_prediction_day: string;
   format: string;
   games_ranked: number;
   games_with_outcome: number;
   independent_sources: number;
   inspection: InspectionDayView[];
   inspection_truncated: boolean;
-  last_snapshot_day: string;
+  label_set_hash: string;
+  last_latest_due_day: string;
+  last_prediction_day: string;
   lead_time: LeadTimeView;
   leakage_checks: LeakageCheckView[];
   limitations: string[];
@@ -68,12 +71,16 @@ export interface ValidationReportView {
     [k: string]: number;
   };
   protocol_version: string;
+  publication_lag_hours: {
+    [k: string]: number;
+  };
   ranked: number;
   recommendations: number;
   report_id: string;
   score_bins: StratumView[];
   score_version: string;
   snapshot_dates: number;
+  snapshot_set_hash: string;
   strategies: StrategyResultView[];
   universe_size: number;
   unranked: number;
@@ -121,6 +128,9 @@ export interface RequirementView {
 export interface InspectionDayView {
   as_of: string;
   day: string;
+  latest_due_day: string;
+  primary_window_end: string;
+  primary_window_start: string;
   ranked: InspectionEntryView[];
   unranked: InspectionUnrankedView[];
 }

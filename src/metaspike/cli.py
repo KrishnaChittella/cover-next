@@ -192,7 +192,12 @@ def _parser() -> argparse.ArgumentParser:
         help="the last day the recording covers",
     )
     backtest.add_argument(
-        "--from", dest="first_day", type=date.fromisoformat, required=True, metavar="YYYY-MM-DD"
+        "--from",
+        dest="first_day",
+        type=date.fromisoformat,
+        required=True,
+        metavar="YYYY-MM-DD",
+        help="first day a recommendation is simulated on, at 00:00 UTC",
     )
     backtest.add_argument(
         "--to", dest="last_day", type=date.fromisoformat, required=True, metavar="YYYY-MM-DD"
@@ -395,21 +400,30 @@ def _backtest(args: argparse.Namespace) -> int:
         raise CollectionFailedError(f"no recorded response in {args.replay} could be replayed")
     events = EventStore(args.events_dir)
     clock = perf_counter()
-    result = run_backtest(
-        catalogue,
-        recording,
-        args.first_day,
-        args.last_day,
-        created_at=started,
-        publication_lag=lags,
-        event_store=events,
-    )
+    try:
+        result = run_backtest(
+            catalogue,
+            recording,
+            args.first_day,
+            args.last_day,
+            created_at=started,
+            publication_lag=lags,
+            event_store=events,
+        )
+    except ValueError as error:  # a range the recording cannot stand in for
+        return _fail(EXIT_INVALID_CATALOGUE, f"backtest range: {error}")
     seconds = perf_counter() - clock
     store = AccountabilityStore(args.store_dir)
     new_snapshots = store.add_snapshots(result.snapshots)
     new_labels = store.add_labels(result.labels)
     new_report = store.add_report(result.report)
     _print_backtest(result.report, seconds)
+    problems = store.audit(result.report)
+    print(
+        f"\n  Provenance: snapshots {result.report.snapshot_set_hash[:16]}…, "
+        f"labels {result.report.label_set_hash[:16]}…  "
+        f"({'store matches' if not problems else '; '.join(problems)})"
+    )
     print(
         f"\nStore: {args.store_dir}  (+{new_snapshots} snapshots, +{new_labels} labels, "
         f"report {result.report.report_id} {'kept' if new_report else 'already present'})"
@@ -422,10 +436,17 @@ def _signed(value: float | None) -> str:
 
 
 def _print_backtest(report: ValidationReport, seconds: float) -> None:
+    lags = ", ".join(
+        f"{source} {hours:g} h" for source, hours in report.publication_lag_hours.items()
+    )
     print(
-        f"Backtest {report.first_snapshot_day} to {report.last_snapshot_day} "
-        f"({report.snapshot_dates} days, data through {report.data_through}), "
+        f"Backtest of recommendations made at 00:00 UTC, {report.first_prediction_day} to "
+        f"{report.last_prediction_day} ({report.snapshot_dates} days), "
         f"{report.protocol_version} / {report.outcome_rules_version} / {report.score_version}"
+    )
+    print(
+        f"  publication lag: {lags}; newest day visible {report.first_latest_due_day} to "
+        f"{report.last_latest_due_day}; data through {report.data_through}"
     )
     print(
         f"  universe {report.universe_size} games; {report.games_ranked} ever ranked; "

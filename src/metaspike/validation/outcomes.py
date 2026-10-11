@@ -1,43 +1,52 @@
-"""Outcome labels: what happened after a snapshot, measured against what it knew.
+"""Outcome labels: what happened after a recommendation, measured against what it knew.
 
-The OUTCOME side. A label is made from a frozen snapshot and the days after its
-cutoff, and from nothing else. The reference it compares with is the one inside the
-snapshot, so no baseline is ever computed from the future.
+The OUTCOME side. A label is made from a frozen snapshot and the days after the moment
+the recommendation was made, and from nothing else. The reference it compares with is
+the one inside the snapshot, so no baseline is ever computed from the future.
 
-`outcome_rules_v1`, for a daily demand signal. Let t be the snapshot's cutoff day,
-x[d] the value on day d, b the 28-day baseline median the snapshot recorded and a the
-3-day average it recorded.
+**The forward window starts at the recommendation, not at the data.** Let P be the
+snapshot's `as_of`. The first forward day, f, is the first UTC day lying wholly after
+P: the day beginning at P if P is exactly on a day boundary, otherwise the next day.
+With a publication lag the newest day the snapshot could see is earlier than P's own
+day; the days in between were unseen at P and are also not "after" it, so they belong
+to neither side.
 
-    realized_uplift_72h = mean(x[t+1], x[t+2], x[t+3]) / b - 1
-        Primary. Positive: the next three days ran above the game's known normal level.
-        Exactly 0: they averaged exactly that level. Negative: below it. Not clipped.
-        It is the snapshot's own lift measure, moved forward three days.
+`outcome_rules_v1`, for a daily demand signal. x[d] is the value on day d, b the 28-day
+baseline median the snapshot recorded and a the 3-day average it recorded.
 
-    movement_24h = x[t+1] / a - 1
-        The next day against the recent level the snapshot already knew.
+    realized_uplift_72h = mean(x[f], x[f+1], x[f+2]) / b - 1
+        Primary. Positive: the three days after the recommendation ran above the game's
+        known normal level. Exactly 0: they averaged exactly that level. Negative: below
+        it. Not clipped.
 
-    persistence_7d = count(x[t+k] > b for k in 1..7) / 7
+    movement_24h = x[f] / a - 1
+        The first day after the recommendation against the recent level it knew.
+
+    persistence_7d = count(x[f+k] > b for k in 0..6) / 7
         The share of the following week spent above the known normal level.
 
     lead_time_days = the smallest k in 1..6 with
-        x[t+k] > x[t+k-1]  and  x[t+k] >= x[t+k+1]  and  x[t+k] > b
-        The first confirmed local peak above normal. None in the window is a finding.
+        x[f+k-1] > x[f+k-2]  and  x[f+k-1] >= x[f+k]  and  x[f+k-1] > b
+        Days from the recommendation to the first confirmed local peak above normal;
+        k = 1 is the first forward day. None in the window is a finding.
 
 Each measure needs every day of its own window. A day that is missing, or that the
 recording does not reach, makes the measure UNAVAILABLE. It is never filled with zero
 and never averaged over what happens to be there.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from enum import StrEnum
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 
 from metaspike.domain.model import FrozenModel
-from metaspike.validation.history import FutureValues
+from metaspike.validation.history import FutureValues, first_forward_day
 from metaspike.validation.rules import OUTCOME_RULES_V1, OutcomeRules
 from metaspike.validation.snapshot import RecommendationSnapshot, content_id
+
+_DAY = timedelta(days=1)
 
 
 class OutcomeAvailability(StrEnum):
@@ -70,12 +79,14 @@ class OutcomeLabel(FrozenModel):
     snapshot_id: str
     canonical_game_id: str
     outcome_rules_version: str
+    # The moment the recommendation was made, copied from the snapshot.
+    prediction_at: AwareDatetime
     # The last day of data that existed when the label was made.
     data_through: date
     # The reference levels, copied from the snapshot. Never recomputed.
     reference_baseline: float | None = None
     reference_avg_3d: float | None = None
-    # The forward days read, in order, each observed or not.
+    # The forward days read, in order from the first wholly-forward day, observed or not.
     forward: tuple[ForwardDay, ...]
     primary_window_start: date
     primary_window_end: date
@@ -96,6 +107,8 @@ class OutcomeLabel(FrozenModel):
             raise ValueError("unavailable_reason is given exactly when unavailable")
         if (self.peak_status is PeakStatus.FOUND) != (self.lead_time_days is not None):
             raise ValueError("lead_time_days is given exactly when a peak was found")
+        if self.primary_window_start <= self.prediction_at.date() - _DAY:
+            raise ValueError("the forward window must start after the recommendation")
         return self
 
 
@@ -110,18 +123,21 @@ def label(
     future: FutureValues,
     rules: OutcomeRules = OUTCOME_RULES_V1,
 ) -> OutcomeLabel:
-    """The outcome of one snapshot. Reads the snapshot and the days after its cutoff."""
-    cutoff = snapshot.data_cutoff_day
+    """The outcome of one snapshot. Reads the snapshot and the days after its moment."""
+    first = first_forward_day(snapshot.as_of)
     features = snapshot.features
     baseline = None if features is None else features.baseline_median_28d
     recent = None if features is None else features.avg_3d
+    key = snapshot.scored_signal
     forward = (
-        future.after(snapshot.canonical_game_id, snapshot.scored_signal, cutoff, rules.future_days)
-        if snapshot.scored_signal is not None
+        future.from_day(snapshot.canonical_game_id, key, first, rules.future_days)
+        if key is not None
         else ()
     )
     values = [value for _, value in forward]
-    current = None if features is None else features.latest_views
+    # The day before the first forward day. The snapshot may not have seen it; the
+    # outcome side may, and needs it to say whether the first forward day was a rise.
+    before = None if key is None else future.on(snapshot.canonical_game_id, key, first - _DAY)
 
     reason: OutcomeUnavailable | None = None
     uplift: float | None = None
@@ -146,7 +162,7 @@ def label(
         week = _complete(values[: rules.persistence_days])
         if week is not None and baseline is not None and baseline > 0:
             persistence = sum(1 for value in week if value > baseline) / len(week)
-        path = _complete([current, *values[: rules.peak_search_days + 1]])
+        path = _complete([before, *values[: rules.peak_search_days + 1]])
         if path is not None and baseline is not None and baseline > 0:
             peak = PeakStatus.NONE_IN_WINDOW
             for k in range(1, rules.peak_search_days + 1):
@@ -158,12 +174,13 @@ def label(
         "snapshot_id": snapshot.snapshot_id,
         "canonical_game_id": snapshot.canonical_game_id,
         "outcome_rules_version": rules.version,
+        "prediction_at": snapshot.as_of,
         "data_through": future.data_through,
         "reference_baseline": baseline,
         "reference_avg_3d": recent,
         "forward": tuple(ForwardDay(day=day, value=value) for day, value in forward),
-        "primary_window_start": date.fromordinal(cutoff.toordinal() + 1),
-        "primary_window_end": date.fromordinal(cutoff.toordinal() + rules.primary_days),
+        "primary_window_start": first,
+        "primary_window_end": first + (rules.primary_days - 1) * _DAY,
         "availability": (
             OutcomeAvailability.UNAVAILABLE if reason is not None else OutcomeAvailability.AVAILABLE
         ),

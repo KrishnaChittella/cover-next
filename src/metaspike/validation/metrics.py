@@ -19,7 +19,7 @@ ties are broken by slug.
 
 import statistics
 from collections.abc import Callable, Sequence
-from datetime import date
+from datetime import UTC, date
 
 from pydantic import Field
 
@@ -180,10 +180,15 @@ class LeadTime(FrozenModel):
     mean_days: float | None = None
 
 
+def prediction_day(snapshot: RecommendationSnapshot) -> date:
+    """The UTC day the recommendation was made on. What a backtest's days are counted in."""
+    return snapshot.as_of.astimezone(UTC).date()
+
+
 def by_day(pairs: Sequence[Pair]) -> dict[date, list[Pair]]:
     days: dict[date, list[Pair]] = {}
     for pair in pairs:
-        days.setdefault(pair[0].data_cutoff_day, []).append(pair)
+        days.setdefault(prediction_day(pair[0]), []).append(pair)
     return dict(sorted(days.items()))
 
 

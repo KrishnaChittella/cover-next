@@ -10,7 +10,7 @@ import json
 import socket
 import statistics
 from collections.abc import Mapping, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -38,16 +38,30 @@ from metaspike.scoring.v0 import V0_INPUT_SIGNAL
 from metaspike.sources.registry import default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.validation import snapshot as snapshot_module
-from metaspike.validation.backtest import BacktestResult, perturb_after, run_backtest
+from metaspike.validation.backtest import (
+    BacktestResult,
+    perturb_unavailable,
+    prediction_moment,
+    run_backtest,
+)
 from metaspike.validation.history import (
     FutureValues,
     LeakageError,
     PredictionInputs,
     RecordedHistory,
-    as_of_for,
-    ensure_no_future,
+    ensure_available,
+    evaluation_day_at,
+    first_forward_day,
+    latest_due_at,
 )
-from metaspike.validation.metrics import STRATEGIES, evaluate_strategy, order, spearman, summarise
+from metaspike.validation.metrics import (
+    STRATEGIES,
+    evaluate_strategy,
+    order,
+    prediction_day,
+    spearman,
+    summarise,
+)
 from metaspike.validation.outcomes import (
     OutcomeAvailability,
     OutcomeLabel,
@@ -55,7 +69,12 @@ from metaspike.validation.outcomes import (
     PeakStatus,
     label,
 )
-from metaspike.validation.report import ValidationReport, assess_evidence
+from metaspike.validation.report import (
+    ValidationReport,
+    assess_evidence,
+    build_report,
+    set_hash,
+)
 from metaspike.validation.rules import (
     OUTCOME_RULES_V1,
     VALIDATION_PROTOCOL_V1,
@@ -63,7 +82,7 @@ from metaspike.validation.rules import (
     OutcomeRules,
 )
 from metaspike.validation.snapshot import RecommendationSnapshot, predict
-from metaspike.validation.store import AccountabilityStore
+from metaspike.validation.store import STORE_GENERATION, AccountabilityStore
 from tests.conftest import RECORDED_END, RECORDINGS, RUN_TIME, make_id, steady
 
 REPO = Path(__file__).parent.parent
@@ -140,14 +159,31 @@ def recording(
     return catalogue, CollectionReport(window=window, observed_at=WHEN, runs=(run,))
 
 
-CUTOFF = 59  # the index of the snapshot day in the scenarios below
+ZERO = {SOURCE: timedelta(0)}
+ONE_DAY = {SOURCE: DAY}
+
+
+def moment(index: int) -> datetime:
+    """00:00 UTC at the start of day `index`."""
+    return start_of_day(day(index))
+
+
+def sees(
+    report: CollectionReport, index: int, lag: Mapping[str, timedelta] = ZERO
+) -> PredictionInputs:
+    """Inputs for the moment at which, with no publication lag, day `index` is the newest
+    day visible: 00:00 UTC on the following day."""
+    return RecordedHistory(report, lag).inputs_at(moment(index + 1))
+
+
+CUTOFF = 59  # the newest day visible in the scenarios below
 
 
 def scenario(future: Sequence[float | None]) -> tuple[RecommendationSnapshot, OutcomeLabel]:
     """Sixty quiet days (baseline 100, latest 110, 3-day average 103.33), then `future`."""
     catalogue, report = recording({"alpha": [*steady(CUTOFF + 1), *future]})
-    history = RecordedHistory(report)
-    (snapshot,) = predict(catalogue, history.inputs_at(day(CUTOFF)), WHEN)
+    history = RecordedHistory(report, ZERO)
+    (snapshot,) = predict(catalogue, history.inputs_at(moment(CUTOFF + 1)), WHEN)
     return snapshot, label(snapshot, history.future(), RULES)
 
 
@@ -169,13 +205,17 @@ def real_recording() -> tuple[Catalogue, CollectionReport, dict[str, timedelta]]
     return catalogue, report, lags
 
 
+# The recording runs 6 July to 3 October 2026 and Wikimedia's policy lag is one day, so
+# the first moment it can stand in for is 00:00 on 7 July and the last 00:00 on 5 October.
+FIRST_PREDICTION = date(2026, 7, 7)
+LAST_PREDICTION = date(2026, 10, 5)
+
+
 @pytest.fixture(scope="module")
 def fixture_backtest() -> BacktestResult:
     catalogue, report, lags = real_recording()
-    history = RecordedHistory(report, lags)
-    return run_backtest(
-        catalogue, report, history.first_day, history.last_day, RUN_TIME, publication_lag=lags
-    )
+    assert lags == {SOURCE: DAY}
+    return run_backtest(catalogue, report, FIRST_PREDICTION, LAST_PREDICTION, RUN_TIME, lags)
 
 
 def fingerprint(model: Any) -> str:
@@ -215,12 +255,12 @@ def test_event_heat_rules_v1_are_unchanged() -> None:
 # --- no look-ahead --------------------------------------------------------------------
 
 
-def test_inputs_rebuilt_for_a_day_hold_nothing_after_it() -> None:
+def test_inputs_rebuilt_for_a_moment_hold_only_what_was_published_by_then() -> None:
     catalogue, report = recording({"alpha": steady(80), "beta": steady(80)})
-    history = RecordedHistory(report)
-    inputs = history.inputs_at(day(50))
-    assert inputs.cutoff_day == day(50) and inputs.as_of == as_of_for(day(50))
-    assert inputs.as_of == start_of_day(day(51))
+    history = RecordedHistory(report, ZERO)
+    inputs = history.inputs_at(moment(51))
+    assert inputs.as_of == moment(51) and inputs.evaluation_day == day(50)
+    assert inputs.evaluation_day == evaluation_day_at(inputs.as_of)
     assert inputs.report.window.end == start_of_day(day(50))
     assert inputs.report.observed_at == inputs.as_of
     for run in inputs.report.runs:
@@ -228,35 +268,255 @@ def test_inputs_rebuilt_for_a_day_hold_nothing_after_it() -> None:
             assert signal.series is not None
             observed = [p.period_day for p in signal.series.points if p.value is not None]
             assert max(observed) == day(50) and len(observed) == 51
-    assert len(catalogue.games) == 2
-    with pytest.raises(ValueError, match="outside the recording"):
-        history.inputs_at(day(80))
+    assert len(catalogue.games) == 2 and ensure_available(inputs) == 2
+    # The recording cannot stand in for a moment whose visible data it does not hold.
+    assert history.can_reconstruct(moment(80)) and not history.can_reconstruct(moment(81))
+    assert not history.can_reconstruct(moment(0))
+    with pytest.raises(ValueError, match="cannot be reconstructed"):
+        history.inputs_at(moment(81))
+    with pytest.raises(ValueError, match="timezone-aware"):
+        history.inputs_at(datetime(2026, 4, 1))
+    # A lag must be stated for every source, and cannot be negative.
+    with pytest.raises(ValueError, match="no publication lag given"):
+        RecordedHistory(report, {})
+    with pytest.raises(ValueError, match="cannot be negative"):
+        RecordedHistory(report, {SOURCE: -DAY})
 
 
-def test_inputs_that_reach_past_their_cutoff_are_refused() -> None:
+def test_inputs_holding_what_was_not_yet_visible_are_refused() -> None:
     catalogue, report = recording({"alpha": steady(80)})
-    leaky = PredictionInputs(cutoff_day=day(50), as_of=as_of_for(day(50)), report=report)
-    with pytest.raises(LeakageError, match="runs past the cutoff"):
-        ensure_no_future(leaky)
+    whole = PredictionInputs(
+        as_of=moment(51), evaluation_day=day(50), publication_lag=ZERO, report=report
+    )
+    with pytest.raises(LeakageError, match="runs past the evaluation day"):
+        ensure_available(whole)
     with pytest.raises(LeakageError):
-        predict(catalogue, leaky, WHEN)
-    # A window that ends on the cutoff but still carries a later point is caught too.
-    honest = RecordedHistory(report).inputs_at(day(50))
-    later = RecordedHistory(report).inputs_at(day(51))
+        predict(catalogue, whole, WHEN)
+    # A window that ends on the evaluation day but still carries a later point.
+    honest = sees(report, 50)
+    later = sees(report, 51)
     smuggled = PredictionInputs(
-        cutoff_day=day(50),
-        as_of=as_of_for(day(50)),
+        as_of=moment(51),
+        evaluation_day=day(50),
+        publication_lag=ZERO,
         report=later.report.model_copy(update={"window": honest.report.window}),
     )
     with pytest.raises(LeakageError):
-        ensure_no_future(smuggled)
+        ensure_available(smuggled)
     late = PredictionInputs(
-        cutoff_day=day(50),
-        as_of=as_of_for(day(50)),
-        report=honest.report.model_copy(update={"observed_at": as_of_for(day(52))}),
+        as_of=moment(51),
+        evaluation_day=day(50),
+        publication_lag=ZERO,
+        report=honest.report.model_copy(update={"observed_at": moment(53)}),
     )
-    with pytest.raises(LeakageError, match="observed after the snapshot"):
-        ensure_no_future(late)
+    with pytest.raises(LeakageError, match="observed after the simulated moment"):
+        ensure_available(late)
+    wrong_day = PredictionInputs(
+        as_of=moment(51), evaluation_day=day(51), publication_lag=ZERO, report=honest.report
+    )
+    with pytest.raises(LeakageError, match="not the last whole day"):
+        ensure_available(wrong_day)
+    unknown = PredictionInputs(
+        as_of=moment(51), evaluation_day=day(50), publication_lag={}, report=honest.report
+    )
+    with pytest.raises(LeakageError, match="no publication lag is known"):
+        ensure_available(unknown)
+
+
+# --- publication lag: ended is not the same as published ------------------------------
+
+
+def with_spike(index: int, value: float, length: int = 80) -> list[float | None]:
+    values = steady(length)
+    values[index] = value
+    return values
+
+
+def test_a_period_that_had_ended_but_was_not_yet_published_is_withheld() -> None:
+    """The regression for the leak in the first version of this backtest.
+
+    P is 00:00 on day 61, and the source publishes a day one day after it ends. Day 59
+    (X) is due at P. Day 60 (X+1) had ended at P and is in the recording, but the
+    source had not published it. Truncating by the calendar, as the first version did,
+    lets day 60 in; it must not be there.
+    """
+    as_of = moment(61)
+    assert latest_due_at(as_of, Granularity.DAILY, DAY).date() == day(59)
+    assert evaluation_day_at(as_of) == day(60)  # ended, and not yet published
+
+    def at_p(x_plus_1: float) -> tuple[PredictionInputs, RecommendationSnapshot]:
+        catalogue, report = recording(
+            {"alpha": with_spike(60, x_plus_1), "beta": [v * 3 for v in steady(80) if v]}
+        )
+        inputs = RecordedHistory(report, ONE_DAY).inputs_at(as_of)
+        alpha = next(s for s in predict(catalogue, inputs, WHEN) if s.slug == "alpha")
+        return inputs, alpha
+
+    ordinary_inputs, ordinary = at_p(90.0)
+    enormous_inputs, enormous = at_p(9_000_000.0)
+
+    for inputs in (ordinary_inputs, enormous_inputs):
+        assert inputs.evaluation_day == day(60)
+        for run in inputs.report.runs:
+            for signal in run.outcomes:
+                assert signal.series is not None
+                by_day = {p.period_day: p.value for p in signal.series.points}
+                assert by_day[day(60)] is None  # X+1 is absent: not zero, not a value
+                assert by_day[day(59)] is not None  # X is there
+                assert max(d for d, v in by_day.items() if v is not None) == day(59)
+                assert signal.series.latest_due == start_of_day(day(59))
+    # The prediction is the same snapshot whether X+1 was ordinary or enormous.
+    assert enormous == ordinary and enormous.snapshot_id == ordinary.snapshot_id
+    assert ordinary.score == enormous.score and ordinary.rank == enormous.rank
+    assert ordinary.confidence == enormous.confidence
+    assert ordinary.features is not None
+    assert ordinary.features.as_of_day == day(59)  # the features anchor on X
+    assert ordinary.features.latest_views == steady(80)[59]
+    # The snapshot says when it was made and what it could see, and they differ.
+    assert ordinary.as_of == as_of
+    assert ordinary.evaluation_day == day(60)
+    assert ordinary.latest_due_day == day(59) == ordinary.latest_observed_day
+    assert ordinary.publication_lag_hours == 24.0
+    assert ordinary.input_window_end == day(60)
+
+    # The calendar-only truncation of the first version DOES let the spike in, which is
+    # what makes this a regression test: under zero lag at the same P, day 60 is visible
+    # and the answer changes.
+    catalogue, report = recording(
+        {"alpha": with_spike(60, 9_000_000.0), "beta": [v * 3 for v in steady(80) if v]}
+    )
+    leaky = next(
+        s
+        for s in predict(catalogue, RecordedHistory(report, ZERO).inputs_at(as_of), WHEN)
+        if s.slug == "alpha"
+    )
+    assert leaky.features is not None and leaky.features.latest_views == 9_000_000.0
+    assert leaky.latest_observed_day == day(60)
+    assert leaky.score.value != ordinary.score.value
+    # And inputs built that way are refused when the true lag is stated.
+    stale_policy = RecordedHistory(report, ZERO).inputs_at(as_of)
+    relabelled = PredictionInputs(
+        as_of=as_of, evaluation_day=day(60), publication_lag=ONE_DAY, report=stale_policy.report
+    )
+    with pytest.raises(LeakageError):
+        ensure_available(relabelled)
+    with pytest.raises(LeakageError):
+        predict(catalogue, relabelled, WHEN)
+
+
+def test_the_first_outcome_day_follows_the_recommendation_not_the_data() -> None:
+    values = [*steady(60), 5000.0, 120.0, 130.0, 140.0, 100.0, 100.0, 100.0, 100.0, 100.0]
+    catalogue, report = recording({"alpha": values})
+    history = RecordedHistory(report, ONE_DAY)
+    (snapshot,) = predict(catalogue, history.inputs_at(moment(61)), WHEN)
+    assert snapshot.latest_observed_day == day(59)
+    outcome = label(snapshot, history.future())
+    # Not day 60 (the data's next day, unseen at P and already over), but day 61.
+    assert first_forward_day(snapshot.as_of) == day(61)
+    assert (outcome.primary_window_start, outcome.primary_window_end) == (day(61), day(63))
+    assert outcome.prediction_at == moment(61)
+    assert [item.day for item in outcome.forward] == [day(61 + k) for k in range(7)]
+    assert outcome.realized_uplift_72h == pytest.approx(0.30)  # 120, 130, 140 over 100
+    # The 5,000 on day 60 is on neither side.
+    assert outcome.realized_uplift_72h is not None and outcome.realized_uplift_72h < 1
+    # Day 60 is used for one thing only: to say whether day 61 was a rise. It was not.
+    assert outcome.peak_status is PeakStatus.FOUND and outcome.lead_time_days == 3
+    with pytest.raises(ValidationError, match="must start after the recommendation"):
+        OutcomeLabel.model_validate({**outcome.model_dump(), "primary_window_start": day(59)})
+
+
+def test_a_moment_inside_a_day_takes_the_next_whole_day_as_its_first() -> None:
+    assert first_forward_day(moment(61)) == day(61)  # exactly on the boundary
+    assert first_forward_day(moment(61) + timedelta(microseconds=1)) == day(62)
+    assert first_forward_day(moment(61) + timedelta(hours=13)) == day(62)
+    assert first_forward_day(moment(62) - timedelta(seconds=1)) == day(62)
+    east = moment(61).astimezone(timezone(timedelta(hours=9)))  # the same instant
+    assert first_forward_day(east) == day(61)
+    assert evaluation_day_at(moment(61) + timedelta(hours=13)) == day(60)
+    values = [*steady(61), 120.0, 130.0, 140.0, 100.0, 100.0, 100.0, 100.0]
+    catalogue, report = recording({"alpha": values})
+    history = RecordedHistory(report, ZERO)
+    (midday,) = predict(catalogue, history.inputs_at(moment(61) + timedelta(hours=13)), WHEN)
+    outcome = label(midday, history.future())
+    assert outcome.primary_window_start == day(62)
+    assert outcome.realized_uplift_72h == pytest.approx((130 + 140 + 100) / 3 / 100 - 1)
+
+
+def test_the_due_boundary_is_exact_to_the_second() -> None:
+    values = with_spike(59, 777.0)
+    catalogue, report = recording({"alpha": values})
+    history = RecordedHistory(report, ONE_DAY)
+    # Day 59 ends at moment(60); with a one-day lag it is published at moment(61).
+
+    def newest(as_of: datetime) -> tuple[date, float | None]:
+        (snapshot,) = predict(catalogue, history.inputs_at(as_of), WHEN)
+        assert snapshot.features is not None
+        return snapshot.latest_due_day, snapshot.features.latest_views
+
+    assert newest(moment(61) - timedelta(seconds=1)) == (day(58), steady(80)[58])
+    assert newest(moment(61)) == (day(59), 777.0)  # due at exactly its publication time
+    assert newest(moment(61) + timedelta(seconds=1)) == (day(59), 777.0)
+    assert newest(moment(62) - timedelta(seconds=1)) == (day(59), 777.0)
+    assert latest_due_at(moment(61) - timedelta(seconds=1), Granularity.DAILY, DAY) == moment(58)
+    # A longer lag withholds more; a shorter one less.
+    for hours, due in ((0, 60), (1, 59), (24, 59), (25, 58), (48, 58), (72, 57)):
+        lag = timedelta(hours=hours)
+        assert latest_due_at(moment(61), Granularity.DAILY, lag) == moment(due), hours
+
+
+def test_zero_publication_lag_sees_the_day_that_has_just_ended() -> None:
+    catalogue, report = recording({"alpha": with_spike(60, 555.0)})
+    (snapshot,) = predict(catalogue, RecordedHistory(report, ZERO).inputs_at(moment(61)), WHEN)
+    assert snapshot.latest_due_day == day(60) == snapshot.evaluation_day
+    assert snapshot.latest_observed_day == day(60) and snapshot.publication_lag_hours == 0
+    assert snapshot.features is not None and snapshot.features.latest_views == 555.0
+
+
+def test_a_day_not_yet_due_is_missing_never_zero() -> None:
+    catalogue, report = recording({"alpha": steady(80)})
+    inputs = RecordedHistory(report, {SOURCE: 3 * DAY}).inputs_at(moment(61))
+    series = inputs.report.runs[0].outcomes[0].series
+    assert series is not None
+    tail = {p.period_day: (p.value, p.status) for p in series.points[-4:]}
+    assert tail[day(57)][0] is not None  # the newest day published under a three-day lag
+    for index in (58, 59, 60):
+        value, status = tail[day(index)]
+        assert value is None and status is ObservationStatus.MISSING
+    (snapshot,) = predict(catalogue, inputs, WHEN)
+    assert snapshot.features is not None
+    assert snapshot.features.as_of_day == day(57) == snapshot.latest_due_day
+    # The withheld days are not counted as gaps in the history, and not as zero views.
+    assert snapshot.features.missing_days == 0 and snapshot.features.staleness_days == 0
+    assert snapshot.features.latest_views in (90.0, 110.0)
+
+
+def test_sources_with_different_lags_are_each_held_to_their_own() -> None:
+    _, report = recording({"alpha": steady(80)})
+    slow_source = "slow_source"
+    run = report.runs[0]
+    slow = run.model_copy(update={"source": slow_source})
+    both = report.model_copy(update={"runs": (run, slow)})
+    lags = {SOURCE: timedelta(0), slow_source: 2 * DAY}
+    inputs = RecordedHistory(both, lags).inputs_at(moment(61))
+    newest = {
+        item.source: max(
+            p.period_day
+            for p in item.outcomes[0].series.points  # type: ignore[union-attr]
+            if p.value is not None
+        )
+        for item in inputs.report.runs
+    }
+    assert newest == {SOURCE: day(60), slow_source: day(58)}
+    assert ensure_available(inputs) == 2
+    # Swapping the lags makes the same report a leak for the slower source.
+    swapped = PredictionInputs(
+        as_of=inputs.as_of,
+        evaluation_day=inputs.evaluation_day,
+        publication_lag={SOURCE: 2 * DAY, slow_source: timedelta(0)},
+        report=inputs.report,
+    )
+    with pytest.raises(LeakageError):
+        ensure_available(swapped)
 
 
 def test_a_computation_that_looked_ahead_would_give_a_different_answer() -> None:
@@ -268,8 +528,8 @@ def test_a_computation_that_looked_ahead_would_give_a_different_answer() -> None
     """
     values = [*steady(60), 400.0, 900.0, 1500.0, 2000.0, 2600.0, 3000.0, 3200.0, 3300.0]
     catalogue, report = recording({"alpha": values})
-    history = RecordedHistory(report)
-    (honest,) = predict(catalogue, history.inputs_at(day(59)), WHEN)
+    history = RecordedHistory(report, ZERO)
+    (honest,) = predict(catalogue, history.inputs_at(moment(59 + 1)), WHEN)
     (looked_ahead,) = assess(catalogue, report)  # the whole recording, future included
     assert honest.features is not None and looked_ahead.scored_features is not None
     assert honest.features.latest_views == 110.0
@@ -286,30 +546,28 @@ def test_changing_or_appending_the_future_cannot_change_a_past_prediction() -> N
     predictions = []
     for future in (quiet, loud, gone, steady(60)):
         catalogue, report = recording({"alpha": future, "beta": steady(len(future))})
-        history = RecordedHistory(report)
-        predictions.append(predict(catalogue, history.inputs_at(day(59)), WHEN))
+        history = RecordedHistory(report, ZERO)
+        predictions.append(predict(catalogue, history.inputs_at(moment(59 + 1)), WHEN))
     first = predictions[0]
     for other in predictions[1:]:
         assert [item.snapshot_id for item in other] == [item.snapshot_id for item in first]
         assert other == first
     # The same through the checker the backtest itself runs.
     catalogue, report = recording({"alpha": quiet, "beta": loud})
-    altered = perturb_after(report, day(59), 1000.0)
+    altered = perturb_unavailable(report, moment(60), ZERO, 1000.0)
     assert altered != report
-    before = predict(catalogue, RecordedHistory(report).inputs_at(day(59)), WHEN)
-    after = predict(catalogue, RecordedHistory(altered).inputs_at(day(59)), WHEN)
+    before = predict(catalogue, sees(report, 59), WHEN)
+    after = predict(catalogue, sees(altered, 59), WHEN)
     assert before == after
     # While a day inside the perturbed range does change, so the check is not vacuous.
-    assert predict(catalogue, RecordedHistory(report).inputs_at(day(70)), WHEN) != predict(
-        catalogue, RecordedHistory(altered).inputs_at(day(70)), WHEN
-    )
+    assert predict(catalogue, sees(report, 70), WHEN) != predict(catalogue, sees(altered, 70), WHEN)
 
 
 def test_a_snapshot_rebuilt_later_is_identical_and_its_id_ignores_when_it_was_made() -> None:
     catalogue, report = recording({"alpha": steady(80), "beta": [*steady(70), *([300.0] * 10)]})
-    history = RecordedHistory(report)
-    first = predict(catalogue, history.inputs_at(day(72)), WHEN)
-    later = predict(catalogue, RecordedHistory(report).inputs_at(day(72)), WHEN + 400 * DAY)
+    history = RecordedHistory(report, ZERO)
+    first = predict(catalogue, history.inputs_at(moment(72 + 1)), WHEN)
+    later = predict(catalogue, sees(report, 72), WHEN + 400 * DAY)
     assert [a.snapshot_id for a in first] == [b.snapshot_id for b in later]
     assert all(a.created_at != b.created_at for a, b in zip(first, later, strict=True))
     assert all(
@@ -317,7 +575,7 @@ def test_a_snapshot_rebuilt_later_is_identical_and_its_id_ignores_when_it_was_ma
         for a, b in zip(first, later, strict=True)
     )
     assert all(item.snapshot_id.startswith("snap_") for item in first)
-    other_day = predict(catalogue, history.inputs_at(day(73)), WHEN)
+    other_day = predict(catalogue, history.inputs_at(moment(73 + 1)), WHEN)
     assert {a.snapshot_id for a in first}.isdisjoint({b.snapshot_id for b in other_day})
     # The id is a hash of the content: tampering with a stored snapshot is detectable.
     tampered = first[0].model_copy(update={"rank": 7})
@@ -423,7 +681,7 @@ def test_an_event_or_revision_seen_later_cannot_rewrite_event_intelligence_at_t(
     early = event_store(tmp_path / "early", catalogue, with_revision=False)
     revised = event_store(tmp_path / "revised", catalogue, with_revision=True)
     runs = {
-        name: run_backtest(catalogue, report, day(36), day(80), WHEN, event_store=store)
+        name: run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store)
         for name, store in (("early", early), ("revised", revised))
     }
 
@@ -431,7 +689,7 @@ def test_an_event_or_revision_seen_later_cannot_rewrite_event_intelligence_at_t(
         return next(
             item
             for item in runs[name].snapshots
-            if item.slug == "alpha" and item.data_cutoff_day == day(index)
+            if item.slug == "alpha" and item.latest_due_day == day(index)
         )
 
     # Before the event was first observed, nobody had looked: unavailable, no number.
@@ -455,8 +713,8 @@ def test_an_event_or_revision_seen_later_cannot_rewrite_event_intelligence_at_t(
 def test_events_add_nothing_to_score_v0_in_a_backtest(tmp_path: Path) -> None:
     catalogue, report = recording({"alpha": [*steady(60), *([260.0] * 25)], "beta": steady(85)})
     store = event_store(tmp_path, catalogue, with_revision=True)
-    plain = run_backtest(catalogue, report, day(36), day(80), WHEN)
-    eventful = run_backtest(catalogue, report, day(36), day(80), WHEN, event_store=store)
+    plain = run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO)
+    eventful = run_backtest(catalogue, report, day(37), day(81), WHEN, ZERO, event_store=store)
     assert any(item.events.event_heat for item in eventful.snapshots)
     score_side = {"score", "rank", "confidence", "features", "explanation", "ranked_count"}
     for without, with_events in zip(plain.snapshots, eventful.snapshots, strict=True):
@@ -471,7 +729,7 @@ def test_events_add_nothing_to_score_v0_in_a_backtest(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="after the snapshot"):
         predict(
             catalogue,
-            RecordedHistory(report).inputs_at(day(50)),
+            sees(report, 50),
             WHEN,
             event_records=store.events(),
         )
@@ -605,8 +863,8 @@ def test_a_game_with_no_score_at_the_snapshot_has_no_outcome_to_answer_for() -> 
     catalogue, report = recording(
         {"alpha": [*steady(60), 500.0, 500.0, 500.0], "beta": [None] * 63}
     )
-    history = RecordedHistory(report)
-    snapshots = predict(catalogue, history.inputs_at(day(59)), WHEN)
+    history = RecordedHistory(report, ZERO)
+    snapshots = predict(catalogue, history.inputs_at(moment(59 + 1)), WHEN)
     beta = next(item for item in snapshots if item.slug == "beta")
     assert beta.rank is None and beta.score.value is None and beta.features is None
     outcome = label(beta, history.future())
@@ -652,10 +910,10 @@ def test_the_ranking_at_t_uses_only_games_scorable_at_t() -> None:
     catalogue, report = recording(
         {"steady": steady(80), "latecomer": latecomer, "vanisher": vanisher, "never": [None] * 80}
     )
-    result = run_backtest(catalogue, report, day(36), day(79), WHEN)
+    result = run_backtest(catalogue, report, day(37), day(80), WHEN, ZERO)
 
     def on(index: int) -> dict[str, RecommendationSnapshot]:
-        return {s.slug: s for s in result.snapshots if s.data_cutoff_day == day(index)}
+        return {s.slug: s for s in result.snapshots if s.latest_due_day == day(index)}
 
     early = on(45)
     assert early["latecomer"].rank is None  # five days of data: no baseline yet
@@ -688,7 +946,7 @@ def test_the_ranking_at_t_uses_only_games_scorable_at_t() -> None:
 def test_ties_are_broken_by_slug_in_every_strategy() -> None:
     values = [*steady(60), 300.0, 320.0, 340.0, 300.0, 300.0, 300.0, 300.0]
     catalogue, report = recording({"zulu": values, "alpha": values, "mike": values})
-    snapshots = predict(catalogue, RecordedHistory(report).inputs_at(day(62)), WHEN)
+    snapshots = predict(catalogue, sees(report, 62), WHEN)
     by_slug = {item.slug: item for item in snapshots}
     assert (
         by_slug["alpha"].score.value == by_slug["mike"].score.value == by_slug["zulu"].score.value
@@ -696,7 +954,7 @@ def test_ties_are_broken_by_slug_in_every_strategy() -> None:
     assert [by_slug[slug].rank for slug in ("alpha", "mike", "zulu")] == [1, 2, 3]
     for strategy in STRATEGIES:
         assert [item.slug for item in order(strategy, list(snapshots))] == ["alpha", "mike", "zulu"]
-    again = predict(catalogue, RecordedHistory(report).inputs_at(day(62)), WHEN)
+    again = predict(catalogue, sees(report, 62), WHEN)
     assert [item.rank for item in again] == [item.rank for item in snapshots]
 
 
@@ -707,7 +965,7 @@ def test_comparators_order_the_same_universe_by_values_the_snapshot_already_held
     catalogue, report = recording(
         {"big": big_flat, "lifting": lifting, "accelerating": accelerating, "absent": [None] * 70}
     )
-    snapshots = predict(catalogue, RecordedHistory(report).inputs_at(day(69)), WHEN)
+    snapshots = predict(catalogue, sees(report, 69), WHEN)
     ranked = [item for item in snapshots if item.rank is not None]
     assert {item.slug for item in ranked} == {"big", "lifting", "accelerating"}
     features = {item.slug: item.features for item in ranked}
@@ -756,7 +1014,7 @@ def test_top_k_and_association_match_an_independent_count(fixture_backtest: Back
     pairs = fixture_backtest.pairs
     by_day: dict[date, list[tuple[RecommendationSnapshot, OutcomeLabel]]] = {}
     for pair in pairs:
-        by_day.setdefault(pair[0].data_cutoff_day, []).append(pair)
+        by_day.setdefault(prediction_day(pair[0]), []).append(pair)
     for strategy in STRATEGIES:
         result = evaluate_strategy(strategy, pairs, RULES, PROTOCOL)
         assert [group.k for group in result.top_k] == [1, 3, 5]
@@ -824,13 +1082,21 @@ def test_validated_cannot_be_reached_under_protocol_v1() -> None:
 # --- the real recorded replay ---------------------------------------------------------
 
 
-def test_the_backtest_reproduces_score_v0_as_it_was_published(
-    fixture_backtest: BacktestResult,
-) -> None:
-    last = [s for s in fixture_backtest.snapshots if s.data_cutoff_day == RECORDED_END]
-    assert len(last) == 15 == len(GOLDEN["games"])
-    for snapshot in last:
+def test_with_no_lag_the_backtest_reproduces_score_v0_as_it_was_published() -> None:
+    """The published replay scored every day the source returned, 3 October included.
+
+    Under the source's one-day policy lag that day is not visible at 00:00 on the 4th,
+    so the lag-safe backtest does not, and must not, equal the published run. With the
+    lag set to zero it sees exactly what the published run saw, and reproduces it: the
+    scoring is the same code, and only the simulation's view of time has changed.
+    """
+    catalogue, report, _ = real_recording()
+    moment_after = RECORDED_END + DAY
+    zero_lag = run_backtest(catalogue, report, moment_after, moment_after, RUN_TIME, ZERO)
+    assert len(zero_lag.snapshots) == 15 == len(GOLDEN["games"])
+    for snapshot in zero_lag.snapshots:
         published = GOLDEN["games"][snapshot.slug]
+        assert snapshot.latest_due_day == RECORDED_END
         assert snapshot.rank == published["rank"], snapshot.slug
         assert snapshot.score.model_dump(mode="json") == published["score"]
         if published["confidence"] is None:
@@ -850,40 +1116,74 @@ def test_the_backtest_reproduces_score_v0_as_it_was_published(
         assert snapshot.events.event_heat is None
 
 
+def test_under_the_policy_lag_no_snapshot_sees_a_day_its_source_had_not_published(
+    fixture_backtest: BacktestResult,
+) -> None:
+    for snapshot in fixture_backtest.snapshots:
+        assert snapshot.as_of == prediction_moment(prediction_day(snapshot))
+        assert snapshot.evaluation_day == prediction_day(snapshot) - DAY
+        assert snapshot.latest_due_day == prediction_day(snapshot) - 2 * DAY
+        assert snapshot.publication_lag_hours == 24.0
+        if snapshot.latest_observed_day is not None:
+            assert snapshot.latest_observed_day <= snapshot.latest_due_day
+            assert snapshot.features is not None
+            assert snapshot.features.as_of_day == snapshot.latest_observed_day
+    for snapshot, outcome in fixture_backtest.pairs:
+        assert outcome.prediction_at == snapshot.as_of
+        assert outcome.primary_window_start == prediction_day(snapshot)
+        if snapshot.latest_observed_day is not None:
+            # Two days separate what was seen from what is judged.
+            assert (outcome.primary_window_start - snapshot.latest_observed_day).days >= 2
+    # At 00:00 on 4 October the published run's last day, 3 October, is not yet visible.
+    fourth = [
+        s for s in fixture_backtest.snapshots if prediction_day(s) == date(2026, 10, 4) and s.rank
+    ]
+    assert fourth and {s.latest_observed_day for s in fourth} == {date(2026, 10, 2)}
+
+
 def test_the_fixture_backtest_reports_exactly_what_the_recording_shows(
     fixture_backtest: BacktestResult,
 ) -> None:
     report = fixture_backtest.report
-    assert (report.first_snapshot_day, report.last_snapshot_day) == (
-        date(2026, 7, 6),
+    assert (report.first_prediction_day, report.last_prediction_day) == (
+        FIRST_PREDICTION,
+        LAST_PREDICTION,
+    )
+    assert (report.first_latest_due_day, report.last_latest_due_day) == (
+        date(2026, 7, 5),
         RECORDED_END,
     )
-    assert report.snapshot_dates == 90 and report.data_through == RECORDED_END
+    assert report.publication_lag_hours == {SOURCE: 24.0}
+    assert report.snapshot_dates == 91 and report.data_through == RECORDED_END
     assert (report.universe_size, report.games_ranked, report.games_with_outcome) == (15, 6, 6)
-    assert (report.recommendations, report.ranked, report.unranked) == (1350, 420, 930)
-    assert report.primary_evaluable == 402 == report.overall.count
-    assert report.primary_unavailable == {"future_incomplete": 18, "not_scored_at_snapshot": 930}
-    # The last three days cannot have a 72-hour outcome: six ranked games each.
-    assert report.primary_unavailable["future_incomplete"] == 3 * 6
+    assert (report.recommendations, report.ranked, report.unranked) == (1365, 420, 945)
+    assert report.primary_evaluable == 396 == report.overall.count
+    assert report.primary_unavailable == {"future_incomplete": 24, "not_scored_at_snapshot": 945}
+    # Recommendations from 2 to 5 October have no complete three days ahead: six games each.
+    assert report.primary_unavailable["future_incomplete"] == 4 * 6
+    first_ranked = min(prediction_day(s) for s in fixture_backtest.snapshots if s.rank)
+    assert first_ranked == date(2026, 7, 28)  # rests on data through 26 July
     assert report.independent_sources == 1
     # Six games is nowhere near enough: the machinery is shown to work, nothing more.
     assert report.evidence.status is EvidenceStatus.FRAMEWORK_ONLY
     assert "nothing here should be read as evidence" in report.evidence.conclusion
     assert not any(check.reached for check in report.evidence.checks)
     assert [check.name for check in report.leakage_checks] == [
-        "inputs_end_at_cutoff",
+        "source_publication_lag_respected",
+        "outcome_window_after_prediction",
         "reproduced_after_labelling",
-        "unchanged_when_future_altered",
+        "unchanged_when_unseen_values_altered",
         "reference_frozen_at_snapshot",
     ]
     assert all(check.passed and check.checked > 0 for check in report.leakage_checks)
-    assert report.leakage_checks[1].checked == 1350
+    assert report.leakage_checks[0].checked == 91 * 6  # every series given to a prediction
+    assert report.leakage_checks[1].checked == 1365 == report.leakage_checks[2].checked
     assert report.events.real_event_history is False
     assert report.events.snapshots_with_event_intelligence == 0
     assert report.overall.minimum is not None and report.overall.minimum < 0  # negatives kept
     assert report.overall.downside_rate is not None and report.overall.downside_rate > 0
-    assert sum(stratum.outcomes.count for stratum in report.score_bins) == 402
-    assert sum(stratum.outcomes.count for stratum in report.confidence_bands) == 402
+    assert sum(stratum.outcomes.count for stratum in report.score_bins) == 396
+    assert sum(stratum.outcomes.count for stratum in report.confidence_bands) == 396
     assert [stratum.label for stratum in report.score_bins] == [
         "0",
         "0 to 10",
@@ -894,29 +1194,45 @@ def test_the_fixture_backtest_reports_exactly_what_the_recording_shows(
     high = next(s for s in report.confidence_bands if s.label == "high")
     assert high.outcomes.count == 0 and high.outcomes.mean is None  # empty, not zero
     assert len(report.inspection) == 60 and report.inspection_truncated is True
-    assert report.inspection[-1].day == RECORDED_END
-    top = report.inspection[-1].ranked[0]
-    assert (top.rank, top.slug, top.score) == (1, "minecraft", 12.2)
+    last = report.inspection[-1]
+    assert (last.day, last.latest_due_day) == (LAST_PREDICTION, RECORDED_END)
+    assert (last.primary_window_start, last.primary_window_end) == (
+        date(2026, 10, 5),
+        date(2026, 10, 7),
+    )
+    top = last.ranked[0]
+    assert (top.rank, top.slug) == (1, "minecraft")
     assert top.outcome_availability == "unavailable" and top.realized_uplift_72h is None
-    assert len(report.inspection[-1].unranked) == 9
+    assert len(last.unranked) == 9
     scored_day = report.inspection[0]
     assert all(entry.realized_uplift_72h is not None for entry in scored_day.ranked)
     assert any("In-sample only" in line for line in report.limitations)
     assert any("not independent" in line for line in report.limitations)
     assert any("has not been backtested" in line for line in report.limitations)
+    assert any("publication lag" in line for line in report.limitations)
 
 
-def test_the_fixture_result_is_reported_as_it_is_including_where_v0_does_not_lead(
+def test_the_corrected_fixture_result_is_reported_as_it_is(
     fixture_backtest: BacktestResult,
 ) -> None:
     by_name = {s.strategy: s for s in fixture_backtest.report.strategies}
     v0, lift = by_name["metaspike_score_v0"], by_name["simple_lift"]
     assert v0.association.mean_rho is not None and lift.association.mean_rho is not None
-    # On this recording plain lift orders games at least as well as score v0. The report
-    # says so; nothing is arranged to hide it.
+    # The corrected figures, pinned so a change in the simulation cannot pass unnoticed.
+    assert v0.top_k[0].outcomes.mean == pytest.approx(1.1437, abs=5e-4)
+    assert v0.top_k[0].outcomes.median == pytest.approx(0.5012, abs=5e-4)
+    assert v0.association.mean_rho == pytest.approx(0.623, abs=5e-4)
+    assert lift.association.mean_rho == pytest.approx(0.706, abs=5e-4)
+    assert fixture_backtest.report.overall.median == pytest.approx(0.0609, abs=5e-4)
+    # Lower than the first version's +129.3%, +0.68 and +0.78, which let an unpublished
+    # day into each prediction and so into each ranking.
+    assert v0.top_k[0].outcomes.mean is not None and v0.top_k[0].outcomes.mean < 1.2926
+    assert v0.association.mean_rho is not None and v0.association.mean_rho < 0.679
+    assert lift.association.mean_rho < 0.779
+    # Plain lift still orders the games at least as well as score v0. Reported, not hidden.
     assert lift.association.mean_rho >= v0.association.mean_rho
-    assert v0.association.days_used == lift.association.days_used == 67
-    assert v0.top_k[0].outcomes.count == 67
+    assert v0.association.days_used == lift.association.days_used == 66
+    assert v0.top_k[0].outcomes.count == 66
     assert by_name["raw_popularity"].association.mean_rho is not None
 
 
@@ -924,9 +1240,7 @@ def test_the_backtest_is_deterministic_and_linear_in_days_and_games(
     fixture_backtest: BacktestResult,
 ) -> None:
     catalogue, report, lags = real_recording()
-    again = run_backtest(
-        catalogue, report, date(2026, 7, 6), RECORDED_END, RUN_TIME + DAY, publication_lag=lags
-    )
+    again = run_backtest(catalogue, report, FIRST_PREDICTION, LAST_PREDICTION, RUN_TIME + DAY, lags)
     assert again.report.report_id == fixture_backtest.report.report_id
     assert [s.snapshot_id for s in again.snapshots] == [
         s.snapshot_id for s in fixture_backtest.snapshots
@@ -935,19 +1249,100 @@ def test_the_backtest_is_deterministic_and_linear_in_days_and_games(
         item.label_id for item in fixture_backtest.labels
     ]
     assert again.report.created_at != fixture_backtest.report.created_at
-    assert len(fixture_backtest.snapshots) == 90 * 15 == len(fixture_backtest.labels)
-    half = run_backtest(
-        catalogue, report, date(2026, 7, 6), date(2026, 8, 19), RUN_TIME, publication_lag=lags
-    )
+    assert len(fixture_backtest.snapshots) == 91 * 15 == len(fixture_backtest.labels)
+    half = run_backtest(catalogue, report, FIRST_PREDICTION, date(2026, 8, 20), RUN_TIME, lags)
     assert len(half.snapshots) == 45 * 15
     # A shorter run's snapshots are the same snapshots: a day does not depend on the range.
     assert [s.snapshot_id for s in half.snapshots] == [
         s.snapshot_id for s in fixture_backtest.snapshots[: 45 * 15]
     ]
-    with pytest.raises(ValueError, match="inside the recording"):
-        run_backtest(catalogue, report, date(2026, 7, 1), RECORDED_END, RUN_TIME)
+    # The recording cannot stand in for a moment before it starts, or one at which a
+    # day it does not hold would already have been published.
+    for first, last in (
+        (date(2026, 7, 6), LAST_PREDICTION),
+        (FIRST_PREDICTION, date(2026, 10, 6)),
+    ):
+        with pytest.raises(ValueError, match="cannot be reconstructed"):
+            run_backtest(catalogue, report, first, last, RUN_TIME, lags)
+    # With no lag the reachable range is one day shorter at the end, not longer.
+    run_backtest(catalogue, report, date(2026, 10, 4), date(2026, 10, 4), RUN_TIME, ZERO)
+    with pytest.raises(ValueError, match="cannot be reconstructed"):
+        run_backtest(catalogue, report, date(2026, 10, 5), date(2026, 10, 5), RUN_TIME, ZERO)
     with pytest.raises(ValueError, match="ends before it starts"):
-        run_backtest(catalogue, report, RECORDED_END, date(2026, 7, 6), RUN_TIME)
+        run_backtest(catalogue, report, LAST_PREDICTION, FIRST_PREDICTION, RUN_TIME, lags)
+    # A lag has to be stated; there is no default to fall back on.
+    assert inspect.signature(run_backtest).parameters["publication_lag"].default is inspect._empty
+
+
+# --- provenance -----------------------------------------------------------------------
+
+
+def test_a_report_names_the_exact_records_it_was_made_from(
+    fixture_backtest: BacktestResult,
+) -> None:
+    report = fixture_backtest.report
+    snapshot_ids = [s.snapshot_id for s in fixture_backtest.snapshots]
+    label_ids = [item.label_id for item in fixture_backtest.labels]
+    assert report.snapshot_set_hash == set_hash(snapshot_ids)
+    assert report.label_set_hash == set_hash(label_ids)
+    assert len(report.snapshot_set_hash) == 64 and report.snapshot_set_hash != report.label_set_hash
+    # Order does not matter; membership does.
+    assert set_hash(reversed(snapshot_ids)) == report.snapshot_set_hash
+    assert set_hash(snapshot_ids[:-1]) != report.snapshot_set_hash
+    assert set_hash([*snapshot_ids[:-1], "snap_" + "0" * 32]) != report.snapshot_set_hash
+    assert set_hash([]) == hashlib.sha256(b"").hexdigest()
+    # The report's identity includes its provenance.
+    pairs = list(fixture_backtest.pairs)
+    rebuilt = build_report(
+        pairs,
+        RULES,
+        PROTOCOL,
+        EVENT_HEAT_RULES_V1.version,
+        report.leakage_checks,
+        real_event_history=False,
+        data_through=report.data_through,
+        created_at=RUN_TIME,
+    )
+    assert rebuilt.report_id == report.report_id
+    assert rebuilt.snapshot_set_hash == report.snapshot_set_hash
+    fewer = build_report(
+        pairs[:-15],
+        RULES,
+        PROTOCOL,
+        EVENT_HEAT_RULES_V1.version,
+        report.leakage_checks,
+        real_event_history=False,
+        data_through=report.data_through,
+        created_at=RUN_TIME,
+    )
+    assert fewer.snapshot_set_hash != report.snapshot_set_hash
+    assert fewer.label_set_hash != report.label_set_hash
+    assert fewer.report_id != report.report_id
+    # Only ids and hashes: no observation, value series or source payload.
+    dumped = report.model_dump_json()
+    assert "forward" not in dumped and "points" not in dumped and "period_start" not in dumped
+
+
+def test_one_changed_snapshot_or_label_changes_the_matching_hash() -> None:
+    quiet = {"alpha": [*steady(60), *steady(20)], "beta": steady(80)}
+    loud = {"alpha": [*steady(60), *steady(20)], "beta": with_spike(40, 4000.0)}
+    later = {"alpha": [*steady(60), *([900.0] * 20)], "beta": steady(80)}
+    reports = {}
+    for name, series in (("quiet", quiet), ("loud", loud), ("later", later)):
+        catalogue, report = recording(series)
+        reports[name] = run_backtest(catalogue, report, day(40), day(60), WHEN, ZERO).report
+    again_catalogue, again_report = recording(quiet)
+    again = run_backtest(again_catalogue, again_report, day(40), day(60), WHEN + DAY, ZERO).report
+    assert again.snapshot_set_hash == reports["quiet"].snapshot_set_hash
+    assert again.label_set_hash == reports["quiet"].label_set_hash
+    assert again.report_id == reports["quiet"].report_id
+    # A different visible past: different snapshots, and so different labels.
+    assert reports["loud"].snapshot_set_hash != reports["quiet"].snapshot_set_hash
+    assert reports["loud"].label_set_hash != reports["quiet"].label_set_hash
+    # The same visible past and a different future: the same snapshots, different labels.
+    assert reports["later"].snapshot_set_hash == reports["quiet"].snapshot_set_hash
+    assert reports["later"].label_set_hash != reports["quiet"].label_set_hash
+    assert reports["later"].report_id != reports["quiet"].report_id
 
 
 # --- the store ------------------------------------------------------------------------
@@ -958,9 +1353,11 @@ def test_the_accountability_store_is_append_only_and_idempotent(
 ) -> None:
     store = AccountabilityStore(tmp_path)
     assert store.snapshots() == () and store.labels() == () and store.latest_report() is None
-    assert store.add_snapshots(fixture_backtest.snapshots) == 1350
-    assert store.add_labels(fixture_backtest.labels) == 1350
+    assert store.add_snapshots(fixture_backtest.snapshots) == 1365
+    assert store.add_labels(fixture_backtest.labels) == 1365
     assert store.add_report(fixture_backtest.report) is True
+    assert [path.name for path in tmp_path.iterdir()] == [STORE_GENERATION]
+    tmp_path = tmp_path / STORE_GENERATION
     files = sorted(path.relative_to(tmp_path) for path in tmp_path.rglob("*") if path.is_file())
     before = {path: (tmp_path / path).read_bytes() for path in files}
     assert store.add_snapshots(fixture_backtest.snapshots) == 0
@@ -970,28 +1367,87 @@ def test_the_accountability_store_is_append_only_and_idempotent(
     assert after == files
     assert all((tmp_path / path).read_bytes() == body for path, body in before.items())
     assert {path.parts[0] for path in files} == {"snapshots", "labels", "reports"}
-    assert len([path for path in files if path.parts[0] == "snapshots"]) == 90
+    snapshot_days = sorted(path.parts[1] for path in files if path.parts[0] == "snapshots")
+    assert len(snapshot_days) == 91 and snapshot_days[0] == "2026-07-07"  # by prediction day
 
-    reopened = AccountabilityStore(tmp_path)
+    reopened = AccountabilityStore(tmp_path.parent)
     assert {s.snapshot_id for s in reopened.snapshots()} == {
         s.snapshot_id for s in fixture_backtest.snapshots
     }
     assert reopened.latest_report() == fixture_backtest.report
     day_one = reopened.snapshots(date(2026, 9, 1))
     assert len(day_one) == 15 and [s.rank for s in day_one[:6]] == [1, 2, 3, 4, 5, 6]
+    assert {s.latest_due_day for s in day_one} == {date(2026, 8, 30)}
     first = fixture_backtest.snapshots[0]
     assert reopened.label_for(first.snapshot_id) == fixture_backtest.labels[0]
     assert reopened.label_for("snap_" + "f" * 32) is None
 
 
+def test_records_of_the_superseded_simulation_are_kept_and_never_read(
+    tmp_path: Path, fixture_backtest: BacktestResult
+) -> None:
+    """The first generation's records let an unpublished day in. They stay; they are not used."""
+    old = {
+        "snapshots/2026-10-03/aa.ndjson": '{"snapshot_id":"snap_old","data_cutoff_day":"x"}\n',
+        "labels/2026-10-03/bb.ndjson": '{"label_id":"label_old","snapshot_id":"snap_old"}\n',
+        "reports/report_old.json": '{"format":"validation_report_v1","first_snapshot_day":"x"}\n',
+    }
+    for name, body in old.items():
+        (tmp_path / name).parent.mkdir(parents=True)
+        (tmp_path / name).write_text(body)
+    store = AccountabilityStore(tmp_path)
+    assert store.snapshots() == () and store.labels() == () and store.latest_report() is None
+    store.add_snapshots(fixture_backtest.snapshots)
+    store.add_labels(fixture_backtest.labels)
+    store.add_report(fixture_backtest.report)
+    assert store.latest_report() == fixture_backtest.report
+    assert store.audit(fixture_backtest.report) == ()
+    assert all((tmp_path / name).read_text() == body for name, body in old.items())
+
+
+def test_the_store_can_audit_a_report_against_the_records_it_holds(
+    tmp_path: Path, fixture_backtest: BacktestResult
+) -> None:
+    report = fixture_backtest.report
+    complete = AccountabilityStore(tmp_path / "complete")
+    complete.add_snapshots(fixture_backtest.snapshots)
+    complete.add_labels(fixture_backtest.labels)
+    assert complete.audit(report) == ()
+    # A snapshot missing from the store.
+    partial = AccountabilityStore(tmp_path / "partial")
+    partial.add_snapshots(fixture_backtest.snapshots[:-1])
+    partial.add_labels(fixture_backtest.labels)
+    problems = partial.audit(report)
+    assert len(problems) == 2 and "snapshot_set_hash" in problems[0]
+    # Every snapshot, one label missing.
+    unlabelled = AccountabilityStore(tmp_path / "unlabelled")
+    unlabelled.add_snapshots(fixture_backtest.snapshots)
+    unlabelled.add_labels(fixture_backtest.labels[:-1])
+    assert len(unlabelled.audit(report)) == 1 and "label_set_hash" in unlabelled.audit(report)[0]
+    # An empty store holds nothing the report describes.
+    assert len(AccountabilityStore(tmp_path / "empty").audit(report)) == 2
+    # The store may hold more than one run. A report is audited against its own period:
+    # a shorter run's report matches the larger store, and the longer report does not
+    # match a store that holds only the shorter run.
+    catalogue, recording_, lags = real_recording()
+    shorter = run_backtest(
+        catalogue, recording_, FIRST_PREDICTION, date(2026, 9, 1), RUN_TIME, lags
+    )
+    shorter_store = AccountabilityStore(tmp_path / "shorter")
+    shorter_store.add_snapshots(shorter.snapshots)
+    shorter_store.add_labels(shorter.labels)
+    assert shorter_store.audit(shorter.report) == ()
+    assert len(shorter_store.audit(report)) == 2
+
+
 def test_a_later_label_is_kept_beside_the_earlier_one(tmp_path: Path) -> None:
     catalogue, short = recording({"alpha": [*steady(60), 120.0]})
     _, longer = recording({"alpha": [*steady(60), 120.0, 130.0, 140.0]})
-    snapshot = predict(catalogue, RecordedHistory(short).inputs_at(day(59)), WHEN)[0]
-    same = predict(catalogue, RecordedHistory(longer).inputs_at(day(59)), WHEN)[0]
+    snapshot = predict(catalogue, sees(short, 59), WHEN)[0]
+    same = predict(catalogue, sees(longer, 59), WHEN)[0]
     assert same.snapshot_id == snapshot.snapshot_id
-    early = label(snapshot, RecordedHistory(short).future())
-    late = label(snapshot, RecordedHistory(longer).future())
+    early = label(snapshot, RecordedHistory(short, ZERO).future())
+    late = label(snapshot, RecordedHistory(longer, ZERO).future())
     assert early.availability is OutcomeAvailability.UNAVAILABLE
     assert late.realized_uplift_72h == pytest.approx(0.30)
     store = AccountabilityStore(tmp_path)
@@ -1017,7 +1473,7 @@ def test_validation_is_published_through_the_artifact_contract(
 ) -> None:
     root = publish(tmp_path, fixture_backtest.report)
     manifest = validate_published(root)
-    assert manifest.schema_version == SCHEMA_VERSION == "1.2.0"
+    assert manifest.schema_version == SCHEMA_VERSION == "1.3.0"
     assert manifest.artifacts.validation == f"{manifest.version_path}/validation.json"
     document = json.loads((root / "validation.json").read_text())
     schema = json.loads((REPO / "schemas" / "validation.schema.json").read_text())
@@ -1028,7 +1484,25 @@ def test_validation_is_published_through_the_artifact_contract(
     report = fixture_backtest.report
     assert published.report_id == report.report_id
     assert published.evidence.status == "framework_only"
-    assert published.primary_evaluable == 402 and published.overall.mean == report.overall.mean
+    assert published.primary_evaluable == 396 and published.overall.mean == report.overall.mean
+    # When each recommendation was simulated, and what it could see at that moment.
+    assert (published.first_prediction_day, published.last_prediction_day) == (
+        FIRST_PREDICTION,
+        LAST_PREDICTION,
+    )
+    assert (published.first_latest_due_day, published.last_latest_due_day) == (
+        date(2026, 7, 5),
+        RECORDED_END,
+    )
+    assert published.publication_lag_hours == {SOURCE: 24.0}
+    assert published.snapshot_set_hash == report.snapshot_set_hash
+    assert published.label_set_hash == report.label_set_hash
+    assert "first_snapshot_day" not in document["report"]
+    for shown in published.inspection:
+        assert shown.as_of == prediction_moment(shown.day)
+        assert shown.latest_due_day == shown.day - 2 * DAY
+        assert shown.primary_window_start == shown.day
+        assert shown.primary_window_end == shown.day + 2 * DAY
     assert [s.strategy for s in published.strategies] == list(STRATEGIES)
     # Published exactly as computed: nothing is rounded at the boundary.
     assert published.strategies[0].association.mean_rho == report.strategies[0].association.mean_rho
@@ -1039,7 +1513,13 @@ def test_validation_is_published_through_the_artifact_contract(
         "persistence_7d",
         "lead_time_days",
     ]
-    assert "baseline_median_28d[t]" in artifact.outcome_definition.terms[0].formula
+    formulas = [term.formula for term in artifact.outcome_definition.terms]
+    assert formulas[0] == "mean(x[f] .. x[f+2]) / baseline_median_28d[P] - 1"
+    assert formulas[1] == "x[f] / avg_3d[P] - 1"
+    assert formulas[2] == "count(x[f+k] > baseline_median_28d[P] for k in 0..6) / 7"
+    assert formulas[3].startswith("1 + smallest k in 0..5 with x[f+k] > x[f+k-1]")
+    assert "first whole UTC day" in artifact.outcome_definition.terms[0].rationale
+    assert not any("[t" in formula for formula in formulas)  # no day-of-data notation left
     assert "not evidence about the final" in artifact.scope_note
     # Score v0 in the same bundle is untouched.
     for slug, expected in GOLDEN["games"].items():
@@ -1086,12 +1566,34 @@ def test_validation_refuses_a_report_that_claims_more_than_it_shows(
     def drop_v0(report: dict[str, Any]) -> None:
         report["strategies"] = report["strategies"][1:]
 
+    def drop_lag_check(report: dict[str, Any]) -> None:
+        report["leakage_checks"] = report["leakage_checks"][1:]
+
+    def see_the_unpublished(report: dict[str, Any]) -> None:
+        shown = report["inspection"][0]
+        shown["latest_due_day"] = (date.fromisoformat(shown["day"]) - DAY).isoformat()
+
+    def judge_from_the_past(report: dict[str, Any]) -> None:
+        shown = report["inspection"][0]
+        shown["primary_window_start"] = shown["latest_due_day"]
+
+    def no_lag_stated(report: dict[str, Any]) -> None:
+        report["publication_lag_hours"] = {}
+
+    def blank_hash(report: dict[str, Any]) -> None:
+        report["snapshot_set_hash"] = "unknown"
+
     for change, message in (
         (promote, "not what its checks support"),
         (mark_reached, "reached with an unmet requirement"),
         (miscount, "counts do not add up"),
         (fail_check, "leakage check did not pass"),
         (drop_v0, "not among the strategies"),
+        (drop_lag_check, "publication lag was not checked"),
+        (see_the_unpublished, "had not been published at the recommendation"),
+        (judge_from_the_past, "does not start after the recommendation"),
+        (no_lag_stated, "no source publication lag is stated"),
+        (blank_hash, "not a SHA-256 digest"),
     ):
         tamper(change)
         with pytest.raises(ArtifactValidationError, match=message):
@@ -1129,9 +1631,15 @@ def test_the_backtest_command_runs_offline_and_writes_the_store(
     ]
     assert cli.main(arguments) == 0
     output = capsys.readouterr().out
-    assert "Backtest 2026-08-01 to 2026-09-30 (61 days, data through 2026-10-03)" in output
+    assert (
+        "Backtest of recommendations made at 00:00 UTC, 2026-08-01 to 2026-09-30 (61 days)"
+        in output
+    )
+    assert "publication lag: wikimedia_pageviews 24 h" in output
+    assert "newest day visible 2026-07-30 to 2026-09-28; data through 2026-10-03" in output
+    assert "Provenance: snapshots " in output and "(store matches)" in output
     assert "EVIDENCE STATUS: framework_only" in output
-    assert "Leakage checks passed: 4 of 4" in output
+    assert "Leakage checks passed: 5 of 5" in output
     assert "Real event backtesting is unavailable" in output
     assert "+915 snapshots, +915 labels" in output
     for strategy in STRATEGIES:
@@ -1140,8 +1648,16 @@ def test_the_backtest_command_runs_offline_and_writes_the_store(
     report = store.latest_report()
     assert report is not None and report.snapshot_dates == 61
     assert len(store.snapshots()) == 61 * 15
+    assert store.audit(report) == ()
     # Every day of this range has its three forward days inside the recording.
     assert report.primary_unavailable.get("future_incomplete", 0) == 0
+    # The range is checked against what the recording could have shown at each moment.
+    for first, last in (("2026-07-06", "2026-09-30"), ("2026-08-01", "2026-10-06")):
+        outside = [*arguments]
+        outside[outside.index("--from") + 1] = first
+        outside[outside.index("--to") + 1] = last
+        assert cli.main(outside) != 0
+        assert "cannot be reconstructed" in capsys.readouterr().err
     # A second run adds nothing.
     assert cli.main(arguments) == 0
     assert "+0 snapshots, +0 labels" in capsys.readouterr().out

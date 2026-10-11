@@ -85,16 +85,50 @@ describe("the real replay backtest", () => {
     render(<Validation />);
     const tested = await screen.findByRole("region", { name: "What was tested" });
     const stat = (label: string) => within(tested).getByText(label).closest("div")!;
-    expect(stat("Snapshot days")).toHaveTextContent("90");
-    expect(stat("Snapshot days")).toHaveTextContent("6 Jul 2026 to 3 Oct 2026");
+    expect(stat("Recommendation days")).toHaveTextContent("91");
+    expect(stat("Recommendation days")).toHaveTextContent("7 Jul 2026 to 5 Oct 2026");
+    expect(stat("Recording ends")).toHaveTextContent("3 Oct 2026");
     expect(stat("Games ranked at least once")).toHaveTextContent("6");
     expect(stat("Games ranked at least once")).toHaveTextContent("of 15 in the universe");
-    expect(stat("Snapshots")).toHaveTextContent("1,350");
-    expect(stat("Snapshots")).toHaveTextContent("420 ranked, 930 unranked");
-    expect(stat("Outcomes evaluable")).toHaveTextContent("402");
-    expect(stat("Outcomes evaluable")).toHaveTextContent("18 future incomplete");
+    expect(stat("Snapshots")).toHaveTextContent("1,365");
+    expect(stat("Snapshots")).toHaveTextContent("420 ranked, 945 unranked");
+    expect(stat("Outcomes evaluable")).toHaveTextContent("396");
+    expect(stat("Outcomes evaluable")).toHaveTextContent("24 future incomplete");
     expect(stat("Independent sources")).toHaveTextContent("1");
     expect(stat("Score under test")).toHaveTextContent("metaspike_score_v0");
+  });
+
+  it("says when each recommendation was made and the newest day it could see", async () => {
+    serve();
+    render(<Validation />);
+    const timing = await screen.findByTestId("timing");
+    const stat = (label: string) => within(timing).getByText(label).closest("div")!;
+    // Recommendations run 7 Jul to 5 Oct; with a one-day lag each sees two days back.
+    expect(stat("Newest demand day visible")).toHaveTextContent("5 Jul 2026 to 3 Oct 2026");
+    expect(stat("Source publication lag")).toHaveTextContent("Wikimedia pageviews: 24 h");
+    expect(screen.getByRole("region", { name: "What each recommendation could see" })).toHaveTextContent(
+      "had ended but was not yet published is left out of the recommendation and is not part of its outcome either",
+    );
+    expect(report.publication_lag_hours).toEqual({ wikimedia_pageviews: 24 });
+    for (const day of report.inspection) {
+      expect(day.latest_due_day < day.day).toBe(true);
+      expect(day.primary_window_start).toBe(day.day);
+      expect(day.as_of).toBe(`${day.day}T00:00:00Z`);
+    }
+  });
+
+  it("names the records it summarises", async () => {
+    serve();
+    render(<Validation />);
+    const provenance = await screen.findByTestId("provenance");
+    expect(report.snapshot_set_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.label_set_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(report.snapshot_set_hash).not.toBe(report.label_set_hash);
+    expect(provenance).toHaveTextContent(report.snapshot_set_hash);
+    expect(provenance).toHaveTextContent(report.label_set_hash);
+    expect(provenance).toHaveTextContent(report.report_id);
+    expect(provenance).toHaveTextContent("validation_report_v2");
+    expect(provenance).toHaveTextContent("Snapshots (1,365)");
   });
 
   it("shows score v0 beside the simple alternatives, exactly as computed", async () => {
@@ -136,7 +170,7 @@ describe("the real replay backtest", () => {
     // No ordering by result, no winner, no praise: the strategies are in the artifact's order.
     const order = [...document.querySelectorAll("[data-strategy]")].map((node) => node.getAttribute("data-strategy"));
     expect(order).toEqual(report.strategies.map((strategy) => strategy.strategy));
-    expect(document.body.textContent).not.toMatch(/outperform|beats|winner|best strategy|proven|predictive power/i);
+    expect(document.body.textContent).not.toMatch(/outperform|beats|winner|best strategy|\bproven\b|predictive power/i);
   });
 
   it("shows an empty stratum as empty, never as zero", async () => {
@@ -164,15 +198,19 @@ describe("the real replay backtest", () => {
     expect(rows[0]).toHaveTextContent("Insufficient sample");
     expect(rows[0]).toHaveTextContent("No");
     expect(rows[0]).toHaveTextContent("6 / 20"); // six games where twenty are needed
-    expect(rows[0]).toHaveTextContent("90 / 30");
+    expect(rows[0]).toHaveTextContent("91 / 30");
     expect(rows[2]).toHaveTextContent("Validated");
     expect(rows[2]).toHaveTextContent("held_out_period");
     expect(rows[2]).toHaveTextContent("0 / 1");
     expect(screen.getByRole("region", { name: "Why this status" })).toHaveTextContent("cannot report validated");
     const checks = within(screen.getByRole("region", { name: "Look-ahead checks" })).getAllByRole("listitem");
-    expect(checks).toHaveLength(4);
+    expect(checks).toHaveLength(5);
     for (const check of checks) expect(check).toHaveTextContent("Passed");
-    expect(checks[2]).toHaveTextContent("unchanged_when_future_altered");
+    expect(checks[0]).toHaveTextContent("source_publication_lag_respected");
+    expect(checks[0]).toHaveTextContent("546 checked");
+    expect(checks[1]).toHaveTextContent("outcome_window_after_prediction");
+    expect(checks[3]).toHaveTextContent("unchanged_when_unseen_values_altered");
+    expect(checks[3]).toHaveTextContent("days that had ended but were not yet published");
   });
 
   it("says event backtesting is unavailable and lists every limitation", async () => {
@@ -181,7 +219,7 @@ describe("the real replay backtest", () => {
     const events = await screen.findByRole("complementary", { name: "Event backtesting" });
     expect(events).toHaveTextContent("Event backtesting unavailable");
     expect(events).toHaveTextContent(report.events.note);
-    expect(events).toHaveTextContent("0 of 1,350");
+    expect(events).toHaveTextContent("0 of 1,365");
     expect(events).toHaveTextContent("event_heat_rules_v1");
     const limitations = screen.getByRole("region", { name: "Limitations" });
     expect(within(limitations).getAllByRole("listitem")).toHaveLength(report.limitations.length);
@@ -197,7 +235,7 @@ describe("the real replay backtest", () => {
     render(<Validation />);
     const table = await screen.findByTestId("inspection-table");
     const latest = report.inspection[report.inspection.length - 1]!;
-    expect(screen.getByRole("combobox", { name: "Snapshot day" })).toHaveValue(latest.day);
+    expect(screen.getByRole("combobox", { name: "Recommendation day" })).toHaveValue(latest.day);
     // The last recorded day has no future yet: said in words, not as a number.
     let rows = within(table).getAllByRole("row").slice(1);
     expect(rows).toHaveLength(latest.ranked.length);
@@ -206,9 +244,14 @@ describe("the real replay backtest", () => {
     expect(rows[0]).toHaveTextContent("Future incomplete");
     expect(rows[0]!.textContent).not.toMatch(/%/);
     expect(screen.getByText(/Unranked that day \(9\)/)).toBeInTheDocument();
+    let timing = screen.getByTestId("inspection-timing");
+    expect(latest.day).toBe("2026-10-05");
+    expect(timing).toHaveTextContent("5 Oct 2026, 00:00 UTC");
+    expect(within(timing).getByText("Newest demand day visible then").closest("div")).toHaveTextContent("3 Oct 2026");
+    expect(timing).toHaveTextContent("5 Oct 2026 to 7 Oct 2026");
 
     const earlier = report.inspection.find((entry) => entry.day === "2026-09-15")!;
-    await user.selectOptions(screen.getByRole("combobox", { name: "Snapshot day" }), earlier.day);
+    await user.selectOptions(screen.getByRole("combobox", { name: "Recommendation day" }), earlier.day);
     rows = within(screen.getByTestId("inspection-table")).getAllByRole("row").slice(1);
     expect(rows.map((row) => within(row).getByRole("link").textContent)).toEqual(earlier.ranked.map((entry) => entry.name));
     earlier.ranked.forEach((entry, index) => {
@@ -218,7 +261,10 @@ describe("the real replay backtest", () => {
       expect(within(row).getByRole("link")).toHaveAttribute("href", `/games/${entry.slug}`);
     });
     expect(earlier.ranked.some((entry) => (entry.realized_uplift_72h ?? 0) < 0)).toBe(true); // negatives are there
-    expect(screen.getByText(/using only data through 15 Sep 2026/)).toBeInTheDocument();
+    timing = screen.getByTestId("inspection-timing");
+    expect(timing).toHaveTextContent("15 Sep 2026, 00:00 UTC");
+    expect(within(timing).getByText("Newest demand day visible then").closest("div")).toHaveTextContent("13 Sep 2026");
+    expect(timing).toHaveTextContent("15 Sep 2026 to 17 Sep 2026");
   });
 });
 
@@ -290,6 +336,22 @@ describe("refusing a report that claims more than it shows", () => {
     ],
     ["a failed look-ahead check", (draft) => void (draft.report!.leakage_checks[0]!.passed = false), "/report/leakage_checks"],
     ["no look-ahead checks at all", (draft) => void (draft.report!.leakage_checks = []), "/report/leakage_checks"],
+    [
+      "a report whose publication lag was never checked",
+      (draft) => void (draft.report!.leakage_checks = draft.report!.leakage_checks.slice(1)),
+      "/report/leakage_checks",
+    ],
+    [
+      "a recommendation that saw its own day",
+      (draft) => void (draft.report!.inspection[0]!.latest_due_day = draft.report!.inspection[0]!.day),
+      "/report/inspection/0/latest_due_day",
+    ],
+    [
+      "an outcome window that starts before the recommendation",
+      (draft) => void (draft.report!.inspection[0]!.primary_window_start = draft.report!.inspection[0]!.latest_due_day),
+      "/report/inspection/0/primary_window_start",
+    ],
+    ["a provenance hash that is not one", (draft) => void (draft.report!.snapshot_set_hash = "unknown"), "/report/snapshot_set_hash"],
     ["'not run' that still carries a report", (draft) => void (draft.availability = "not_run"), "/report"],
     ["'available' with no report", (draft) => void (draft.report = null), "/report"],
   ];

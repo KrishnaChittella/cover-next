@@ -171,7 +171,7 @@ function Inspection({ days }: { days: readonly InspectionDayView[] }) {
     <div>
       <div className="mb-3">
         <label htmlFor={`${id}-day`} className="eyebrow mb-1 block">
-          Snapshot day
+          Recommendation day
         </label>
         <select
           id={`${id}-day`}
@@ -186,13 +186,22 @@ function Inspection({ days }: { days: readonly InspectionDayView[] }) {
           ))}
         </select>
       </div>
-      <p className="mb-2 text-xs text-muted">
-        What was ranked using only data through {formatDay(day.day)} (as of {formatTimestamp(day.as_of)}), and what
-        the next days then did.
-      </p>
+      <dl data-testid="inspection-timing" className="panel mb-3 grid gap-x-6 gap-y-4 p-4 sm:grid-cols-3">
+        <Stat label="Recommendation simulated at">
+          <span className="num">{formatTimestamp(day.as_of)}</span>
+        </Stat>
+        <Stat label="Newest demand day visible then" hint="Later days had not been published by the source.">
+          <span className="num">{formatDay(day.latest_due_day)}</span>
+        </Stat>
+        <Stat label="Judged on the next 72 hours" hint="Whole UTC days starting at or after the recommendation.">
+          <span className="num">
+            {formatDay(day.primary_window_start)} to {formatDay(day.primary_window_end)}
+          </span>
+        </Stat>
+      </dl>
       <div className="panel overflow-x-auto">
         <table data-testid="inspection-table" className="w-full border-collapse text-sm">
-          <caption className="sr-only">Ranking on {formatDay(day.day)} and what followed</caption>
+          <caption className="sr-only">Ranking made on {formatDay(day.day)} and what followed</caption>
           <thead>
             <tr className="border-b border-line text-xs text-muted">
               <th scope="col" className="px-4 py-2 text-right font-medium">Rank</th>
@@ -290,6 +299,7 @@ function OutcomeDefinition({ validation }: { validation: ValidationArtifact }) {
 function Report({ validation, report }: { validation: ValidationArtifact; report: ValidationReportView }) {
   const status = report.evidence.status;
   const unavailable = Object.entries(report.primary_unavailable);
+  const lags = Object.entries(report.publication_lag_hours);
   return (
     <>
       <aside
@@ -311,7 +321,10 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
 
       <Section id="tested" title="What was tested">
         <dl className="panel grid grid-cols-2 gap-x-6 gap-y-5 p-5 md:grid-cols-4">
-          <Stat label="Snapshot days" hint={`${formatDay(report.first_snapshot_day)} to ${formatDay(report.last_snapshot_day)}`}>
+          <Stat
+            label="Recommendation days"
+            hint={`${formatDay(report.first_prediction_day)} to ${formatDay(report.last_prediction_day)}`}
+          >
             <span className="num">{formatCount(report.snapshot_dates)}</span>
           </Stat>
           <Stat label="Games ranked at least once" hint={`of ${formatCount(report.universe_size)} in the universe`}>
@@ -326,7 +339,7 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
           >
             <span className="num">{formatCount(report.primary_evaluable)}</span>
           </Stat>
-          <Stat label="Data through">
+          <Stat label="Recording ends">
             <span className="num">{formatDay(report.data_through)}</span>
           </Stat>
           <Stat label="Independent sources">
@@ -337,6 +350,28 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
           </Stat>
           <Stat label="Score under test">
             <span className="font-mono text-xs">{report.score_version}</span>
+          </Stat>
+        </dl>
+      </Section>
+
+      <Section
+        id="timing"
+        title="What each recommendation could see"
+        note="A day of demand counts as visible only once its source would have published it. A day that had ended but was not yet published is left out of the recommendation and is not part of its outcome either."
+      >
+        <dl data-testid="timing" className="panel grid gap-x-6 gap-y-5 p-5 md:grid-cols-3">
+          <Stat label="Newest demand day visible" hint="At the first and the last recommendation.">
+            <span className="num">
+              {formatDay(report.first_latest_due_day)} to {formatDay(report.last_latest_due_day)}
+            </span>
+          </Stat>
+          <Stat label="Source publication lag" hint="After a day ends, before it counts as published.">
+            <span className="num">
+              {lags.map(([source, hours]) => `${humanize(source)}: ${String(hours)} h`).join("; ")}
+            </span>
+          </Stat>
+          <Stat label="Outcome window" hint="Never includes a day that had begun before the recommendation.">
+            The first whole UTC days at or after the recommendation
           </Stat>
         </dl>
       </Section>
@@ -464,7 +499,7 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
         title="A past day, and what followed"
         note={
           report.inspection_truncated
-            ? `The most recent ${report.inspection.length} snapshot days are kept in the report. Every snapshot is in the accountability store.`
+            ? `The most recent ${report.inspection.length} recommendation days are kept in the report. Every snapshot is in the accountability store.`
             : undefined
         }
       >
@@ -481,9 +516,25 @@ function Report({ validation, report }: { validation: ValidationArtifact; report
         </ol>
       </Section>
 
-      <p className="mt-6 font-mono text-xs text-faint">
-        {report.report_id} · backtest run {formatTimestamp(report.created_at)}
-      </p>
+      <Section
+        id="provenance"
+        title="Provenance"
+        note="Which records this report summarises. Each hash is a SHA-256 over the sorted record ids, so the same records always give the same hash and one changed record gives another."
+      >
+        <dl data-testid="provenance" className="panel grid gap-y-4 p-5">
+          <Stat label={`Snapshots (${formatCount(report.recommendations)})`}>
+            <span className="font-mono text-xs break-all">{report.snapshot_set_hash}</span>
+          </Stat>
+          <Stat label="Outcome labels">
+            <span className="font-mono text-xs break-all">{report.label_set_hash}</span>
+          </Stat>
+          <Stat label="Report">
+            <span className="font-mono text-xs break-all">
+              {report.report_id} · {report.format} · backtest run {formatTimestamp(report.created_at)}
+            </span>
+          </Stat>
+        </dl>
+      </Section>
     </>
   );
 }
