@@ -1,157 +1,223 @@
-# Handoff: latest checkpoint
+# Handoff: latest checkpoint (product branch)
 
-This file is the short-lived handoff from Claude Code to ChatGPT. It is overwritten at
-each checkpoint; Git history is the archive. It supports communication only and
-replaces no code, test, audit or document.
+This file is the short-lived handoff from Claude Code to ChatGPT. **This copy lives only
+on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and was not
+touched. It supports communication only and replaces no code, test or document.
 
-Previous checkpoint: **PHASE 4 PART C2-F: FINAL UNPAUSE PLAN READY — REVIEW REQUIRED**
+Production baseline: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
 
-Current checkpoint: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
+Parallel checkpoint: **PRODUCT BUILD U1: LOCAL UI COMPLETE — CHATGPT REVIEW REQUIRED**
 
-The control record is armed and the approved unpause plan is applied. The scheduler is
-enabled with the finite cron and its next run is the first tick of the window.
-**C2-F is NOT YET PASSED and has not yet run:** the observation window opens at
-2026-10-12T00:00:00Z. Nothing was triggered by hand and no source was called.
+The first private, local MetaSpike interface is built, tested and running against real
+artifacts from the offline replay pipeline. Production, `main` and the C2-F soak were
+not touched in any way.
 
-No manual action is required before the first tick. Nothing depends on a laptop.
-
-## Launch
+## Where it is
 
 | | |
 |---|---|
-| Launch completed | 2026-10-11 02:20:17 UTC, 21 h 40 m before the first tick |
-| Control record written | 02:11:44 UTC |
-| Control generation | `1791578645841911` (disabled) → **`1791684706340016`** (armed) |
-| Write mechanism | `--if-generation-match` on the disabled generation; it held |
-| Read-back | byte-identical to the approved record (238 bytes); validated by the dispatcher's own model before writing |
-| Approved plan | run `38101148562`, SHA-256 `61c335bbd54e7bbed2cba09490315331d0c858f595f079aea28fd75e95659bd1` |
-| Apply run | `38104368815`, apply job finished 02:20:20 UTC, success |
-| Terraform result | `Apply complete! Resources: 0 added, 2 changed, 0 destroyed.` (0 replaced) |
-| Prod state serial | 13 → **14**; still 94 managed resources |
+| Branch | `product/local-ui` |
+| Worktree | `../MetaSpike-product-ui` (sibling of the original, which stays on `main`) |
+| Base commit | `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, the C2-F launch commit |
+| Feature commit | `d01331fd89522ce5fc7e481d019cbc6b6de94396`, "feat: add local MetaSpike product UI" |
+| App | `apps/dev-ui/` |
 
-Order kept: preflight, then control, then apply. Between the control write and the
-apply the scheduler was confirmed still PAUSED with 35 executions.
+## Stack
 
-The control record now in place:
+| | |
+|---|---|
+| Framework | Next.js 16.4.0, App Router, React 19.3.0 |
+| Language | TypeScript 6.0.3, `strict` plus `noUncheckedIndexedAccess` |
+| Styling | Tailwind CSS 4.3.3, one dark palette as theme tokens, system fonts only |
+| Charts | Apache ECharts 6.1.0, modular import, canvas renderer |
+| Validation | Ajv 8.20.0 (JSON Schema 2020-12) with ajv-formats |
+| Tests | Vitest 5.0.3, Testing Library, jsdom |
+| Lint | ESLint 9.39.5 with eslint-config-next 16.4.0 |
+| Package manager | npm 11, `package-lock.json` committed |
 
-```json
-{"version":1,"enabled":true,"armed_until":"2026-10-18T23:30:00Z","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
+TypeScript 6 and ESLint 9 are what the Next 16.4 lint stack resolves to; the newest
+majors of each are not yet supported by it. No second backend, no API server, no
+external font, no analytics.
+
+## Routes
+
+| Route | Artifact read | Content |
+|---|---|---|
+| `/` | `current.json`, `source-health.json` | Header and question, INTERNAL DEVELOPMENT badge, scope notice, snapshot strip, leaderboard (search, sort, lifecycle and confidence filters), unranked games with reasons, "what exists today" panel |
+| `/games` | `current.json` | Every game in the run, searchable, ranked or not |
+| `/games/[slug]` | `games/{slug}.json` only | Name, aliases, relationships with a link to the parent, rank, score and version, confidence with ceiling and factors, why-now summary and coded reasons, the four score components, history chart, feature panel, source coverage, method reference |
+| `/sources` | `source-health.json` | Status, last success, expected and latest observed day, staleness, attempted, succeeded, failed, not mapped, failures grouped by error code |
+| `/methodology` | `methodology.json` | Score terms, confidence terms, ceiling and bands, feature definitions, metrics, source signals and usage policy, limitations |
+
+Navigation: Overview, Games, Sources, Methodology. No account, settings or portfolio
+links.
+
+## Data adapter
+
+- One base URL: `NEXT_PUBLIC_METASPIKE_DATA_URL`, default `/data`.
+- The client (`src/lib/data/client.ts`) reads `manifest.json` first and then exactly the
+  files the manifest names, at the manifest's own `versions/{run_id}/…` paths. The
+  manifest and version-path model is kept as published; nothing is flattened into a
+  frontend dataset.
+- A manifest path that is absolute, or contains `..`, a scheme, a backslash or a query,
+  is refused, so a manifest cannot point the interface elsewhere.
+- `npm run data:sync` runs the repository's own `metaspike validate-artifacts`, then
+  copies only `manifest.json` and the one version it selects into `public/data`
+  (git-ignored). The source artifacts are only read.
+- `npm run data:replay` first rebuilds the artifacts with
+  `uv run metaspike run --replay tests/fixtures/wikimedia --as-of 2026-10-03`, which
+  answers from recorded files. No live source call exists anywhere in the app or its
+  scripts.
+- A CDN or object store serving the same layout needs only the variable changed.
+- **The browser computes no score, rank or feature.** It sorts and filters the
+  leaderboard the artifact already holds; the artifact's rank is the default order and
+  the tie-break for every other.
+
+## Schema and type safety
+
+- `<repo>/schemas/*.schema.json`, exported from the Python contract, is the authority.
+- `npm run contract:generate` copies those files byte for byte into
+  `src/contract/schemas` and generates `src/contract/types` from them. No artifact type
+  is written by hand.
+- Every file is validated against its schema at run time before anything renders. A
+  failure renders nothing from that data: the page names the file and lists the first
+  violations with their JSON paths.
+- Also refused, visibly: an artifact from a different run than the manifest selects; a
+  contract version this build was not generated for; a game file whose slug does not
+  match.
+- `npm run contract:check` fails when the committed copy no longer matches
+  `<repo>/schemas`.
+
+## How to run
+
+```
+cd apps/dev-ui
+npm install
+npm run data:replay     # offline; or `npm run data:sync` if artifacts/ already exists
+npm run dev             # http://localhost:3000, bound to 127.0.0.1
 ```
 
-## Preflight (02:10 UTC on 11 October), all met
+## Data used for the smoke check
 
-Before midnight UTC, against an external clock. `main` level with origin and clean;
-only two documents changed since the plan's commit `fea9429`. Plan run succeeded;
-artifact unexpired (2026-10-14T01:24:20Z) and hashing exactly; rendered diff 0 add,
-2 change, 0 destroy. State serial 13, 94 resources, no apply since the plan. Scheduler
-PAUSED `0 * * * *` `Etc/UTC`. Control disabled at generation `1791578645841911`. 35
-executions, the last being the catch-up `ms-warehouse-lxqp9`. Seven jobs on the
-approved digest. 51 landed batches and 51 load receipts, so none pending;
-`collection_runs` 54, observations 1,372, ledger 28. Ten policies, silence disabled,
-the two failure alerts enabled, volume threshold 60. The five repository variables as
-approved. 0 secret versions, 0 keys, WIF ACTIVE, quota 10,240 MiB. No Cloud Run log
-entry since the catch-up.
+Real output of the offline replay, not hand-made: run `20261011T025133Z-a8861c54`,
+contract 1.0.0, as of 2026-10-03, **6 ranked of 15 games**. Minecraft 12.2, Grand Theft
+Auto VI 2.3, four games at 0.0 (attention at or below baseline), nine unranked (eight
+whose recorded responses are not in the replay fixtures, and FiveM, which has no
+mapping). Confidence ceiling 60. Source health "degraded", which is what a replay with
+six recorded games honestly reports.
 
-## Verified after the apply (02:20 UTC)
+It is a thin, unexciting leaderboard. That is the truth of the fixture data and it was
+not dressed up.
 
-**Scheduler**, read from the live job:
+## Browser smoke check
 
-| | |
+Production build served locally, loaded in headless Chrome:
+
+| Page | Result |
 |---|---|
-| State | **ENABLED** |
-| Schedule | **`0 * 12-18 10 *`** |
-| Time zone | `Etc/UTC` |
-| Next scheduled run | **2026-10-12T00:00:00Z** |
-| Last attempt | none |
+| `/` | Renders: scope notice, snapshot, 6-row leaderboard, 9 unranked, capability panel |
+| `/games/minecraft` | Renders: headline, reasons, component and factor meters, chart drawn on a canvas, features, coverage |
+| `/games/fivem` | Renders the unscored state: "Unranked", "Not scored", "Not available", no meters, no chart |
+| `/sources` | Renders: Wikimedia pageviews, degraded, 14 attempted, 6 succeeded, 8 failed, 1 not mapped |
+| `/methodology` | Renders: v0 distinction, score and confidence terms, feature definitions, policy, 11 limitations |
+| `/` at a true 390 px width | Renders as a list of cards with no horizontal overflow |
 
-Only four fields differ from before the apply: state, schedule, the next-run time and
-the update timestamp. Retry settings, deadline, target and identity are unchanged. No
-scheduler attempt has been logged since the scheduler was paused on 9 October.
+Screenshots: `apps/dev-ui/docs/screenshots/` (overview, game, unscored game, sources).
 
-**Monitoring.** Ten policies, none added or removed. One changed: "unusually many job
-executions in a day" now reads "more than 31 completed executions in 24 hours" with a
-threshold of **31**, and nothing else in that policy changed. `dispatcher_silent`
-remains disabled. `scheduler_delivery_failed` and `dispatcher_failed` remain enabled.
-The other seven are identical to their pre-apply copies.
+Not verified visually: the game page at 390 px (the headless browser would not finish
+loading it inside a narrow frame; its layout uses the same responsive grid and
+scrolling tables as the pages that were checked). No interactive click-through was
+done in a real browser; search, sort and filters are covered by the component tests.
 
-**Terraform outputs:** `collection_running = true`,
-`daily_execution_alert_threshold = 31`, `dispatch_schedule = "0 * 12-18 10 *"`,
-`soak_scheduled_ticks = 168`.
+## Tests and checks
 
-**Control:** enabled, byte-identical to the approved record, `armed_until`
-2026-10-18T23:30:00Z, generation `1791684706340016`.
+`npm run check` passes: contract copy current, type check clean, lint clean,
+**111 tests in 8 files**, production build succeeds.
 
-**Cloud Run:** executions still **35**; the last is the catch-up of 01:06 UTC. No
-dispatcher, collector or warehouse job has run since. No Cloud Run log entry at all
-since the catch-up. All seven jobs at generation 6 on
-`sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`.
-
-**Security:** 0 secret versions; 0 user-managed keys across 10 service accounts; the
-audit comparison differs only in the alert list and the scheduler; WIF pool ACTIVE.
-
-**BigQuery quota:** 10,240 MiB a day.
-
-**Sources:** Wikimedia 0, Steam 0, IGDB 0.
-
-**Repository variables:** `SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
-`SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`.
-
-The portfolio repository was not touched.
-
-## The soak
-
-| | |
+| Area | Covered |
 |---|---|
-| Opens | 2026-10-12T00:00:00Z |
-| Last tick | 2026-10-18T23:00:00Z |
-| Control expires | 2026-10-18T23:30:00Z |
-| Ticks | 168 |
+| Manifest and paths | Manifest first, then exactly the versioned files; remote base URL; unsafe paths refused |
+| Base URL | Default, trailing slashes, environment variable |
+| Schema-invalid data | Out-of-range score, missing field, extra field, wrong type, unknown enum, bad date, null where a number is required, non-JSON body; and the page renders nothing from it |
+| Consistency | Different run, unsupported contract version, wrong game file |
+| Ranked ordering | Default equals artifact rank; ties keep rank order in both directions; input not mutated |
+| Search and filters | Words in any order, diacritics, lifecycle, band, combined, no matches, reset |
+| Null features | Each nullable feature shows "not available", never a digit; a real zero stays zero |
+| Unranked | Every one listed with its reason; failed collection distinguished from not mapped; no score shown |
+| Formatting | Score, confidence, counts, signed percentages, UTC dates |
+| History | Null and omitted days become gaps; never zero; never joined; rolling mean not invented |
+| Pages | Overview, ranked game, unscored game, sources, methodology against the real bundle |
 
-Expected: 168 dispatchers; a collection opportunity at 03:00 UTC on each of seven
-days; Monday 12 October with the 14-day reconciliation window, Tuesday to Sunday with
-4-day windows; 14 requests a day (above 22 a review event, above 44 an incident); two
-children a day, at most three; at most 189 executions for the soak, so at most 224 in
-the project; no rolling 24 hours above 31 completed executions; about $0.30.
+The Python suite is unchanged and passes in the worktree: 1,199 passed.
 
-First milestones, to be read afterwards and not waited for:
+## Design
 
-| UTC | Expected |
-|---|---|
-| 2026-10-12 00:00 | First tick. Dispatcher only; nothing is due |
-| 2026-10-12 03:00 | Monday reconciliation order: 14 targets, 14-day window, 22 reserved, 14 requests expected. Collector starts |
-| 2026-10-12 04:00 | Warehouse run, after the collector's receipt |
+Dark and restrained: near-black canvas, one amber signal colour, hairline borders, a
+system sans-serif with tabular figures for every number. Tables where the data is
+tabular, not a card per number. Every state has a word and a shape as well as a colour
+(band glyphs, status marks, arrows with "up"/"down" for assistive technology). Visible
+focus ring, skip link, table captions and scopes, `aria-sort` on sortable headers,
+live regions for result counts, a text summary and a data table behind every chart,
+fixed chart height and skeletons so loading does not collapse the page, reduced motion
+respected.
 
-Work begins two to four minutes after each hour: that is Cloud Run's start-up time,
-measured in C2-E, and is not a fault.
+## Files added
 
-**The schedule is not one-shot.** The cron has no year and the same dates are eligible
-again from 2027-10-12. The control record's expiry and the post-soak reconciliation
-are what bound it to this year.
+- `apps/dev-ui/` (90 files): configuration, `scripts/`, `src/app`, `src/components`,
+  `src/lib`, `src/contract` (schema copy and generated types), `src/test` (one replay
+  bundle), `docs/screenshots`, `README.md`, `package-lock.json`.
+- Root `README.md`: one short section pointing to the developer UI. No historical
+  section was rewritten.
+- This handoff.
 
-## Success criteria
+Nothing under `src/metaspike`, `infra/`, `.github/`, `tests/`, `schemas/`,
+`warehouse/`, the Dockerfile or the Python lockfile was changed.
 
-The fourteen criteria are in section 31 of `docs/phase4-c2-plan.md`, with the alert
-ceiling at 31. They are judged after the window. **C2-F is not yet passed.**
+## Intentionally not implemented
 
-## Stops, if one is needed
+Final opportunity scoring; event detection or event heat; multi-source agreement;
+creator-supply gap; Steam or IGDB data of any kind; R2, Cloudflare or any CDN; public
+pages, SEO, Open Graph cards, sharing; accounts, login, settings, billing; portfolio
+integration; deployment of any kind. Where these concepts are named in the interface
+they carry an explanation and no number.
 
-- Stop source work at once: disable the control record (one write, on generation
-  `1791684706340016`).
-- Stop everything: `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1
-  --project=metaspike-prod-kc`.
+## Production was not touched
 
-Neither is needed for the soak to end. The ticks stop by themselves after 23:00 UTC on
-18 October.
+Read back at 03:18 UTC on 2026-10-11, after the build:
 
-## After the window
+- `main` and `origin/main` both at `cb33198`; no product commit on it; original
+  worktree clean and on `main`.
+- Prod Terraform state serial 14, 94 resources.
+- Scheduler ENABLED, `0 * 12-18 10 *`, `Etc/UTC`, next run 2026-10-12T00:00:00Z, no
+  attempt yet.
+- Control record byte-identical to the launch record, generation `1791684706340016`.
+- 35 executions, the last still the catch-up. All seven jobs on
+  `sha256:a8680b2b…c754`.
+- No IAM, schema, secret, alert or scheduler difference from the launch audit. 0 secret
+  versions, 0 keys. Registry 11 images. Repository variables unchanged.
+- No workflow run since the launch commit's own push.
+- No Wikimedia, Steam or IGDB call: the only pipeline run was the offline replay, and
+  the only network use was `npm install` from the public registry, version lookups
+  there, and a headless browser pointed at localhost.
+- krishnachittella.dev was not modified. Nothing was published.
 
-A read-only audit against the criteria; then the reconciliation: `SCHEDULER_PAUSED`
-back to `true`, the four soak variables deleted, one plan, review, apply; and the
-control record disabled.
+## Branch push safety
+
+Proven from the workflow files, which are unchanged on this branch:
+
+- `deploy.yml` runs on `push` to `main` only, and on manual dispatch. Its
+  identity-check, plan and apply jobs all require `github.ref == 'refs/heads/main'`,
+  and the Workload Identity condition separately pins the `main` ref, so a dispatch
+  from this branch cannot obtain a deployment credential.
+- `ci.yml` runs on pull requests, when called, and on manual dispatch. It has no `push`
+  trigger and holds no cloud credential.
+
+A push of `product/local-ui` therefore starts no workflow at all. **The branch was
+pushed** to `origin/product/local-ui`, and no workflow run followed. No pull request
+was opened.
 
 ## Exact next approval required
 
-None before the first tick. The next checkpoint is whatever observation or audit
-ChatGPT instructs, during or after the window.
+Review of U1. U2 has not been started.
 
-STOP. Nothing is to be triggered by hand.
+STOP.
