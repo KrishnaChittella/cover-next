@@ -23,6 +23,7 @@ const source = path.resolve(fromIndex >= 0 ? args[fromIndex + 1] ?? "" : path.jo
 const target = path.join(app, "public", "data");
 const REPLAY_FIXTURES = "tests/fixtures/wikimedia";
 const REPLAY_AS_OF = "2026-10-03";
+const REPLAY_FROM = "2026-07-06";
 
 function fail(message) {
   console.error(`data:sync: ${message}`);
@@ -37,6 +38,21 @@ function metaspike(commandArgs) {
 
 if (args.includes("--replay")) {
   if (fromIndex >= 0) fail("--replay rebuilds <repo>/artifacts; do not combine it with --from.");
+  // The backtest first, also offline, so the bundle carries a validation report for the
+  // same recording. It walks the whole recorded range and never contacts a source.
+  console.log(`data:sync: backtesting the recording offline (${REPLAY_FROM} to ${REPLAY_AS_OF})`);
+  const backtested = metaspike([
+    "backtest",
+    "--replay",
+    REPLAY_FIXTURES,
+    "--recorded-through",
+    REPLAY_AS_OF,
+    "--from",
+    REPLAY_FROM,
+    "--to",
+    REPLAY_AS_OF,
+  ]);
+  if (!backtested) fail("the offline backtest failed; nothing was synced.");
   console.log(`data:sync: rebuilding artifacts offline from ${REPLAY_FIXTURES} (as of ${REPLAY_AS_OF})`);
   if (!metaspike(["run", "--replay", REPLAY_FIXTURES, "--as-of", REPLAY_AS_OF, "--artifacts-dir", source])) {
     fail("the offline replay failed; nothing was synced.");

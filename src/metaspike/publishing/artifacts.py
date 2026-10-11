@@ -26,7 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
@@ -43,6 +43,13 @@ RADAR_SCOPE_NOTE = (
     "The radar lists dated events that have not started, with their timing. It ranks "
     "nothing and recommends nothing: an event being scheduled is not, by itself, a content "
     "opportunity."
+)
+
+VALIDATION_SCOPE_NOTE = (
+    "Historical validation of metaspike_score_v0, an internal attention measure, against "
+    "what the same demand signal did afterwards. It is not evidence about the final "
+    "creator-opportunity model, which does not exist yet. Read the evidence status before "
+    "any number."
 )
 
 SemVer = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
@@ -603,11 +610,198 @@ class RadarArtifact(ArtifactHeader):
         return self
 
 
+EvidenceStatusView = Literal["framework_only", "insufficient_sample", "exploratory", "validated"]
+ValidationAvailabilityView = Literal["available", "not_run"]
+OutcomeAvailabilityView = Literal["available", "unavailable"]
+
+
+class OutcomeSummaryView(ContractModel):
+    """A set of primary outcomes. With a count of 0 every statistic is null, never 0."""
+
+    count: int = Field(ge=0)
+    mean: float | None = None
+    median: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    hit_rate: float | None = Field(default=None, ge=0, le=1)
+    downside_rate: float | None = Field(default=None, ge=0, le=1)
+
+
+class TopKView(ContractModel):
+    k: int
+    days_with_full_group: int
+    outcomes: OutcomeSummaryView
+
+
+class AssociationView(ContractModel):
+    statistic: str
+    days_used: int
+    days_skipped: int
+    mean_rho: float | None = None
+    median_rho: float | None = None
+    positive_days: int
+    negative_days: int
+
+
+class StrategyResultView(ContractModel):
+    strategy: str
+    label: str
+    description: str
+    top_k: tuple[TopKView, ...]
+    association: AssociationView
+
+
+class StratumView(ContractModel):
+    label: str
+    outcomes: OutcomeSummaryView
+
+
+class LeadTimeView(ContractModel):
+    found: int
+    none_in_window: int
+    unavailable: int
+    median_days: float | None = None
+    mean_days: float | None = None
+
+
+class SpreadView(ContractModel):
+    count: int = Field(ge=0)
+    mean: float | None = None
+    median: float | None = None
+
+
+class RequirementView(ContractModel):
+    name: str
+    required: int
+    actual: int
+    met: bool
+
+
+class StatusCheckView(ContractModel):
+    status: EvidenceStatusView
+    reached: bool
+    requirements: tuple[RequirementView, ...]
+    rationale: str
+
+
+class EvidenceView(ContractModel):
+    status: EvidenceStatusView
+    checks: tuple[StatusCheckView, ...]
+    holdout_supported: bool
+    holdout_rationale: str
+    conclusion: str
+
+
+class LeakageCheckView(ContractModel):
+    name: str
+    description: str
+    checked: int = Field(ge=0)
+    passed: bool
+
+
+class EventBacktestView(ContractModel):
+    real_event_history: bool
+    snapshots_with_event_intelligence: int = Field(ge=0)
+    note: str
+
+
+class InspectionEntryView(ContractModel):
+    rank: int
+    slug: SlugView
+    name: str
+    score: float = Field(ge=0, le=100)
+    confidence: float = Field(ge=0, le=100)
+    outcome_availability: OutcomeAvailabilityView
+    unavailable_reason: str | None = None
+    realized_uplift_72h: float | None = None
+    movement_24h: float | None = None
+    persistence_7d: float | None = Field(default=None, ge=0, le=1)
+    lead_time_days: int | None = None
+
+
+class InspectionUnrankedView(ContractModel):
+    slug: SlugView
+    name: str
+    reason: str
+
+
+class InspectionDayView(ContractModel):
+    day: date
+    as_of: AwareDatetime
+    ranked: tuple[InspectionEntryView, ...]
+    unranked: tuple[InspectionUnrankedView, ...]
+
+
+class ValidationReportView(ContractModel):
+    report_id: str
+    format: str
+    protocol_version: str
+    outcome_rules_version: str
+    score_version: str
+    event_rules_version: str
+    first_snapshot_day: date
+    last_snapshot_day: date
+    data_through: date
+    snapshot_dates: int
+    universe_size: int
+    games_ranked: int
+    games_with_outcome: int
+    independent_sources: int
+    recommendations: int
+    ranked: int
+    unranked: int
+    primary_evaluable: int
+    primary_unavailable: dict[str, int]
+    overall: OutcomeSummaryView
+    strategies: tuple[StrategyResultView, ...]
+    score_bins: tuple[StratumView, ...]
+    confidence_bands: tuple[StratumView, ...]
+    movement_24h: SpreadView
+    persistence_7d: SpreadView
+    lead_time: LeadTimeView
+    evidence: EvidenceView
+    leakage_checks: tuple[LeakageCheckView, ...]
+    events: EventBacktestView
+    limitations: tuple[str, ...]
+    inspection: tuple[InspectionDayView, ...]
+    inspection_truncated: bool
+    created_at: AwareDatetime
+
+
+class OutcomeDefinitionView(ContractModel):
+    """`outcome_rules_v1` as published: what each outcome is and every constant in it."""
+
+    version: str
+    terms: tuple[TermView, ...]
+    parameters: tuple[ParameterView, ...]
+    unavailable: tuple[TermView, ...]
+
+
+class ValidationArtifact(ArtifactHeader):
+    """Historical validation, or the plain statement that none has been run.
+
+    "not_run" carries no report and no number. It is not a result of zero.
+    """
+
+    scope_note: str
+    availability: ValidationAvailabilityView
+    protocol_version: str
+    outcome_definition: OutcomeDefinitionView
+    report: ValidationReportView | None = None
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        if (self.availability == "available") != (self.report is not None):
+            raise ValueError("a report is present exactly when validation is available")
+        return self
+
+
 class ManifestPaths(ContractModel):
     current: str
     source_health: str
     methodology: str
     radar: str
+    validation: str
     games: dict[str, str]
 
 
@@ -623,6 +817,7 @@ CURRENT_FILE = "current.json"
 SOURCE_HEALTH_FILE = "source-health.json"
 METHODOLOGY_FILE = "methodology.json"
 RADAR_FILE = "radar.json"
+VALIDATION_FILE = "validation.json"
 MANIFEST_FILE = "manifest.json"
 GAMES_DIR = "games"
 VERSIONS_DIR = "versions"
@@ -642,6 +837,7 @@ class ArtifactBundle:
     source_health: SourceHealthArtifact
     methodology: MethodologyArtifact
     radar: RadarArtifact
+    validation: ValidationArtifact
 
     def version_files(self) -> dict[str, ContractModel]:
         """Path relative to the version directory -> artifact."""
@@ -650,6 +846,7 @@ class ArtifactBundle:
             SOURCE_HEALTH_FILE: self.source_health,
             METHODOLOGY_FILE: self.methodology,
             RADAR_FILE: self.radar,
+            VALIDATION_FILE: self.validation,
         }
         for slug, game in sorted(self.games.items()):
             files[game_file(slug)] = game

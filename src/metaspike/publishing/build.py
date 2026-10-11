@@ -36,6 +36,7 @@ from metaspike.publishing.artifacts import (
     SCHEMA_VERSION,
     SCOPE_NOTE,
     SOURCE_HEALTH_FILE,
+    VALIDATION_FILE,
     VERSIONS_DIR,
     ArtifactBundle,
     ConfidenceMethodology,
@@ -61,6 +62,7 @@ from metaspike.publishing.artifacts import (
     SourceMethodology,
     SourceStatusView,
     UnrankedEntry,
+    ValidationArtifact,
     game_file,
 )
 from metaspike.publishing.event_views import (
@@ -81,6 +83,7 @@ from metaspike.publishing.mapping import (
     score_view,
     term_view,
 )
+from metaspike.publishing.validation_views import validation_artifact
 from metaspike.scoring.v0 import (
     CONFIDENCE_HIGH_ABOVE,
     CONFIDENCE_MEDIUM_FROM,
@@ -91,6 +94,8 @@ from metaspike.scoring.v0 import (
     source_ceiling,
 )
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry
+from metaspike.validation.report import ValidationReport
+from metaspike.validation.rules import OUTCOME_RULES_V1, VALIDATION_PROTOCOL_V1
 
 _PENDING_RUN_ID = "00000000T000000Z-00000000"
 # Fields that describe when a run happened rather than what it found. They are left
@@ -137,6 +142,7 @@ def build_bundle(
     registry: SourceRegistry,
     generated_at: datetime,
     events: EventInputs | None = None,
+    validation: ValidationReport | None = None,
 ) -> ArtifactBundle:
     # Nothing computed from a source may be published unless its policy says so
     # explicitly. An unanswered permission blocks publication; it is never assumed.
@@ -167,12 +173,21 @@ def build_bundle(
     radar_draft = build_radar(
         catalogue, intelligence, as_of, inputs.rules, _header(generated_at, _PENDING_RUN_ID)
     )
-    content_hash = _content_hash(drafts, methodology, radar_draft)
+    # A backtest report, when one has been run. It describes history; it changes nothing
+    # above, and with none the artifact says "not_run".
+    validation_draft = validation_artifact(
+        validation,
+        OUTCOME_RULES_V1,
+        VALIDATION_PROTOCOL_V1,
+        _header(generated_at, _PENDING_RUN_ID),
+    )
+    content_hash = _content_hash(drafts, methodology, radar_draft, validation_draft)
     run_id = f"{generated_at:%Y%m%dT%H%M%SZ}-{content_hash[:8]}"
 
     games = {slug: draft.model_copy(update={"run_id": run_id}) for slug, draft in drafts.items()}
     methodology = methodology.model_copy(update={"run_id": run_id})
     radar = radar_draft.model_copy(update={"run_id": run_id})
+    validation_view = validation_draft.model_copy(update={"run_id": run_id})
     current = _current(games, report, generated_at, run_id)
     source_health = _source_health(catalogue, report, registry, generated_at, run_id)
     version_path = f"{VERSIONS_DIR}/{run_id}"
@@ -185,6 +200,7 @@ def build_bundle(
             source_health=f"{version_path}/{SOURCE_HEALTH_FILE}",
             methodology=f"{version_path}/{METHODOLOGY_FILE}",
             radar=f"{version_path}/{RADAR_FILE}",
+            validation=f"{version_path}/{VALIDATION_FILE}",
             games={slug: f"{version_path}/{game_file(slug)}" for slug in sorted(games)},
         ),
         game_count=len(games),
@@ -197,6 +213,7 @@ def build_bundle(
         source_health=source_health,
         methodology=methodology,
         radar=radar,
+        validation=validation_view,
     )
 
 
@@ -524,9 +541,16 @@ def _methodology(
 
 
 def _content_hash(
-    games: dict[str, GameArtifact], methodology: MethodologyArtifact, radar: RadarArtifact
+    games: dict[str, GameArtifact],
+    methodology: MethodologyArtifact,
+    radar: RadarArtifact,
+    validation: ValidationArtifact,
 ) -> str:
     payload = {
+        "validation": validation.model_dump(
+            mode="json",
+            exclude={**dict.fromkeys(_VOLATILE_FIELDS, True), "report": {"created_at"}},
+        ),
         "radar": radar.model_dump(mode="json", exclude=_VOLATILE_FIELDS),
         "games": [
             games[slug].model_dump(mode="json", exclude=_VOLATILE_FIELDS) for slug in sorted(games)

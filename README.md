@@ -311,6 +311,15 @@ observations, deterministic identity and revisions, a versioned Event Heat
 every game it publishes "unavailable", which is never the same as zero. It is not part
 of `metaspike_score_v0`. See [docs/event-intelligence.md](docs/event-intelligence.md).
 
+## Historical validation (internal)
+
+`src/metaspike/validation/` checks past rankings against what followed, with no
+look-ahead: `uv run metaspike backtest --replay tests/fixtures/wikimedia
+--recorded-through 2026-10-03 --from 2026-07-06 --to 2026-10-03` (offline). On the
+recorded fixture the evidence status is `framework_only`: six games show that the
+method works, and nothing about whether the score predicts demand. See
+[docs/historical-validation.md](docs/historical-validation.md).
+
 ## Architecture
 
 ```

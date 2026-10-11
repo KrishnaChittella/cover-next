@@ -396,6 +396,7 @@ describe("navigation", () => {
       "Overview",
       "Games",
       "Radar",
+      "Validation",
       "Sources",
       "Methodology",
     ]);

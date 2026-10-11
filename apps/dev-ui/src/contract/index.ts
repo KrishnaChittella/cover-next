@@ -36,9 +36,26 @@ export type {
 } from "./types/methodology";
 export type { RadarArtifact, RadarItemView } from "./types/radar";
 export type {
+  ValidationArtifact,
+  ValidationReportView,
+  StrategyResultView,
+  OutcomeSummaryView,
+  StratumView,
+  InspectionDayView,
+  InspectionEntryView,
+  EvidenceView,
+} from "./types/validation";
+export type {
   SourceHealthArtifact,
   SourceHealthEntry,
   SourceFailure,
 } from "./types/source-health";
 
-export type ArtifactKind = "manifest" | "current" | "game" | "source-health" | "methodology" | "radar";
+export type ArtifactKind =
+  | "manifest"
+  | "current"
+  | "game"
+  | "source-health"
+  | "methodology"
+  | "radar"
+  | "validation";

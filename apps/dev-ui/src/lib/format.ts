@@ -49,6 +49,27 @@ export function formatShare(value: number | null | undefined): string {
   return twoDecimal.format(value);
 }
 
+/**
+ * A realized outcome held as a fraction (0.25 is 25% above the reference), shown as a
+ * signed percentage. An outcome that could not be evaluated is absent, never 0%.
+ */
+export function formatOutcome(fraction: number | null | undefined): string {
+  return present(fraction) ? formatSignedPercent(fraction * 100) : ABSENT;
+}
+
+/** A share held as a fraction, shown as a whole percentage. */
+export function formatRate(fraction: number | null | undefined): string {
+  return present(fraction) ? `${integer.format(Math.round(fraction * 100))}%` : ABSENT;
+}
+
+/** A correlation between -1 and 1, always signed so its direction cannot be misread. */
+export function formatCorrelation(value: number | null | undefined): string {
+  if (!present(value)) return ABSENT;
+  const rounded = Math.round(value * 100) / 100;
+  if (rounded === 0) return "0.00";
+  return `${rounded > 0 ? "+" : "−"}${twoDecimal.format(Math.abs(rounded))}`;
+}
+
 /** A signed percentage change. Zero carries no sign; the minus is a real minus sign. */
 export function formatSignedPercent(value: number | null | undefined): string {
   if (!present(value)) return ABSENT;

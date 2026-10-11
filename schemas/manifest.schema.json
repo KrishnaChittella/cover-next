@@ -25,6 +25,10 @@
         "source_health": {
           "title": "Source Health",
           "type": "string"
+        },
+        "validation": {
+          "title": "Validation",
+          "type": "string"
         }
       },
       "required": [
@@ -32,6 +36,7 @@
         "source_health",
         "methodology",
         "radar",
+        "validation",
         "games"
       ],
       "title": "ManifestPaths",

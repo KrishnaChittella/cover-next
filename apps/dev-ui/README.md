@@ -35,7 +35,7 @@ source: `data:replay` runs `uv run metaspike run --replay tests/fixtures/wikimed
 | `npm run build` / `npm run start` | Production build, and serving it locally |
 | `npm run data:sync` | Validate `<repo>/artifacts`, copy the selected version into `public/data` |
 | `npm run data:sync -- --from <dir>` | The same, from another artifacts root |
-| `npm run data:replay` | Rebuild `<repo>/artifacts` offline, then sync |
+| `npm run data:replay` | Backtest and rebuild `<repo>/artifacts` offline, then sync |
 | `npm run contract:generate` | Regenerate the schema copy and the TypeScript types |
 | `npm run contract:check` | Fail if that copy is out of date |
 | `npm run typecheck`, `npm run lint`, `npm test` | The checks, one at a time |
@@ -49,6 +49,7 @@ source: `data:replay` runs `uv run metaspike run --replay tests/fixtures/wikimed
 | `/games` | `current.json` | Every game in the run, searchable |
 | `/games/[slug]` | `games/{slug}.json` | Rank, score, components, confidence and its factors, why-now reasons, event intelligence, history chart, features, coverage |
 | `/radar` | `radar.json` | Dated events that have not started, by window. Timing and context only |
+| `/validation` | `validation.json` | A walk-forward backtest of score v0: evidence status first, then what was tested, score v0 beside simple alternatives, the look-ahead checks, limitations, and any past day's ranking with what followed |
 | `/sources` | `source-health.json` | What each source returned in this run |
 | `/methodology` | `methodology.json` | Score and confidence terms, the Event Heat rules, feature definitions, source policy, limitations |
 
@@ -72,6 +73,20 @@ Event Heat is internal and uncalibrated, and is not part of score v0. No event i
 invented for the developer UI: the synthetic events in `src/test/synthetic-events.ts`
 exist only for tests.
 
+## Validation
+
+`/validation` shows a historical backtest: for each past day, what score v0 ranked
+using only data up to that day, and what each game's attention did over the next 72
+hours against the baseline known that day. `npm run data:replay` runs it offline over
+the recorded history before syncing.
+
+Read the evidence status first. With the recorded fixture (six games with history) it
+is `framework_only`: the machinery works and does not look ahead; the sample says
+nothing about whether the score predicts demand. The page shows results as they came
+out, including that plain lift orders those six games at least as well as score v0. If
+no backtest is in the bundle the page says "not run" and shows no number. The
+interface refuses a report whose status its own checks do not support.
+
 ## Where the data comes from
 
 One base URL, `NEXT_PUBLIC_METASPIKE_DATA_URL`, default `/data` (see `.env.example`).
@@ -85,6 +100,7 @@ public/data/
   versions/{run_id}/source-health.json
   versions/{run_id}/methodology.json
   versions/{run_id}/radar.json
+  versions/{run_id}/validation.json
   versions/{run_id}/games/{slug}.json
 ```
 
@@ -128,11 +144,12 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 135 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 157 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
-confidence formatting, history gaps staying gaps, and event intelligence in its
-available, zero and unavailable states. The fixture under
+confidence formatting, history gaps staying gaps, event intelligence in its
+available, zero and unavailable states, and validation in its real, bad-result and
+not-run states. The fixture under
 `src/test/fixtures/bundle` is an unmodified replay output; nothing in it is hand
 written.
 

@@ -1,14 +1,14 @@
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T03:47:43.777313Z",
-  "run_id": "20261011T034743Z-9cf1238c",
+  "generated_at": "2026-10-11T04:51:44.105207Z",
+  "run_id": "20261011T045144Z-036d3eb9",
   "score_version": "metaspike_score_v0",
-  "canonical_game_id": "86d32c9a-afbe-4220-94c3-52dbf2489f04",
-  "slug": "elden-ring",
-  "name": "Elden Ring",
+  "canonical_game_id": "05773a27-941a-4175-8243-3a5641b255d3",
+  "slug": "helldivers-2",
+  "name": "Helldivers 2",
   "aliases": [],
-  "lifecycle_state": "RELEASED",
+  "lifecycle_state": "LIVE_SERVICE",
   "relationships": [],
   "rank": null,
   "score": {
@@ -71,5 +71,5 @@
     "path": "methodology.json",
     "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
   },
-  "updated_at": "2026-10-11T03:47:43.777313Z"
+  "updated_at": "2026-10-11T04:51:44.105207Z"
 }

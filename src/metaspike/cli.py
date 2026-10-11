@@ -8,6 +8,7 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
+from time import perf_counter
 
 import httpx
 from pydantic import ValidationError
@@ -82,6 +83,9 @@ from metaspike.sources.wikimedia import build_client
 from metaspike.storage.base import StoragePolicyError
 from metaspike.storage.local import LocalObservationStore
 from metaspike.storage.samples import LocalSampleStore
+from metaspike.validation.backtest import run_backtest
+from metaspike.validation.report import ValidationReport
+from metaspike.validation.store import AccountabilityStore
 
 EXIT_OK = 0
 EXIT_UNEXPECTED = 1
@@ -95,6 +99,7 @@ DEFAULT_ARTIFACTS_DIR = Path("artifacts")
 DEFAULT_SCHEMAS_DIR = Path("schemas")
 DEFAULT_CACHE_DIR = Path(".metaspike/cache")
 DEFAULT_EVENTS_DIR = Path(".metaspike/events")
+DEFAULT_VALIDATION_DIR = Path(".metaspike/validation")
 DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
 DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
 DEFAULT_RECORDED_DIRECTORIES = (
@@ -154,12 +159,47 @@ def _parser() -> argparse.ArgumentParser:
     build.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     build.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     build.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    build.add_argument("--validation-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
     build.set_defaults(handler=_build)
 
     run = commands.add_parser("run", help="collect, score and publish in one step")
     _add_collection_options(run)
     run.add_argument("--artifacts-dir", type=Path, default=DEFAULT_ARTIFACTS_DIR)
     run.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    run.add_argument("--validation-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
+
+    backtest = commands.add_parser(
+        "backtest",
+        help="walk forward over recorded history and score what was said against what followed",
+        description=(
+            "Offline only. Replays recorded responses, rebuilds what was known on each day "
+            "of the range, and compares each day's ranking with what the same signal did "
+            "afterwards. It never contacts a source, which is why --replay is required."
+        ),
+    )
+    backtest.add_argument(
+        "--replay",
+        type=Path,
+        required=True,
+        metavar="DIR",
+        help="recorded responses to replay; there is no live mode",
+    )
+    backtest.add_argument(
+        "--recorded-through",
+        type=date.fromisoformat,
+        required=True,
+        metavar="YYYY-MM-DD",
+        help="the last day the recording covers",
+    )
+    backtest.add_argument(
+        "--from", dest="first_day", type=date.fromisoformat, required=True, metavar="YYYY-MM-DD"
+    )
+    backtest.add_argument(
+        "--to", dest="last_day", type=date.fromisoformat, required=True, metavar="YYYY-MM-DD"
+    )
+    backtest.add_argument("--store-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
+    backtest.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
+    backtest.set_defaults(handler=_backtest)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -334,6 +374,86 @@ def _event_inputs(args: argparse.Namespace, report: CollectionReport) -> EventIn
     return EventInputs(records=store.events(as_of), checks=store.checks(as_of), as_of=as_of)
 
 
+def _backtest(args: argparse.Namespace) -> int:
+    """Walk forward over a recording, keep the result, and say plainly what it is worth."""
+    catalogue = load_seed_catalogue()
+    started = _now()
+    with replay_client(args.replay) as client:
+        registry = default_registry(client)
+        recording = collect(
+            catalogue,
+            registry,
+            window_ending(args.recorded_through),
+            observed_at=started,
+            clock=_now,
+        )
+        lags = {
+            entry.policy.source: entry.policy.operations.expected_publication_lag
+            for entry in registry.entries()
+        }
+    if not recording.any_success:
+        raise CollectionFailedError(f"no recorded response in {args.replay} could be replayed")
+    events = EventStore(args.events_dir)
+    clock = perf_counter()
+    result = run_backtest(
+        catalogue,
+        recording,
+        args.first_day,
+        args.last_day,
+        created_at=started,
+        publication_lag=lags,
+        event_store=events,
+    )
+    seconds = perf_counter() - clock
+    store = AccountabilityStore(args.store_dir)
+    new_snapshots = store.add_snapshots(result.snapshots)
+    new_labels = store.add_labels(result.labels)
+    new_report = store.add_report(result.report)
+    _print_backtest(result.report, seconds)
+    print(
+        f"\nStore: {args.store_dir}  (+{new_snapshots} snapshots, +{new_labels} labels, "
+        f"report {result.report.report_id} {'kept' if new_report else 'already present'})"
+    )
+    return EXIT_OK
+
+
+def _signed(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:+.1%}"
+
+
+def _print_backtest(report: ValidationReport, seconds: float) -> None:
+    print(
+        f"Backtest {report.first_snapshot_day} to {report.last_snapshot_day} "
+        f"({report.snapshot_dates} days, data through {report.data_through}), "
+        f"{report.protocol_version} / {report.outcome_rules_version} / {report.score_version}"
+    )
+    print(
+        f"  universe {report.universe_size} games; {report.games_ranked} ever ranked; "
+        f"{report.recommendations} snapshots, {report.ranked} ranked, {report.unranked} unranked"
+    )
+    unavailable = ", ".join(f"{name} {count}" for name, count in report.primary_unavailable.items())
+    print(f"  primary outcome evaluable for {report.primary_evaluable}; unavailable: {unavailable}")
+    print(f"  ran in {seconds:.2f} s\n")
+    print("  72h uplift vs the baseline known at the snapshot (mean / hit rate), by strategy")
+    for strategy in report.strategies:
+        cells = "  ".join(
+            f"top-{group.k} {_signed(group.outcomes.mean)} / "
+            f"{'n/a' if group.outcomes.hit_rate is None else f'{group.outcomes.hit_rate:.0%}'}"
+            f" (n={group.outcomes.count})"
+            for group in strategy.top_k
+        )
+        rho = strategy.association.mean_rho
+        print(
+            f"  {strategy.strategy:<20} {cells}  rank assoc "
+            f"{'n/a' if rho is None else f'{rho:+.2f}'} over {strategy.association.days_used} days"
+        )
+    print(f"\n  EVIDENCE STATUS: {report.evidence.status.value}")
+    print(f"  {report.evidence.conclusion}")
+    passed = sum(check.passed for check in report.leakage_checks)
+    print(f"  Leakage checks passed: {passed} of {len(report.leakage_checks)}")
+    print(f"  Events: {report.events.note}")
+
+
 def _build(args: argparse.Namespace) -> int:
     snapshot = args.cache_dir / _SNAPSHOT_FILE
     if not snapshot.is_file():
@@ -347,6 +467,7 @@ def _build(args: argparse.Namespace) -> int:
             args.artifacts_dir,
             _now(),
             _event_inputs(args, report),
+            AccountabilityStore(args.validation_dir).latest_report(),
         )
     _print_summary(result, args.artifacts_dir)
     return EXIT_OK
@@ -363,6 +484,7 @@ def _run(args: argparse.Namespace) -> int:
             args.artifacts_dir,
             _now(),
             _event_inputs(args, report),
+            AccountabilityStore(args.validation_dir).latest_report(),
         )
     _print_summary(result, args.artifacts_dir)
     return EXIT_OK

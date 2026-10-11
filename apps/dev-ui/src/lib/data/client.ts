@@ -9,11 +9,13 @@ import type {
   MethodologyArtifact,
   RadarArtifact,
   SourceHealthArtifact,
+  ValidationArtifact,
 } from "@/contract";
 import {
   SUPPORTED_SCHEMA_VERSION,
   eventIntelligenceViolations,
   radarViolations,
+  validationViolations,
   violations,
   type Violation,
 } from "@/contract/validate";
@@ -193,6 +195,16 @@ export async function loadRadar(options: LoadOptions = {}): Promise<Loaded<Radar
   const broken = radarViolations(data);
   if (broken.length > 0) {
     throw new DataError("invalid", `${manifest.artifacts.radar} contradicts itself.`, null, broken);
+  }
+  return { manifest, data };
+}
+
+export async function loadValidation(options: LoadOptions = {}): Promise<Loaded<ValidationArtifact>> {
+  const manifest = await loadManifest(options);
+  const data = await loadFrom<ValidationArtifact>(manifest, "validation", manifest.artifacts.validation, options);
+  const broken = validationViolations(data);
+  if (broken.length > 0) {
+    throw new DataError("invalid", `${manifest.artifacts.validation} contradicts itself.`, null, broken);
   }
   return { manifest, data };
 }

@@ -1,27 +1,35 @@
 {
-  "schema_version": "1.1.0",
+  "schema_version": "1.2.0",
   "contract_status": "internal",
-  "generated_at": "2026-10-11T03:47:43.777313Z",
-  "run_id": "20261011T034743Z-9cf1238c",
+  "generated_at": "2026-10-11T04:51:44.105207Z",
+  "run_id": "20261011T045144Z-036d3eb9",
   "score_version": "metaspike_score_v0",
-  "canonical_game_id": "3c37a62c-1718-49ce-bc4a-6b3be70faf02",
-  "slug": "no-mans-sky",
-  "name": "No Man's Sky",
+  "canonical_game_id": "204f2af0-0dab-438f-b3b3-024fd4d2be1c",
+  "slug": "gta-vi",
+  "name": "Grand Theft Auto VI",
   "aliases": [
-    "NMS"
+    "GTA VI",
+    "GTA 6"
   ],
-  "lifecycle_state": "LIVE_SERVICE",
-  "relationships": [],
-  "rank": 5,
+  "lifecycle_state": "PRE_RELEASE",
+  "relationships": [
+    {
+      "relationship_type": "SEQUEL",
+      "parent_game_id": "780b4850-6248-4a81-8fe0-7f0762376cfc",
+      "parent_slug": "gta-v",
+      "parent_name": "Grand Theft Auto V"
+    }
+  ],
+  "rank": 2,
   "score": {
     "score_version": "metaspike_score_v0",
     "status": "scored",
-    "value": 0.0,
+    "value": 2.3,
     "components": {
       "significance": 0.0,
       "magnitude": 0.0,
       "anomaly": 0.0,
-      "momentum": 0.0
+      "momentum": 0.0755
     },
     "unscored_reason": null
   },
@@ -45,35 +53,35 @@
     "history_span_days": 90,
     "missing_days": 0,
     "staleness_days": 0,
-    "latest_views": 723.0,
-    "avg_3d": 717.6667,
-    "avg_7d": 750.4286,
-    "prior_avg_3d": 752.0,
+    "latest_views": 10524.0,
+    "avg_3d": 10552.0,
+    "avg_7d": 10219.2857,
+    "prior_avg_3d": 10014.0,
     "recent_7d_samples": 7,
     "baseline_samples": 28,
-    "baseline_mean_28d": 1109.1071,
-    "baseline_median_28d": 909.5,
-    "baseline_std_28d": 552.3089,
-    "baseline_mad_28d": 249.0,
-    "lift_ratio": 0.7891,
-    "lift_pct": -21.0922,
-    "lift_7d_pct": -17.49,
-    "velocity_ratio": 0.9543,
-    "velocity_pct": -4.5656,
-    "consecutive_rising_days": 1,
-    "z_score": -0.6991,
-    "robust_z_score": -0.5052,
+    "baseline_mean_28d": 15746.0714,
+    "baseline_median_28d": 12400.5,
+    "baseline_std_28d": 8139.8694,
+    "baseline_mad_28d": 1892.5,
+    "lift_ratio": 0.8509,
+    "lift_pct": -14.9067,
+    "lift_7d_pct": -17.5897,
+    "velocity_ratio": 1.0537,
+    "velocity_pct": 5.3725,
+    "consecutive_rising_days": 0,
+    "z_score": -0.6415,
+    "robust_z_score": -0.6688,
     "robust_scale_method": "mad",
-    "history_percentile": 42.6966,
+    "history_percentile": 55.0562,
     "percentile_samples": 89,
     "flags": []
   },
   "explanation": {
-    "summary": "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910.",
+    "summary": "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400.",
     "reasons": [
       {
-        "code": "lift_depressed",
-        "text": "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910."
+        "code": "lift_normal",
+        "text": "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400."
       },
       {
         "code": "single_source",
@@ -81,7 +89,7 @@
       }
     ],
     "top_reasons": [
-      "Attention is 21% below its 28-day baseline: a 3-day average of 718 daily views against a typical 910.",
+      "Attention is in line with its 28-day baseline: a 3-day average of 10,552 daily views against a typical 12,400.",
       "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
     ]
   },
@@ -94,453 +102,453 @@
       "points": [
         {
           "day": "2026-07-06",
-          "value": 758.0,
+          "value": 11300.0,
           "rolling_mean_7d": null
         },
         {
           "day": "2026-07-07",
-          "value": 679.0,
+          "value": 9664.0,
           "rolling_mean_7d": null
         },
         {
           "day": "2026-07-08",
-          "value": 660.0,
+          "value": 9250.0,
           "rolling_mean_7d": null
         },
         {
           "day": "2026-07-09",
-          "value": 585.0,
+          "value": 8716.0,
           "rolling_mean_7d": null
         },
         {
           "day": "2026-07-10",
-          "value": 545.0,
-          "rolling_mean_7d": 645.4
+          "value": 8470.0,
+          "rolling_mean_7d": 9480.0
         },
         {
           "day": "2026-07-11",
-          "value": 587.0,
-          "rolling_mean_7d": 635.67
+          "value": 8069.0,
+          "rolling_mean_7d": 9244.83
         },
         {
           "day": "2026-07-12",
-          "value": 635.0,
-          "rolling_mean_7d": 635.57
+          "value": 7829.0,
+          "rolling_mean_7d": 9042.57
         },
         {
           "day": "2026-07-13",
-          "value": 567.0,
-          "rolling_mean_7d": 608.29
+          "value": 7947.0,
+          "rolling_mean_7d": 8563.57
         },
         {
           "day": "2026-07-14",
-          "value": 695.0,
-          "rolling_mean_7d": 610.57
+          "value": 7866.0,
+          "rolling_mean_7d": 8306.71
         },
         {
           "day": "2026-07-15",
-          "value": 663.0,
-          "rolling_mean_7d": 611.0
+          "value": 7420.0,
+          "rolling_mean_7d": 8045.29
         },
         {
           "day": "2026-07-16",
-          "value": 728.0,
-          "rolling_mean_7d": 631.43
+          "value": 7927.0,
+          "rolling_mean_7d": 7932.57
         },
         {
           "day": "2026-07-17",
-          "value": 796.0,
-          "rolling_mean_7d": 667.29
+          "value": 7865.0,
+          "rolling_mean_7d": 7846.14
         },
         {
           "day": "2026-07-18",
-          "value": 970.0,
-          "rolling_mean_7d": 722.0
+          "value": 7340.0,
+          "rolling_mean_7d": 7742.0
         },
         {
           "day": "2026-07-19",
-          "value": 929.0,
-          "rolling_mean_7d": 764.0
+          "value": 6769.0,
+          "rolling_mean_7d": 7590.57
         },
         {
           "day": "2026-07-20",
-          "value": 782.0,
-          "rolling_mean_7d": 794.71
+          "value": 6424.0,
+          "rolling_mean_7d": 7373.0
         },
         {
           "day": "2026-07-21",
-          "value": 1293.0,
-          "rolling_mean_7d": 880.14
+          "value": 6409.0,
+          "rolling_mean_7d": 7164.86
         },
         {
           "day": "2026-07-22",
-          "value": 730.0,
-          "rolling_mean_7d": 889.71
+          "value": 6261.0,
+          "rolling_mean_7d": 6999.29
         },
         {
           "day": "2026-07-23",
-          "value": 697.0,
-          "rolling_mean_7d": 885.29
+          "value": 6233.0,
+          "rolling_mean_7d": 6757.29
         },
         {
           "day": "2026-07-24",
-          "value": 740.0,
-          "rolling_mean_7d": 877.29
+          "value": 6327.0,
+          "rolling_mean_7d": 6537.57
         },
         {
           "day": "2026-07-25",
-          "value": 809.0,
-          "rolling_mean_7d": 854.29
+          "value": 6129.0,
+          "rolling_mean_7d": 6364.57
         },
         {
           "day": "2026-07-26",
-          "value": 728.0,
-          "rolling_mean_7d": 825.57
+          "value": 6787.0,
+          "rolling_mean_7d": 6367.14
         },
         {
           "day": "2026-07-27",
-          "value": 629.0,
-          "rolling_mean_7d": 803.71
+          "value": 7731.0,
+          "rolling_mean_7d": 6553.86
         },
         {
           "day": "2026-07-28",
-          "value": 599.0,
-          "rolling_mean_7d": 704.57
+          "value": 7123.0,
+          "rolling_mean_7d": 6655.86
         },
         {
           "day": "2026-07-29",
-          "value": 591.0,
-          "rolling_mean_7d": 684.71
+          "value": 6446.0,
+          "rolling_mean_7d": 6682.29
         },
         {
           "day": "2026-07-30",
-          "value": 619.0,
-          "rolling_mean_7d": 673.57
+          "value": 5988.0,
+          "rolling_mean_7d": 6647.29
         },
         {
           "day": "2026-07-31",
-          "value": 561.0,
-          "rolling_mean_7d": 648.0
+          "value": 5737.0,
+          "rolling_mean_7d": 6563.0
         },
         {
           "day": "2026-08-01",
-          "value": 606.0,
-          "rolling_mean_7d": 619.0
+          "value": 5756.0,
+          "rolling_mean_7d": 6509.71
         },
         {
           "day": "2026-08-02",
-          "value": 582.0,
-          "rolling_mean_7d": 598.14
+          "value": 6288.0,
+          "rolling_mean_7d": 6438.43
         },
         {
           "day": "2026-08-03",
-          "value": 609.0,
-          "rolling_mean_7d": 595.29
+          "value": 6567.0,
+          "rolling_mean_7d": 6272.14
         },
         {
           "day": "2026-08-04",
-          "value": 600.0,
-          "rolling_mean_7d": 595.43
+          "value": 6415.0,
+          "rolling_mean_7d": 6171.0
         },
         {
           "day": "2026-08-05",
-          "value": 604.0,
-          "rolling_mean_7d": 597.29
+          "value": 6847.0,
+          "rolling_mean_7d": 6228.29
         },
         {
           "day": "2026-08-06",
-          "value": 774.0,
-          "rolling_mean_7d": 619.43
+          "value": 11429.0,
+          "rolling_mean_7d": 7005.57
         },
         {
           "day": "2026-08-07",
-          "value": 707.0,
-          "rolling_mean_7d": 640.29
+          "value": 12069.0,
+          "rolling_mean_7d": 7910.14
         },
         {
           "day": "2026-08-08",
-          "value": 682.0,
-          "rolling_mean_7d": 651.14
+          "value": 8599.0,
+          "rolling_mean_7d": 8316.29
         },
         {
           "day": "2026-08-09",
-          "value": 1146.0,
-          "rolling_mean_7d": 731.71
+          "value": 8737.0,
+          "rolling_mean_7d": 8666.14
         },
         {
           "day": "2026-08-10",
-          "value": 2173.0,
-          "rolling_mean_7d": 955.14
+          "value": 9225.0,
+          "rolling_mean_7d": 9045.86
         },
         {
           "day": "2026-08-11",
-          "value": 2559.0,
-          "rolling_mean_7d": 1235.0
+          "value": 8100.0,
+          "rolling_mean_7d": 9286.57
         },
         {
           "day": "2026-08-12",
-          "value": 1545.0,
-          "rolling_mean_7d": 1369.43
+          "value": 7620.0,
+          "rolling_mean_7d": 9397.0
         },
         {
           "day": "2026-08-13",
-          "value": 1559.0,
-          "rolling_mean_7d": 1481.57
+          "value": 7511.0,
+          "rolling_mean_7d": 8837.29
         },
         {
           "day": "2026-08-14",
-          "value": 1026.0,
-          "rolling_mean_7d": 1527.14
+          "value": 8388.0,
+          "rolling_mean_7d": 8311.43
         },
         {
           "day": "2026-08-15",
-          "value": 1206.0,
-          "rolling_mean_7d": 1602.0
+          "value": 7373.0,
+          "rolling_mean_7d": 8136.29
         },
         {
           "day": "2026-08-16",
-          "value": 1144.0,
-          "rolling_mean_7d": 1601.71
+          "value": 8307.0,
+          "rolling_mean_7d": 8074.86
         },
         {
           "day": "2026-08-17",
-          "value": 1240.0,
-          "rolling_mean_7d": 1468.43
+          "value": 8727.0,
+          "rolling_mean_7d": 8003.71
         },
         {
           "day": "2026-08-18",
-          "value": 1107.0,
-          "rolling_mean_7d": 1261.0
+          "value": 10668.0,
+          "rolling_mean_7d": 8370.57
         },
         {
           "day": "2026-08-19",
-          "value": 1139.0,
-          "rolling_mean_7d": 1203.0
+          "value": 19596.0,
+          "rolling_mean_7d": 10081.43
         },
         {
           "day": "2026-08-20",
-          "value": 1004.0,
-          "rolling_mean_7d": 1123.71
+          "value": 22255.0,
+          "rolling_mean_7d": 12187.71
         },
         {
           "day": "2026-08-21",
-          "value": 924.0,
-          "rolling_mean_7d": 1109.14
+          "value": 21894.0,
+          "rolling_mean_7d": 14117.14
         },
         {
           "day": "2026-08-22",
-          "value": 1086.0,
-          "rolling_mean_7d": 1092.0
+          "value": 19995.0,
+          "rolling_mean_7d": 15920.29
         },
         {
           "day": "2026-08-23",
-          "value": 937.0,
-          "rolling_mean_7d": 1062.43
+          "value": 22386.0,
+          "rolling_mean_7d": 17931.57
         },
         {
           "day": "2026-08-24",
-          "value": 775.0,
-          "rolling_mean_7d": 996.0
+          "value": 21113.0,
+          "rolling_mean_7d": 19701.0
         },
         {
           "day": "2026-08-25",
-          "value": 744.0,
-          "rolling_mean_7d": 944.14
+          "value": 19501.0,
+          "rolling_mean_7d": 20962.86
         },
         {
           "day": "2026-08-26",
-          "value": 688.0,
-          "rolling_mean_7d": 879.71
+          "value": 25350.0,
+          "rolling_mean_7d": 21784.86
         },
         {
           "day": "2026-08-27",
-          "value": 689.0,
-          "rolling_mean_7d": 834.71
+          "value": 48544.0,
+          "rolling_mean_7d": 25540.43
         },
         {
           "day": "2026-08-28",
-          "value": 697.0,
-          "rolling_mean_7d": 802.29
+          "value": 96567.0,
+          "rolling_mean_7d": 36208.0
         },
         {
           "day": "2026-08-29",
-          "value": 665.0,
-          "rolling_mean_7d": 742.14
+          "value": 53640.0,
+          "rolling_mean_7d": 41014.43
         },
         {
           "day": "2026-08-30",
-          "value": 820.0,
-          "rolling_mean_7d": 725.43
+          "value": 42843.0,
+          "rolling_mean_7d": 43936.86
         },
         {
           "day": "2026-08-31",
-          "value": 699.0,
-          "rolling_mean_7d": 714.57
+          "value": 37071.0,
+          "rolling_mean_7d": 46216.57
         },
         {
           "day": "2026-09-01",
-          "value": 563.0,
-          "rolling_mean_7d": 688.71
+          "value": 27833.0,
+          "rolling_mean_7d": 47406.86
         },
         {
           "day": "2026-09-02",
-          "value": 645.0,
-          "rolling_mean_7d": 682.57
+          "value": 24062.0,
+          "rolling_mean_7d": 47222.86
         },
         {
           "day": "2026-09-03",
-          "value": 631.0,
-          "rolling_mean_7d": 674.29
+          "value": 20538.0,
+          "rolling_mean_7d": 43222.0
         },
         {
           "day": "2026-09-04",
-          "value": 640.0,
-          "rolling_mean_7d": 666.14
+          "value": 18499.0,
+          "rolling_mean_7d": 32069.43
         },
         {
           "day": "2026-09-05",
-          "value": 604.0,
-          "rolling_mean_7d": 657.43
+          "value": 16159.0,
+          "rolling_mean_7d": 26715.0
         },
         {
           "day": "2026-09-06",
-          "value": 668.0,
-          "rolling_mean_7d": 635.71
+          "value": 16273.0,
+          "rolling_mean_7d": 22919.29
         },
         {
           "day": "2026-09-07",
-          "value": 707.0,
-          "rolling_mean_7d": 636.86
+          "value": 15030.0,
+          "rolling_mean_7d": 19770.57
         },
         {
           "day": "2026-09-08",
-          "value": 695.0,
-          "rolling_mean_7d": 655.71
+          "value": 15931.0,
+          "rolling_mean_7d": 18070.29
         },
         {
           "day": "2026-09-09",
-          "value": 2540.0,
-          "rolling_mean_7d": 926.43
+          "value": 13718.0,
+          "rolling_mean_7d": 16592.57
         },
         {
           "day": "2026-09-10",
-          "value": 2486.0,
-          "rolling_mean_7d": 1191.43
+          "value": 12099.0,
+          "rolling_mean_7d": 15387.0
         },
         {
           "day": "2026-09-11",
-          "value": 2038.0,
-          "rolling_mean_7d": 1391.14
+          "value": 11705.0,
+          "rolling_mean_7d": 14416.43
         },
         {
           "day": "2026-09-12",
-          "value": 1825.0,
-          "rolling_mean_7d": 1565.57
+          "value": 10970.0,
+          "rolling_mean_7d": 13675.14
         },
         {
           "day": "2026-09-13",
-          "value": 1702.0,
-          "rolling_mean_7d": 1713.29
+          "value": 10863.0,
+          "rolling_mean_7d": 12902.29
         },
         {
           "day": "2026-09-14",
-          "value": 1512.0,
-          "rolling_mean_7d": 1828.29
+          "value": 12661.0,
+          "rolling_mean_7d": 12563.86
         },
         {
           "day": "2026-09-15",
-          "value": 1261.0,
-          "rolling_mean_7d": 1909.14
+          "value": 12140.0,
+          "rolling_mean_7d": 12022.29
         },
         {
           "day": "2026-09-16",
-          "value": 1123.0,
-          "rolling_mean_7d": 1706.71
+          "value": 10812.0,
+          "rolling_mean_7d": 11607.14
         },
         {
           "day": "2026-09-17",
-          "value": 1166.0,
-          "rolling_mean_7d": 1518.14
+          "value": 13706.0,
+          "rolling_mean_7d": 11836.71
         },
         {
           "day": "2026-09-18",
-          "value": 1177.0,
-          "rolling_mean_7d": 1395.14
+          "value": 13402.0,
+          "rolling_mean_7d": 12079.14
         },
         {
           "day": "2026-09-19",
-          "value": 1116.0,
-          "rolling_mean_7d": 1293.86
+          "value": 11548.0,
+          "rolling_mean_7d": 12161.71
         },
         {
           "day": "2026-09-20",
-          "value": 1135.0,
-          "rolling_mean_7d": 1212.86
+          "value": 11020.0,
+          "rolling_mean_7d": 12184.14
         },
         {
           "day": "2026-09-21",
-          "value": 1091.0,
-          "rolling_mean_7d": 1152.71
+          "value": 10446.0,
+          "rolling_mean_7d": 11867.71
         },
         {
           "day": "2026-09-22",
-          "value": 935.0,
-          "rolling_mean_7d": 1106.14
+          "value": 10183.0,
+          "rolling_mean_7d": 11588.14
         },
         {
           "day": "2026-09-23",
-          "value": 884.0,
-          "rolling_mean_7d": 1072.0
+          "value": 10758.0,
+          "rolling_mean_7d": 11580.43
         },
         {
           "day": "2026-09-24",
-          "value": 800.0,
-          "rolling_mean_7d": 1019.71
+          "value": 10266.0,
+          "rolling_mean_7d": 11089.0
         },
         {
           "day": "2026-09-25",
-          "value": 764.0,
-          "rolling_mean_7d": 960.71
+          "value": 10570.0,
+          "rolling_mean_7d": 10684.43
         },
         {
           "day": "2026-09-26",
-          "value": 828.0,
-          "rolling_mean_7d": 919.57
+          "value": 9784.0,
+          "rolling_mean_7d": 10432.43
         },
         {
           "day": "2026-09-27",
-          "value": 844.0,
-          "rolling_mean_7d": 878.0
+          "value": 9837.0,
+          "rolling_mean_7d": 10263.43
         },
         {
           "day": "2026-09-28",
-          "value": 782.0,
-          "rolling_mean_7d": 833.86
+          "value": 9984.0,
+          "rolling_mean_7d": 10197.43
         },
         {
           "day": "2026-09-29",
-          "value": 783.0,
-          "rolling_mean_7d": 812.14
+          "value": 9757.0,
+          "rolling_mean_7d": 10136.57
         },
         {
           "day": "2026-09-30",
-          "value": 691.0,
-          "rolling_mean_7d": 784.57
+          "value": 10301.0,
+          "rolling_mean_7d": 10071.29
         },
         {
           "day": "2026-10-01",
-          "value": 716.0,
-          "rolling_mean_7d": 772.57
+          "value": 10438.0,
+          "rolling_mean_7d": 10095.86
         },
         {
           "day": "2026-10-02",
-          "value": 714.0,
-          "rolling_mean_7d": 765.43
+          "value": 10694.0,
+          "rolling_mean_7d": 10113.57
         },
         {
           "day": "2026-10-03",
-          "value": 723.0,
-          "rolling_mean_7d": 750.43
+          "value": 10524.0,
+          "rolling_mean_7d": 10219.29
         }
       ]
     }
@@ -583,5 +591,5 @@
     "path": "methodology.json",
     "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
   },
-  "updated_at": "2026-10-11T03:47:43.777313Z"
+  "updated_at": "2026-10-11T04:51:44.105207Z"
 }

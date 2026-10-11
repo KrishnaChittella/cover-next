@@ -621,6 +621,8 @@ def test_no_public_artifact_can_carry_a_normalised_record() -> None:
         "generated_at",
         # Event records and coverage checks, evaluated beside the score. Not signals.
         "events",
+        # A backtest report, published as it is. It is about history, not an input.
+        "validation",
     ]
 
 

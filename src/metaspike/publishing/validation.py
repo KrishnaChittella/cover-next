@@ -12,6 +12,7 @@ from metaspike.publishing.artifacts import (
     RADAR_FILE,
     SCHEMA_VERSION,
     SOURCE_HEALTH_FILE,
+    VALIDATION_FILE,
     ContractModel,
     CurrentArtifact,
     GameArtifact,
@@ -19,6 +20,7 @@ from metaspike.publishing.artifacts import (
     MethodologyArtifact,
     RadarArtifact,
     SourceHealthArtifact,
+    ValidationArtifact,
     game_file,
 )
 
@@ -47,6 +49,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
     health = read_artifact(version_dir / SOURCE_HEALTH_FILE, SourceHealthArtifact)
     methodology = read_artifact(version_dir / METHODOLOGY_FILE, MethodologyArtifact)
     radar = read_artifact(version_dir / RADAR_FILE, RadarArtifact)
+    validation = read_artifact(version_dir / VALIDATION_FILE, ValidationArtifact)
 
     listed = [entry.slug for entry in current.entries] + [e.slug for e in current.unranked]
     _require(len(listed) == len(set(listed)), "current.json lists a game more than once")
@@ -54,7 +57,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
     _require(on_disk == sorted(listed), "game files do not match the games in current.json")
     games = {slug: read_artifact(version_dir / game_file(slug), GameArtifact) for slug in listed}
 
-    for artifact in (current, health, methodology, radar, *games.values()):
+    for artifact in (current, health, methodology, radar, validation, *games.values()):
         _require(artifact.schema_version == SCHEMA_VERSION, "unexpected schema_version")
         _require(artifact.run_id == current.run_id, "artifacts come from different runs")
 
@@ -74,6 +77,7 @@ def validate_version(version_dir: Path) -> CurrentArtifact:
             f"{entry.slug}: confidence exceeds the ceiling",
         )
     _validate_events(games, methodology, radar)
+    _validate_history(validation)
     for unranked in current.unranked:
         game = games[unranked.slug]
         _require(
@@ -99,6 +103,7 @@ def validate_published(root: Path) -> Manifest:
         manifest.artifacts.source_health,
         manifest.artifacts.methodology,
         manifest.artifacts.radar,
+        manifest.artifacts.validation,
         *manifest.artifacts.games.values(),
     ]
     for relative in referenced:
@@ -174,6 +179,47 @@ def _validate_events(
             ),
             f"radar lists an event {item.slug} does not carry as upcoming",
         )
+
+
+def _validate_history(validation: ValidationArtifact) -> None:
+    """A published backtest report agrees with itself, and claims no more than it shows."""
+    report = validation.report
+    if report is None:
+        return
+    _require(
+        report.protocol_version == validation.protocol_version
+        and report.outcome_rules_version == validation.outcome_definition.version,
+        "validation report and artifact disagree on the rules used",
+    )
+    _require(
+        report.ranked + report.unranked == report.recommendations,
+        "validation counts do not add up",
+    )
+    _require(
+        report.primary_evaluable == report.overall.count <= report.ranked,
+        "evaluable outcomes disagree with the overall summary",
+    )
+    _require(
+        any(strategy.strategy == report.score_version for strategy in report.strategies),
+        "the score under test is not among the strategies",
+    )
+    # The status must be the highest one whose requirements were all met, and no higher.
+    reached = [check.status for check in report.evidence.checks if check.reached]
+    expected = reached[-1] if reached else "framework_only"
+    _require(report.evidence.status == expected, "evidence status is not what its checks support")
+    for check in report.evidence.checks:
+        _require(
+            not check.reached or all(item.met for item in check.requirements),
+            f"evidence status {check.status} is marked reached with an unmet requirement",
+        )
+        _require(
+            all(item.met == (item.actual >= item.required) for item in check.requirements),
+            "an evidence requirement is marked against its own numbers",
+        )
+    _require(
+        all(check.passed for check in report.leakage_checks) and bool(report.leakage_checks),
+        "a leakage check did not pass",
+    )
 
 
 def _require(condition: bool, message: str) -> None:

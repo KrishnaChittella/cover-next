@@ -9,6 +9,7 @@ import type {
   MethodologyArtifact,
   RadarArtifact,
   SourceHealthArtifact,
+  ValidationArtifact,
 } from "@/contract";
 
 const ROOT = path.resolve(import.meta.dirname, "fixtures", "bundle");
@@ -24,6 +25,8 @@ export const sourceHealth = (): SourceHealthArtifact =>
 export const methodology = (): MethodologyArtifact =>
   readBundleFile<MethodologyArtifact>(manifest().artifacts.methodology);
 export const radar = (): RadarArtifact => readBundleFile<RadarArtifact>(manifest().artifacts.radar);
+export const validation = (): ValidationArtifact =>
+  readBundleFile<ValidationArtifact>(manifest().artifacts.validation);
 export const game = (slug: string): GameArtifact => {
   const relative = manifest().artifacts.games[slug];
   if (!relative) throw new Error(`fixture has no game ${slug}`);

@@ -3,12 +3,13 @@
 import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 
-import type { ArtifactKind, EventIntelligenceView, RadarArtifact } from "./index";
+import type { ArtifactKind, EventIntelligenceView, RadarArtifact, ValidationArtifact } from "./index";
 import currentSchema from "./schemas/current.schema.json";
 import gameSchema from "./schemas/game.schema.json";
 import manifestSchema from "./schemas/manifest.schema.json";
 import methodologySchema from "./schemas/methodology.schema.json";
 import radarSchema from "./schemas/radar.schema.json";
+import validationSchema from "./schemas/validation.schema.json";
 import sourceHealthSchema from "./schemas/source-health.schema.json";
 
 const SCHEMAS: Record<ArtifactKind, object> = {
@@ -18,10 +19,11 @@ const SCHEMAS: Record<ArtifactKind, object> = {
   "source-health": sourceHealthSchema,
   methodology: methodologySchema,
   radar: radarSchema,
+  validation: validationSchema,
 };
 
 // The contract version this build of the UI was generated from.
-export const SUPPORTED_SCHEMA_VERSION = "1.1.0";
+export const SUPPORTED_SCHEMA_VERSION = "1.2.0";
 
 let ajv: Ajv2020 | null = null;
 const compiled = new Map<ArtifactKind, ValidateFunction>();
@@ -84,6 +86,35 @@ export function radarViolations(radar: RadarArtifact): Violation[] {
     if (radar.unavailable_reasons.length === 0) found.push({ path: "/unavailable_reasons", message: "must give a reason when unavailable" });
   } else if (radar.unavailable_reasons.length > 0) {
     found.push({ path: "/unavailable_reasons", message: "must be empty when available" });
+  }
+  return found;
+}
+
+/**
+ * What the schema cannot say about validation: "not run" carries no report, and a
+ * report never claims a status its own checks do not support.
+ */
+export function validationViolations(validation: ValidationArtifact): Violation[] {
+  const found: Violation[] = [];
+  const report = validation.report ?? null;
+  if (validation.availability === "not_run") {
+    if (report !== null) found.push({ path: "/report", message: "must be null when no backtest has been run" });
+    return found;
+  }
+  if (report === null) {
+    found.push({ path: "/report", message: "must be present when validation is available" });
+    return found;
+  }
+  const reached = report.evidence.checks.filter((check) => check.reached).map((check) => check.status);
+  const supported = reached.length > 0 ? reached[reached.length - 1] : "framework_only";
+  if (report.evidence.status !== supported) {
+    found.push({ path: "/report/evidence/status", message: `claims ${report.evidence.status}; its checks support ${supported}` });
+  }
+  if (report.evidence.checks.some((check) => check.reached && check.requirements.some((item) => !item.met))) {
+    found.push({ path: "/report/evidence/checks", message: "a status is marked reached with an unmet requirement" });
+  }
+  if (report.leakage_checks.length === 0 || report.leakage_checks.some((check) => !check.passed)) {
+    found.push({ path: "/report/leakage_checks", message: "every leakage check must be present and passed" });
   }
   return found;
 }

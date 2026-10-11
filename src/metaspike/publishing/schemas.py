@@ -11,6 +11,7 @@ from metaspike.publishing.artifacts import (
     MethodologyArtifact,
     RadarArtifact,
     SourceHealthArtifact,
+    ValidationArtifact,
 )
 
 ARTIFACT_MODELS: dict[str, type[ContractModel]] = {
@@ -20,6 +21,7 @@ ARTIFACT_MODELS: dict[str, type[ContractModel]] = {
     "source-health": SourceHealthArtifact,
     "methodology": MethodologyArtifact,
     "radar": RadarArtifact,
+    "validation": ValidationArtifact,
 }
 
 
