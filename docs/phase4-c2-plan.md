@@ -1471,3 +1471,47 @@ rows left pending by C2-D are loaded; none remain. `ms_ops.collection_runs` went
 20 to 54 rows: the 32, and the two rows every warehouse run writes for itself, which
 the design's figure of 52 left out. Observations (1,372) and the ledger (28) are
 unchanged, with no duplicate row anywhere.
+
+## 31. C2-F: launched
+
+Armed and scheduled on 2026-10-11, before the window opened. This records the launch,
+not a result: the soak has not run and nothing here says it passed.
+
+| | |
+|---|---|
+| Control record armed | 2026-10-11 02:11:44 UTC, generation `1791684706340016`, written on a precondition of the disabled generation `1791578645841911` and read back byte-identical |
+| `armed_until` | 2026-10-18T23:30:00Z |
+| Unpause plan | run `38101148562`, SHA-256 `61c335bbd54e7bbed2cba09490315331d0c858f595f079aea28fd75e95659bd1` |
+| Apply | run `38104368815`, 02:20:17 UTC: 0 added, 2 changed, 0 destroyed |
+| Prod state serial | 13 → 14 |
+| Scheduler | ENABLED, `0 * 12-18 10 *`, `Etc/UTC`, next run 2026-10-12T00:00:00Z |
+| Volume alert | above 31 completed executions in 24 hours |
+| Executions before the first tick | 35 |
+
+Expected: 168 dispatcher ticks from 2026-10-12T00:00Z to 2026-10-18T23:00Z; a
+collection at 03:00 each day (14-day window on Monday 12 October, 4-day on the other
+six) and a warehouse run at 04:00; 14 requests a day; at most 189 executions for the
+soak; about $0.30. The cron has no year: the same dates are eligible again from
+2027-10-12, and the post-soak reconciliation is what removes the window.
+
+**Success criteria**, to be judged after the window and not before:
+
+1. 168 dispatcher executions from 168 ticks, or each missing one explained by a
+   documented platform failure.
+2. No scheduler attempt and no execution after the 2026-10-18T23:00Z tick.
+3. No dispatcher wake-up outside the window, and no refusal inside it.
+4. Wikimedia only: no other source contacted, planned or recorded.
+5. Requests: 14 a day expected, 98 in all; above 22 in a day is a review event, above
+   44 an incident.
+6. Seven collections, one a day, each 14 of 14, with no 401, 403 or 429.
+7. Monday used the 14-day window and the other six days the 4-day window.
+8. Seven warehouse runs, each loading only new batches, dbt passing every time.
+9. No duplicate logical rows; every day in the windows' coverage present for all 14
+   articles; counts reconcile with the landed batches.
+10. Monitoring: no silence incident, no volume alert, any failure alert explained.
+11. Executions at or below 189 for the soak and 31 completed in any rolling 24 hours.
+12. Cost about $0.30 at list price; BigQuery under 2 GiB a day.
+13. Security unchanged: 0 secret versions, 0 keys, IAM, WIF, image and jobs as at
+    launch.
+14. Post-soak reconciliation returns the scheduler to paused `0 * * * *` with no
+    window, and the control record is disabled.

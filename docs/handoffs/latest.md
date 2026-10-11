@@ -4,183 +4,154 @@ This file is the short-lived handoff from Claude Code to ChatGPT. It is overwrit
 each checkpoint; Git history is the archive. It supports communication only and
 replaces no code, test, audit or document.
 
-Previous checkpoint: **PHASE 4 PART C2-F: LAUNCH DESIGN READY — EXECUTION APPROVAL REQUIRED**
+Previous checkpoint: **PHASE 4 PART C2-F: FINAL UNPAUSE PLAN READY — REVIEW REQUIRED**
 
-Current checkpoint: **PHASE 4 PART C2-F: FINAL UNPAUSE PLAN READY — REVIEW REQUIRED**
+Current checkpoint: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
 
-The catch-up ran and passed, the five repository variables are set, and the finite
-unpause plan is made and is exactly the expected diff. **The plan was not applied and
-the control record was not written.** In live GCP the scheduler is still PAUSED and
-the control record still DISABLED: both barriers are closed while the plan is
-reviewed. C2-F has not started.
+The control record is armed and the approved unpause plan is applied. The scheduler is
+enabled with the finite cron and its next run is the first tick of the window.
+**C2-F is NOT YET PASSED and has not yet run:** the observation window opens at
+2026-10-12T00:00:00Z. Nothing was triggered by hand and no source was called.
 
-**Time matters.** The window opens at 2026-10-12T00:00:00Z. This handoff was written
-at about 01:30Z on 11 October. The control write and the apply must both be finished
-before midnight UTC, or ticks are lost.
+No manual action is required before the first tick. Nothing depends on a laptop.
 
-## The plan to review
+## Launch
 
 | | |
 |---|---|
-| Plan run | `38101148562` (commit `fea9429`, `reuse_deployed_image=true`) |
-| Plan SHA-256 | `61c335bbd54e7bbed2cba09490315331d0c858f595f079aea28fd75e95659bd1` |
-| Artifact expires | 2026-10-14T01:24:20Z |
-| Made against | prod state serial 13, 94 managed resources |
-| Result | **0 to add, 2 to change, 0 to destroy, 0 to replace** |
-| Image | reused: the image all seven jobs already run. Build, smoke, scan and push skipped; nothing pushed |
+| Launch completed | 2026-10-11 02:20:17 UTC, 21 h 40 m before the first tick |
+| Control record written | 02:11:44 UTC |
+| Control generation | `1791578645841911` (disabled) → **`1791684706340016`** (armed) |
+| Write mechanism | `--if-generation-match` on the disabled generation; it held |
+| Read-back | byte-identical to the approved record (238 bytes); validated by the dispatcher's own model before writing |
+| Approved plan | run `38101148562`, SHA-256 `61c335bbd54e7bbed2cba09490315331d0c858f595f079aea28fd75e95659bd1` |
+| Apply run | `38104368815`, apply job finished 02:20:20 UTC, success |
+| Terraform result | `Apply complete! Resources: 0 added, 2 changed, 0 destroyed.` (0 replaced) |
+| Prod state serial | 13 → **14**; still 94 managed resources |
 
-Exact resource diff, both updated in place:
+Order kept: preflight, then control, then apply. Between the control write and the
+apply the scheduler was confirmed still PAUSED with 35 executions.
 
-```
-~ google_cloud_scheduler_job.tick                      (name ms-dispatch-15m)
-    ~ paused   = true -> false
-    ~ schedule = "0 * * * *" -> "0 * 12-18 10 *"
-      (7 unchanged attributes hidden, time zone Etc/UTC among them;
-       2 unchanged blocks hidden: the retry settings and the target)
+The control record now in place:
 
-~ google_monitoring_alert_policy.execution_volume
-    ~ conditions.display_name
-        "more than 60 completed executions in 24 hours"
-     -> "more than 31 completed executions in 24 hours"
-    ~ conditions.condition_threshold.threshold_value = 60 -> 31
-      (everything else in the policy unchanged)
+```json
+{"version":1,"enabled":true,"armed_until":"2026-10-18T23:30:00Z","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
 ```
 
-Exact output diff:
+## Preflight (02:10 UTC on 11 October), all met
 
-```
-~ collection_running              = false -> true
-~ daily_execution_alert_threshold = 60 -> 31
-~ dispatch_schedule               = "0 * * * *" -> "0 * 12-18 10 *"
-+ soak_scheduled_ticks            = 168
-```
+Before midnight UTC, against an external clock. `main` level with origin and clean;
+only two documents changed since the plan's commit `fea9429`. Plan run succeeded;
+artifact unexpired (2026-10-14T01:24:20Z) and hashing exactly; rendered diff 0 add,
+2 change, 0 destroy. State serial 13, 94 resources, no apply since the plan. Scheduler
+PAUSED `0 * * * *` `Etc/UTC`. Control disabled at generation `1791578645841911`. 35
+executions, the last being the catch-up `ms-warehouse-lxqp9`. Seven jobs on the
+approved digest. 51 landed batches and 51 load receipts, so none pending;
+`collection_runs` 54, observations 1,372, ledger 28. Ten policies, silence disabled,
+the two failure alerts enabled, volume threshold 60. The five repository variables as
+approved. 0 secret versions, 0 keys, WIF ACTIVE, quota 10,240 MiB. No Cloud Run log
+entry since the catch-up.
 
-The rendered plan names these two resources and no other. Not in it:
-`dispatcher_silent` (stays disabled), `scheduler_delivery_failed`, `dispatcher_failed`,
-the other six policies, any Cloud Run job, any image, IAM, WIF, secrets, buckets,
-datasets, service accounts. The BigQuery quota is not in this root. The workflow's own
-check on the JSON plan found nothing destroyed or replaced. As before, the JSON plan is
-not in the artifact and the binary cannot be decoded locally, so the rendered text and
-the hash are the evidence.
+## Verified after the apply (02:20 UTC)
 
-## Rulings recorded
-
-In section 30 of `docs/phase4-c2-plan.md`: catch-up on 11 October with the default
-load window of 3; `daily` selector for it; request bound 22 per task attempt and 44
-with a crash retry, above 22 a review event, above 44 an incident; **volume threshold
-31** (25 dispatcher completions plus the children of two adjacent days), expected
-maximum about 29; soak ceiling still 189; `armed_until` 2026-10-18T23:30:00Z.
-
-For the success criteria this means: no rolling 24 hours above 31 completed
-executions; total executions for the soak at or below 189.
-
-## Preflight (2026-10-11 01:04 UTC), all met
-
-The UTC date was 11 October, confirmed against an external clock. Prod state serial
-13, 94 resources. Scheduler PAUSED, `0 * * * *`, `Etc/UTC`. Control disabled,
-generation `1791578645841911`. 34 executions. Seven jobs on the approved digest. Ten
-policies: `scheduler_delivery_failed` and `dispatcher_failed` enabled,
-`dispatcher_silent` disabled, volume threshold 60. 0 secret versions, 0 keys, no IAM
-or WIF difference. `SCHEDULER_PAUSED` = `true`, no soak variable. 51 landed batches
-against 19 load receipts: exactly the 32 from 9 October pending and nothing else. No
-Cloud Run log entry of any kind since the previous checkpoint.
-
-The installed gcloud documents `--update-env-vars` as "environment variables overrides
-for an execution of a job"; the persisted job is not changed.
-
-## The catch-up
-
-```
-gcloud run jobs execute ms-warehouse --region us-central1 --project metaspike-prod-kc \
-    --wait --update-env-vars METASPIKE_DBT_SELECTOR=daily
-```
+**Scheduler**, read from the live job:
 
 | | |
 |---|---|
-| Execution | `ms-warehouse-lxqp9` |
-| Created / completed | 2026-10-11 01:06:11 / 01:10:47 UTC, 4 m 24 s |
-| Result | succeeded on the first attempt, no retry |
-| Image | the approved digest |
-| Overrides | `METASPIKE_DBT_SELECTOR=daily` only; load window left at its default of 3 |
-| Batches loaded | **32**, 32 rows, group `runs` |
-| Batches already loaded | 8, recognised and skipped |
-| Incomplete batches | 0 |
-| dbt | selector `daily`; `PASS=28 WARN=0 ERROR=0 SKIP=0`; 8 incremental models, 1 view, 19 tests |
-| BigQuery | 70 jobs (34 loads, 36 queries), 0 errors, 110 MiB billed |
-| Rebuild pending | none |
+| State | **ENABLED** |
+| Schedule | **`0 * 12-18 10 *`** |
+| Time zone | `Etc/UTC` |
+| Next scheduled run | **2026-10-12T00:00:00Z** |
+| Last attempt | none |
 
-| | Before | After |
-|---|---|---|
-| Pending 9 October run-log batches | 32 | **0** |
-| Load receipts, `ms_ops.collection_runs` | 14 | 46 |
-| `ms_ops.collection_runs` rows | 20 | **54** |
-| 9 October dispatcher rows in the table | 4 | 36, all 36 that were landed |
-| `ms_raw.period_observations` | 1,372 | 1,372 |
-| `ms_ops.expected_targets` | 28 | 28 |
+Only four fields differ from before the apply: state, schedule, the next-run time and
+the update timestamp. Retry settings, deadline, target and identity are unchanged. No
+scheduler attempt has been logged since the scheduler was paused on 9 October.
 
-**The one difference from the prediction, explained.** The table holds 54 rows, not
-52. The 32 pending rows account for 20 → 52. The other two are the rows this warehouse
-execution wrote for itself, started and finished, as every warehouse run does (34 load
-jobs: 32 batches and those 2). The design's figure left them out; no other batch was
-found or loaded. All 54 rows are distinct; all 1,372 observations are distinct and
-span the same dates as before.
+**Monitoring.** Ten policies, none added or removed. One changed: "unusually many job
+executions in a day" now reads "more than 31 completed executions in 24 hours" with a
+threshold of **31**, and nothing else in that policy changed. `dispatcher_silent`
+remains disabled. `scheduler_delivery_failed` and `dispatcher_failed` remain enabled.
+The other seven are identical to their pre-apply copies.
 
-## Post-catch-up safety state
+**Terraform outputs:** `collection_running = true`,
+`daily_execution_alert_threshold = 31`, `dispatch_schedule = "0 * 12-18 10 *"`,
+`soak_scheduled_ticks = 168`.
 
-- Scheduler PAUSED, `0 * * * *`, `Etc/UTC`. Control disabled, generation unchanged.
-- Executions **35**: the one catch-up and nothing else. Only `ms-warehouse` ran.
-- Job definitions unchanged: all seven at generation 6 on
-  `sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`;
-  `ms-warehouse` carries no selector in its stored environment.
-- Prod state serial 13. No IAM, schema, secret, alert or scheduler difference. 0 secret
-  versions. 0 user-managed keys. Registry 11 images.
-- Wikimedia 0, Steam 0, IGDB 0.
+**Control:** enabled, byte-identical to the approved record, `armed_until`
+2026-10-18T23:30:00Z, generation `1791684706340016`.
 
-## Repository variables, as set and read back
+**Cloud Run:** executions still **35**; the last is the catch-up of 01:06 UTC. No
+dispatcher, collector or warehouse job has run since. No Cloud Run log entry at all
+since the catch-up. All seven jobs at generation 6 on
+`sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`.
 
-```
-SCHEDULER_PAUSED=false
-SOAK_MONTH=10
-SOAK_START_DAY=12
-SOAK_END_DAY=18
-SOAK_DAILY_EXECUTION_CEILING=31
-```
+**Security:** 0 secret versions; 0 user-managed keys across 10 service accounts; the
+audit comparison differs only in the alert list and the scheduler; WIF pool ACTIVE.
 
-These change nothing live. They do mean that **any plan made from now on is an unpause
-plan**, until they are restored.
+**BigQuery quota:** 10,240 MiB a day.
 
-## State at the end of this checkpoint (01:25 UTC)
+**Sources:** Wikimedia 0, Steam 0, IGDB 0.
+
+**Repository variables:** `SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
+`SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`.
+
+The portfolio repository was not touched.
+
+## The soak
 
 | | |
 |---|---|
-| Live scheduler | **PAUSED**, `0 * * * *` |
-| Control record | **DISABLED** |
-| Live volume threshold | 60 |
-| Prod state serial | 13 |
-| Cloud Run executions | 35 |
-| Source calls | 0 |
-| Secret versions / keys | 0 / 0 |
-| C2-F | NOT STARTED |
+| Opens | 2026-10-12T00:00:00Z |
+| Last tick | 2026-10-18T23:00:00Z |
+| Control expires | 2026-10-18T23:30:00Z |
+| Ticks | 168 |
 
-Git: this handoff and section 30 of the plan document. No code, Terraform or workflow
-change. The portfolio repository was not touched.
+Expected: 168 dispatchers; a collection opportunity at 03:00 UTC on each of seven
+days; Monday 12 October with the 14-day reconciliation window, Tuesday to Sunday with
+4-day windows; 14 requests a day (above 22 a review event, above 44 an incident); two
+children a day, at most three; at most 189 executions for the soak, so at most 224 in
+the project; no rolling 24 hours above 31 completed executions; about $0.30.
 
-## What remains, in order, after approval
+First milestones, to be read afterwards and not waited for:
 
-1. Write the approved control record, with a precondition on generation
-   `1791578645841911`.
-2. Apply exactly plan `38101148562`, once.
-3. Verify: scheduler ENABLED with `0 * 12-18 10 *` and next run 2026-10-12T00:00:00Z;
-   volume threshold 31; `dispatcher_silent` disabled; state serial 14; no execution
-   yet; everything else unchanged.
+| UTC | Expected |
+|---|---|
+| 2026-10-12 00:00 | First tick. Dispatcher only; nothing is due |
+| 2026-10-12 03:00 | Monday reconciliation order: 14 targets, 14-day window, 22 reserved, 14 requests expected. Collector starts |
+| 2026-10-12 04:00 | Warehouse run, after the collector's receipt |
 
-If the apply fails: disable the control record, audit read-only, report; no retry.
-If approval cannot come in time to finish before 2026-10-12T00:00Z: the launch should
-not be started late; the variables are restored and a new window is ruled on.
+Work begins two to four minutes after each hour: that is Cloud Run's start-up time,
+measured in C2-E, and is not a fault.
+
+**The schedule is not one-shot.** The cron has no year and the same dates are eligible
+again from 2027-10-12. The control record's expiry and the post-soak reconciliation
+are what bound it to this year.
+
+## Success criteria
+
+The fourteen criteria are in section 31 of `docs/phase4-c2-plan.md`, with the alert
+ceiling at 31. They are judged after the window. **C2-F is not yet passed.**
+
+## Stops, if one is needed
+
+- Stop source work at once: disable the control record (one write, on generation
+  `1791684706340016`).
+- Stop everything: `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1
+  --project=metaspike-prod-kc`.
+
+Neither is needed for the soak to end. The ticks stop by themselves after 23:00 UTC on
+18 October.
+
+## After the window
+
+A read-only audit against the criteria; then the reconciliation: `SCHEDULER_PAUSED`
+back to `true`, the four soak variables deleted, one plan, review, apply; and the
+control record disabled.
 
 ## Exact next approval required
 
-Review of plan `38101148562` (SHA-256 above) and approval to write the control record
-and apply exactly that plan.
+None before the first tick. The next checkpoint is whatever observation or audit
+ChatGPT instructs, during or after the window.
 
-C2-F has not started. STOP.
+STOP. Nothing is to be triggered by hand.
