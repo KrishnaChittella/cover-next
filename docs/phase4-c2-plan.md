@@ -1440,3 +1440,34 @@ Three things it found are permanent:
   twenty-fifth dispatcher. The strict bound is one higher than the formula.
 
 Nothing was changed for any of them.
+
+## 30. C2-F: rulings on the launch design, and the catch-up
+
+Rulings of 2026-10-11 on the design in section 29 and its handoff:
+
+- **Window:** 2026-10-12 to 2026-10-18 UTC inclusive, `0 * 12-18 10 *`, 168 ticks.
+- **Catch-up:** one supervised warehouse execution on 11 October UTC, before the
+  unpause, with the default load window of three days, which reaches the 9 October
+  folder on that date. The `daily` dbt selection is named for it, the proven path,
+  instead of letting the job pick the `hourly` selection for the first time.
+- **Requests:** the order's budget is 22 and the expected day is 14. One collector
+  task attempt cannot exceed 22. `max_retries` stays 1, so the strict bound after a
+  crash and retry is 44 a day. Any day above 22 is a review event; anything above 44
+  is an incident and a stop.
+- **Volume alert: 31, not 30.** This corrects the formula in section 28. The metric
+  counts completed executions, so a rolling 24 hours can hold 25 dispatcher
+  completions as well as the children of two adjacent UTC days:
+  `25 + 2 x max_executions_per_day` = 31. The expected rolling maximum is about 29.
+  The alert fires only above 31.
+- Unchanged: `max_executions_per_day` 3, 168 dispatchers, at most 21 children, a
+  ceiling of 189 executions for the soak.
+- **Control record:** as proposed, `armed_until` 2026-10-18T23:30:00Z. Written only
+  after the unpause plan is reviewed, immediately before its apply.
+
+**The catch-up, as run.** Execution `ms-warehouse-lxqp9`, 2026-10-11 01:06 to 01:10
+UTC, succeeded on its first attempt. It loaded 32 batches (32 rows), recognised 8 as
+already loaded, left none incomplete, and passed dbt with 28 of 28. The 32 run-log
+rows left pending by C2-D are loaded; none remain. `ms_ops.collection_runs` went from
+20 to 54 rows: the 32, and the two rows every warehouse run writes for itself, which
+the design's figure of 52 left out. Observations (1,372) and the ledger (28) are
+unchanged, with no duplicate row anywhere.
