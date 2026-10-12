@@ -4,164 +4,273 @@ This file is the short-lived handoff from Claude Code to ChatGPT. **This copy li
 on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and was not
 touched. It supports communication only and replaces no code, test or document.
 
-Production baseline: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
-(true at 22:07 UTC on 2026-10-11: the first tick is 2026-10-12T00:00Z and no scheduler
-attempt has been made)
+Production baseline: **PHASE 4 PART C2-F: SEVEN-DAY SOAK RUNNING** (observed read-only
+at 02:34 UTC on 2026-10-12; see the last section. Not altered.)
 
-Parallel checkpoint: **PRODUCT BUILD U4.2: EVENT VALIDATION PROVENANCE CLOSED — CHATGPT REVIEW REQUIRED**
+Parallel checkpoint: **PRODUCT BUILD U5: OFFLINE CATALOGUE EXPANSION FOUNDATION — CHATGPT REVIEW REQUIRED**
 
-Offline only. No source was called. Provenance and policy plumbing; no intelligence
-changed.
+Baseline commit `1936e07` (U4.2), branch `product/local-ui`. Offline only. No source
+was called, nothing was stored, nothing was deployed.
 
-## The gap
+Full description: `docs/catalogue-expansion.md`.
 
-`run_backtest` could be given an event store and would put event intelligence from
-whatever sources it held into its snapshots, with no policy consulted. The resulting
-`ValidationReport` did not record which sources those were. Handed to `build_bundle`
-later, with no current event inputs, the report went into a bundle marked `internal`.
+## IMPLEMENTED
 
-No existing result was affected: no Steam observation was promoted, and the three
-coverage checks postdate the backtest's range.
+A thin layer over what already existed. No second resolver, no second store.
 
-## Backtest: fail closed
+- `catalogue/evaluation.py`: `evaluate_broad_catalogue(records, policies=, stage=,
+  as_of=)`. Runs the existing `generate_catalogue_blocked` on the records production's
+  scope would see, then on all of them, in memory, and summarises in counts.
+- `catalogue/coverage.py`: per entity, whether each monitoring source could be asked,
+  reusing `SourceEligibility`. Steam is exactly `steam_eligibility`; Wikimedia is the
+  catalogue's exact article mapping.
+- `metaspike evaluate-catalogue --stage ...`: the same, as a command. Counts only.
+- `CATALOGUE_SOURCE_POLICIES`: the explicit mapping the command passes.
+- `tests/catalogue_scale.py`: a measurement helper for synthetic sizes.
+- 18 tests (15 in ordinary CI, 3 marked slow).
 
-`run_backtest(..., event_source_policies=None, stage=None)`. Both are explicit and
-neither has a default value that grants anything.
+### Controlled broad-evaluation behaviour
 
-For each prediction day, before that day is predicted, the sources of every event
-record and coverage check visible at that moment are collected. For each such source:
+Requirements A–K of the brief, each met and tested:
 
-- a stage must have been stated;
-- a `SourcePolicy` must be present for it;
-- `policy.source` must equal the source's name;
-- the policy must clear that stage for `EVENT_INTELLIGENCE`.
-
-Otherwise `SourcePolicyError`, raised before `predict` is called for that day, so the
-event intelligence never enters a snapshot (a test counts the calls). If nothing is
-ever visible to any prediction, neither argument is needed.
-
-No caller-vouches path, no source-name test, no default stage. The `backtest` command
-passes `EVENT_SOURCE_POLICIES` and `DeploymentStage.PRIVATE_DEVELOPMENT` explicitly.
-
-## Provenance on the report
-
-`ValidationReport.events` (`EventBacktest`), format now `validation_report_v3`:
-
-| Field | Meaning |
+| | |
 |---|---|
-| `event_sources_used: tuple[str, ...]` | **New.** Sorted set. Every source whose record or coverage check was visible to at least one prediction. Not every registered source; not every source in the store |
-| `snapshots_with_positive_event_heat: int` | **New.** Snapshots where an event actually counted |
-| `snapshots_with_event_intelligence: int` | Unchanged: snapshots with event coverage, heat 0 included |
-| `real_event_history: bool` | Meaning made explicit: at least one event *observation* was visible to at least one prediction |
+| A. Recorded records or fixtures only | takes records; no adapter or client is imported |
+| B. States its scope | every summary says `offline_broad_evaluation` and the stage |
+| C, D. Policy and stage | see below |
+| E. Existing resolver and blocked path | calls `generate_catalogue_blocked` twice; holds no identity rule |
+| F. Bootstrap entities and ids preserved | tested |
+| G. Admitted separately from quarantined | bound / quarantined / related, and new / existing |
+| H. Related products apart from entities | tested |
+| I. Production pointer untouched | no repository, object store or pointer is imported |
+| J. No live call | tested with the network blocked |
+| K. Uncleared or unsupported source refused | tested |
 
-Two things about `real_event_history`. It used to be "the store holds any observation",
-which was true even when every observation postdated the range; it now requires
-visibility. And coverage alone leaves it false while still putting the source in
-`event_sources_used`.
+`BROAD_DISCOVERY_ENABLED` is still `False`. `in_scope(..., BROAD)` still raises.
+`advance_catalogue` still defaults to the narrow scope. The evaluation does not go
+through that gate at all.
 
-The model refuses a report whose snapshots carried event intelligence and that names no
-source, and one whose list is not a sorted set. The sources are part of the
-`report_id`. The report's note and its event limitation line now state the sources when
-any were used; with none, both read exactly as before.
+### Source-policy enforcement
 
-## Publishing
+Every source among the records needs a `SourcePolicy`, handed in under its own name,
+that clears the **stated** stage for `CATALOGUE_METADATA`. `policies` and `stage` have
+no defaults. Refused: no mapping; an empty one; one missing that source; a policy under
+another source's name; no stage; a stage not cleared; an unknown source; a record posing
+as bootstrap evidence; an unknown or prohibited storage permission.
 
-`_restricted_event_sources(inputs, stage, validation)` adds the report's
-`event_sources_used` to the sources the bundle uses, and every one goes through the
-same gate with the same mapping, `EventInputs.source_policies`. There is one mapping
-for current event intelligence and historical provenance, handed in by the caller; no
-global lookup.
+No policy was changed. The recorded fixtures evaluate at private development and are
+refused at private collection (Steam's catalogue is not cleared there), public launch
+and commercial production.
 
-One implementation: `event_sources/gate.py::require_event_source`, called by the
-backtest and by the build.
+### Evidence, identity and quarantine
 
-| Stage | Report used a source not cleared for public launch |
+Unchanged, and pinned by tests: bootstrap ids, slugs, identifiers, typed relationships
+and lifecycle preserved; proven identity joins without duplicating; an eligible new
+game becomes `NEW_ENTITY`; a shared title is never identity; related products, non-games
+and packaging variants never become entities; repeating inputs makes zero resolver
+calls and changes nothing; new evidence releases a quarantine by appending, with the
+earlier decision and bindings intact and a point-in-time read still showing the record
+unbound; no identifier is inferred from a title; cross-checked against all-pairs with
+no difference.
+
+## TESTED OFFLINE
+
+### Recorded inputs actually used
+
+The existing fixture `tests/fixtures/catalogue`, recorded 2026-10-05: **266 IGDB games
+and 128 Steam apps, 394 records.** Nothing new was fetched.
+
+| | |
 |---|---|
-| private development, cleared | builds; `private_development_only`; source in `restricted_sources` |
-| private collection | refused unless that stage is cleared |
-| public launch | refused unless that stage and its permissions are cleared |
-| commercial production | refused unless that stage and its permissions are cleared |
-| any, with no policy for the source | refused |
+| Records in production's scope / seen only by broad | 17 / 377 |
+| Bound | 327 (219 admitted as new entities, 108 resolved to existing) |
+| Quarantined | 44 (title only 21, conflicting evidence 12, id-link title mismatch 8, undetermined type 2, multiple candidates 1) |
+| Related products | 23 |
+| Entities: production's scope / broad | 15 / 234 |
 
-A report derived from `steam_news` cannot enter an `internal` bundle, with current
-event inputs empty or absent.
+### Source coverage
 
-The artifact validator also counts the report's sources among those that must be
-declared, and refuses a published report that carried event intelligence but names no
-source.
+| Source | Eligible | Inapplicable | Unknown |
+|---|---|---|---|
+| Wikimedia pageviews | 14 | 0 | 220 |
+| Steam concurrent players | 90 | 69 | 75 |
 
-Stored reports in an earlier format stay on disk and are never read as current: a v2
-report cannot say which event sources it used.
+Ready for both 5. **Without any eligible source 135.** These are identifier states, not
+measurements: no field can hold a count of players or views, and unknown or inapplicable
+is never zero.
 
-## Schema
+### Synthetic-only scale tests
 
-Internal contract **1.4.0 → 1.5.0**, Python models → JSON Schema → generated
-TypeScript. `/validation` gained one line: "Event sources used: …", or that no event
-source took part, and the count of snapshots with a heat above 0. No redesign; no title
-or candidate text.
+`tests/catalogue_samples.py` (pre-existing): invented games in fixed strata, shaped like
+IGDB and Steam records, deliberately heavy in hard cases. Measured on one laptop, one
+process per size:
 
-## Tests added
+| Records | Entities | Quarantined | Resolver calls | Entities examined | All-pairs | Share | Full scans | Total time | Peak memory |
+|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | 432 | 402 | 1,030 | 25,176 | 675,566 | 3.7% | 60 | 0.51 s | 54 MB |
+| 5,000 | 2,070 | 2,021 | 5,167 | 578,428 | 16,138,916 | 3.6% | 312 | 11.4 s | 108 MB |
+| 10,000 | 4,117 | 4,043 | 10,343 | 2,289,686 | 64,147,993 | 3.6% | 628 | 49.2 s | 169 MB |
+| 20,000 | 8,210 | 8,094 | 20,690 | 9,108,927 | 255,861,875 | 3.6% | 1,260 | 214.2 s | 306 MB |
 
-Backend (8 new, plus existing ones moved onto the policy path):
+Nothing larger was run; nothing is claimed for 50,000. The existing 50,000-entity
+*scheduling* simulation is unrelated to resolving and was not re-run.
 
-| Case | Where |
-|---|---|
-| A. visible record, no policy → fail | `test_a_backtest_refuses_visible_event_data_without_a_policy` (nine refusal variants: nothing stated; stage only; `{}`; policy only; other sources' policies; wrong-name policy; three stages not cleared) |
-| B. visible coverage check, no policy → fail | same test; also proves refusal happens before `predict` |
-| C. data never visible is not provenance | `test_event_data_never_visible_to_a_prediction_is_not_provenance`: report **equal** to the no-event report |
-| D, E, F, K | `test_a_report_records_exactly_the_event_sources_its_predictions_saw` |
-| J. coverage alone is provenance | `test_coverage_alone_is_provenance` |
-| G, I | `test_a_report_that_used_an_event_source_carries_its_policy_into_the_bundle` |
-| H. Steam News policy at public launch → refused | `test_a_backtest_report_that_used_steam_news_cannot_enter_an_internal_bundle` (synthetic posts, real policy) |
-| no-event result unchanged | `test_the_no_event_fixture_backtest_is_exactly_what_it_was` |
-| earlier-format report not read | `test_a_report_from_before_provenance_is_kept_and_never_read_as_current` |
-| L | U3.1's `test_a_period_that_had_ended_but_was_not_yet_published_is_withheld`, untouched and passing |
+### Performance findings
 
-Frontend: 4 new (the line in both states; three contradictions refused).
+1. Blocking holds at about 3.6% of all-pairs at every size.
+2. **Resolving is quadratic anyway** (about ×4.3 per doubling). A record whose title
+   cannot be keyed falls back to a full scan of every entity; about 6% of synthetic
+   records do, and those scans are at least 98% of the entities examined at 20,000. On
+   the 394 recorded records there were 0 full scans, so the real share is unknown.
+3. The coverage summary is quadratic too (22 s at 20,000): `steam_eligibility` scans
+   every binding per entity.
+4. Memory is linear, about 15 MB per thousand records.
+5. A stored snapshot is the whole state each generation: about 2.1 KB per record
+   (measured at 1,000 and 5,000).
 
-Synthetic policy: every backtest test that feeds invented events passes
-`synthetic_event_policies()` at `PRIVATE_DEVELOPMENT`. `tests/synthetic_policy.py` is
-imported by nothing in `src/`; the backtest and the gate contain no source name and no
-name test (asserted).
+**None was fixed.** The first is in the resolver's blocking and needs its own reviewed
+change and equivalence proof.
+
+## Current catalogue limitations identified
+
+- Production resolves 17 of the 394 recorded records and has 15 entities.
+- Only 394 real recorded records exist. Behaviour on thousands of real games is
+  unmeasured.
+- Entities admitted by a broad pass have **no source identifier**. 220 of 234 are
+  unknown for Wikimedia, the only source cleared for unattended collection. No approved
+  way to obtain an article mapping exists, and a title may not be used.
+- The quadratic costs above. The production catalogue job has a one-hour timeout and
+  2 GiB; whether a first broad build fits has not been measured.
+- `metaspike generate-catalogue` and `audit-bootstrap-bindings` already resolve every
+  recorded record locally with no scope or policy check. They predate this checkpoint
+  and were left alone; `evaluate-catalogue` is the gated path. Flagged for a ruling.
+
+## NOT PRODUCTION-PROVEN
+
+Everything above. It ran on a laptop over fixtures. No broad build has run on the
+production job, against real records at scale, or through the repository.
+
+## BLOCKED BY SOURCE POLICY
+
+- Steam catalogue: private development only. Not cleared for unattended collection.
+- IGDB: cleared through private collection; nothing public or commercial.
+- Steam player counts: private development only. Ninety entities are identifier-ready
+  and none may be sampled in production.
+- Steam News: private development only.
+
+## DEFERRED UNTIL AFTER C2-F
+
+Turning broad discovery on; any live catalogue fetch; a fix to the full-scan fallback;
+an indexed eligibility; snapshot retention; a measured broad build on the real job; any
+new source in production; any change to the soak.
+
+## What was deliberately not activated
+
+Broad production discovery; any live source call; any stored catalogue or pointer move;
+sampling, tiers or schedules; any score, component or weight; any change to the
+developer interface or the artifact contract (still 1.5.0).
+
+## What remains for multi-source demand signals
+
+Reviewed, not rebuilt: source families with one voice each, four applicability states,
+`signal_semantics_v2`, signals normalised against their own history, the shadow-only
+access gate, Steam eligibility, event evidence and its gates, point-in-time validation.
+Nothing was added to them. No metric was aggregated, no source counted as independent
+agreement, no weight introduced.
+
+Still needed, in order: (1) a Wikimedia identifier for entities beyond the bootstrap
+14, which is the largest gap; (2) permission; (3) a combination rule for entities with
+several Steam apps; (4) an agreement rule across families, defined before it is fitted.
+
+## Cost
+
+Nothing here costs anything. For a broad rollout, measured and estimated kept apart:
+
+| Item | Measured | Assumed | Estimate |
+|---|---|---|---|
+| Discovery, requests | documented page limits (IGDB 500; Steam app list 50,000) | | 20,000 IGDB games is 40 requests; API price $0 |
+| Discovery, compute | 192 s to resolve 20,000 synthetic records, laptop | 2–4× slower on one Cloud Run vCPU; about $0.0000185 a vCPU-second (the approved table's rate) | one to two cents, once |
+| Metadata refresh | | one small daily execution at the one-minute minimum | about $0.03 a month |
+| Daily Wikimedia coverage | | approved planning figures, C2 plan §28, simulated, with a stand-in sampled source that is not approved | $4.28 at 1,000 catalogued; $4.69 at 5,000; $5.76 at 10,000; $11.55 at 50,000 a month |
+| Selective sampled monitoring | | C2 plan §4 estimate, 24,200 requests a day at the caps | about $9 a month at one request a second, or inside the allowance at four concurrent. Blocked by policy |
+| Storage | about 2.1 KB of snapshot per record | about $0.02 a GB-month; one generation a day | about 42 MB a generation at 20,000; about $0.03 a month, accumulating until pruned |
+
+Discovery, refresh and storage together are cents. Collection cadence is the cost that
+matters, and the approved figures are unchanged. Boundaries unchanged: preferred $5–10,
+scrutiny $10–15, hard $20. No expense was activated.
 
 ## Proofs of no change
 
 | | |
 |---|---|
-| No-event fixture backtest | `snapshot_set_hash` `8a0f192d…e748` and `label_set_hash` `6b8aa3ce…abdf`, identical to U3.1; pinned in a test. Every metric as before (v0 top-1 +114.4% / 82%, association +0.62; lift +0.71). `report_id` changed with the format: `report_9e3a97a9725a587c5570ba2e42e7cd1a` |
-| Score v0 | `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`; golden replay bit-for-bit; identical with and without event intelligence in three tests |
-| U3.1 leakage behaviour | `validation/history.py`, `snapshot.py`, `outcomes.py`, `metrics.py`, `rules.py`: no diff. Only `backtest.py`, `report.py`, `store.py` changed. Five leakage checks unchanged |
-| `outcome_rules_v1`, `validation_protocol_v1` | fingerprint tests pass |
-| `event_classification_rules_v1` | `event_sources/` unchanged apart from the new `gate.py`; fingerprint `20103a107c30…1772` test passes |
-| `event_heat_rules_v1` / event engine | `events/` `333373c61ae6c37f`, `rules.py` `7358ea6563ddcad9` |
-| U4 probe | unchanged: 3 requests, 15 posts, 0 classified, 0 promoted, 3 coverage checks. Local Steam quota ledger still 3 |
+| Score v0 | `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`: no diff; golden replay bit-for-bit |
+| Identity golden set | `tests/fixtures/resolution_golden.json` byte-identical (SHA-256 pinned in a test); version 3, 200 cases, 178 correct, **0 false automatic merges**; `evaluate-resolver` exit 0 with 100% auto-match precision (52/52) |
+| Resolver, blocking, generation, persistence, eligibility | `resolution/`, `catalogue/generate.py`, `incremental.py`, `persistence.py`, `eligibility.py`, `domain/`: no diff |
+| U3.1 | `validation/`: no diff; the publication-lag regression and the pinned no-event set hashes pass |
+| U4.2 | `event_sources/`, `events/`: no diff; the provenance and fail-closed tests pass |
+| Baselines, Event Heat, classifier, outcome rules, protocol | fingerprint tests pass |
+| Artifact contract | 1.5.0; `schemas/` and `apps/` have no diff |
 
 ## Gates
 
-Backend: `ruff format --check` clean; `ruff check` clean; `mypy` clean (202 files);
-`pytest` **1,463 passed**, 5 deselected (slow marker).
-Frontend: `contract:check`, `typecheck`, `lint`, `test` (**179 passed**), `build` all
-pass.
+Backend: `ruff format --check` clean (218 files); `ruff check` clean; `mypy` clean (206
+files); `pytest` **1,478 passed, 8 deselected**; `export-schemas --check` up to date;
+`evaluate-resolver` exit 0.
 
-## C2-F status and production isolation (read-only, 22:07 UTC 2026-10-11)
+The 8 deselected are the `slow` and `live` markers, excluded by the project's default:
+the 5 that existed, and 3 new slow scale cases (5,000 / 10,000 / 20,000). Of the new
+ones the 5,000 case was run and passed; the other two were not run as tests, but the
+same measurement was run for all four sizes through `python -m tests.catalogue_scale`.
+The pre-existing 10,000-record blocked-versus-reference proof was not re-run.
 
-C2-F has **not begun**; there is no autonomous activity to report. Scheduler ENABLED,
-`0 * 12-18 10 *`, next run 2026-10-12T00:00:00Z, no attempt. Control generation
-`1791684706340016`, unchanged. Terraform state unchanged (latest generation
-`1791685217422653`). Executions 35, last `ms-warehouse-lxqp9`. Seven jobs, generation
-6, image `sha256:a8680b2be8b5…`. Ten alert policies; IAM, schemas, secrets and alerts
-identical to the previous snapshot. 0 secret versions, 0 user keys. Repository
-variables unchanged. Last workflow run still 38104941975. `main` = `cb33198`, level
-with origin, clean. No pull request. No Wikimedia, Steam or IGDB call was made in U4.2.
-The portfolio repository was not touched.
+Frontend (no frontend change): `contract:check`, `typecheck`, `lint`, `test` (179
+passed), `build` all pass.
+
+## Production isolation (read-only, 02:34 UTC 2026-10-12)
+
+Verified by reading GCP and GitHub, not inferred:
+
+- `main` = `cb33198`, level with origin, clean. `product/local-ui` is not merged; no
+  pull request exists.
+- Workflow triggers: `deploy.yml` runs on push to `main` and manual dispatch only;
+  `ci.yml` on pull requests, calls and manual dispatch. A push to `product/local-ui`
+  starts nothing. Last workflow run is still 38104941975 (11 October).
+- Terraform state: latest generation `1791685217422653`, the launch apply. Unchanged.
+- Control record: generation `1791684706340016`. Unchanged.
+- Scheduler configuration: ENABLED, `0 * 12-18 10 *`. Unchanged.
+- Seven jobs, generation 6, image `sha256:a8680b2be8b5…`. Unchanged.
+- IAM, dataset schemas, secrets and alert policies identical to the previous snapshot.
+  0 secret versions, 0 user keys.
+- Repository variables unchanged.
+- No Wikimedia, Steam or IGDB call was made by U5. The local Steam quota ledger still
+  reads 3, from the U4 probe.
+- The portfolio repository was not touched.
+
+## C2-F observation (read-only; separate from U5; not altered)
+
+The soak window opened at 2026-10-12T00:00Z and is running by itself.
+
+| Tick | Execution | Result |
+|---|---|---|
+| 00:00 UTC | `ms-dispatch-5lc87` | succeeded |
+| 01:00 UTC | `ms-dispatch-xv92w` | succeeded |
+| 02:00 UTC | `ms-dispatch-zbb72` | succeeded |
+
+Three dispatcher executions, no collector or warehouse run yet, which is what the launch
+plan expects before 03:00. Scheduler last attempt 02:00:04Z, next 03:00Z. Executions 35
+→ 38. Objects in the operations bucket 138 → 145 and in landing 102 → 114.
+
+This is an observation at one moment, not a judgement of the soak. The 03:00 collection
+and 04:00 warehouse run had not happened yet. Nothing was triggered, restarted or
+changed.
 
 ## Commits
 
-"fix: preserve event-source provenance in validation", then this handoff. Pushed to
-`origin/product/local-ui` only. No PR, no merge to `main`.
+`c8b59c4` feat: add offline catalogue expansion foundation; then this handoff. Pushed
+to `origin/product/local-ui` only. No PR, no merge to `main`.
 
 ## Exact next approval required
 
-ChatGPT review of U4.2.
+ChatGPT review of U5.
 
-STOP. U5 has not been started.
+STOP. The next U5 checkpoint has not been started.
