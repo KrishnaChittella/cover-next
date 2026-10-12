@@ -5,272 +5,232 @@ on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and
 touched. It supports communication only and replaces no code, test or document.
 
 Production baseline: **PHASE 4 PART C2-F: SEVEN-DAY SOAK RUNNING** (observed read-only
-at 02:34 UTC on 2026-10-12; see the last section. Not altered.)
+at 03:20 UTC on 2026-10-12; see the last section. Not altered. Not judged.)
 
-Parallel checkpoint: **PRODUCT BUILD U5: OFFLINE CATALOGUE EXPANSION FOUNDATION — CHATGPT REVIEW REQUIRED**
+Parallel checkpoint: **PRODUCT BUILD U5.1: CATALOGUE CORRECTNESS CLOSED — CHATGPT REVIEW REQUIRED**
 
-Baseline commit `1936e07` (U4.2), branch `product/local-ui`. Offline only. No source
-was called, nothing was stored, nothing was deployed.
+Offline only. No source was called. Correctness and policy-boundary fixes; no
+performance work, no identity or product intelligence changed.
 
-Full description: `docs/catalogue-expansion.md`.
+Details: `docs/catalogue-expansion.md`.
 
-## IMPLEMENTED
+## The original issues
 
-A thin layer over what already existed. No second resolver, no second store.
+**A. Scope comparison.** `evaluate_broad_catalogue` took one `previous: CatalogueState`,
+in practice the earlier broad one, and gave it to the narrow pass as its history too. On
+a repeat, `entities_in_production_scope` counted broad-only entities and
+`entities_admitted_by_broad` went to 0. One field had silently changed from "how the two
+scopes differ now" to "what changed since last time".
 
-- `catalogue/evaluation.py`: `evaluate_broad_catalogue(records, policies=, stage=,
-  as_of=)`. Runs the existing `generate_catalogue_blocked` on the records production's
-  scope would see, then on all of them, in memory, and summarises in counts.
-- `catalogue/coverage.py`: per entity, whether each monitoring source could be asked,
-  reusing `SourceEligibility`. Steam is exactly `steam_eligibility`; Wikimedia is the
-  catalogue's exact article mapping.
-- `metaspike evaluate-catalogue --stage ...`: the same, as a command. Counts only.
-- `CATALOGUE_SOURCE_POLICIES`: the explicit mapping the command passes.
-- `tests/catalogue_scale.py`: a measurement helper for synthetic sizes.
-- 18 tests (15 in ordinary CI, 3 marked slow).
+**B. Local generator.** `generate-catalogue` wrote a local catalogue state from recorded
+external records with no policy or stage check. While closing it I found a second path:
+the `sample` command generates and writes the same state file when none exists, through
+`_load_or_generate_state`. Neither was a production mutation.
 
-### Controlled broad-evaluation behaviour
+## The corrections
 
-Requirements A–K of the brief, each met and tested:
+### A. Two catalogues, two histories
 
-| | |
-|---|---|
-| A. Recorded records or fixtures only | takes records; no adapter or client is imported |
-| B. States its scope | every summary says `offline_broad_evaluation` and the stage |
-| C, D. Policy and stage | see below |
-| E. Existing resolver and blocked path | calls `generate_catalogue_blocked` twice; holds no identity rule |
-| F. Bootstrap entities and ids preserved | tested |
-| G. Admitted separately from quarantined | bound / quarantined / related, and new / existing |
-| H. Related products apart from entities | tested |
-| I. Production pointer untouched | no repository, object store or pointer is imported |
-| J. No live call | tested with the network blocked |
-| K. Uncleared or unsupported source refused | tested |
+- `previous` is now `BroadEvaluation | None`: the earlier *evaluation*, carrying both
+  catalogues. A bare `CatalogueState` raises `TypeError`.
+- The narrow catalogue continues from the previous **narrow** one; the broad from the
+  previous **broad** one. The first evaluation builds narrow, then broad on top of it,
+  exactly as before, so first-evaluation results and work counts are unchanged.
+- `BroadEvaluation` gained `record_keys`, the records it has been given.
+- **Scope difference** (a property of the current state):
+  `entities_in_production_scope` (narrow), `canonical_entities` (broad),
+  `entities_only_in_broad_scope` (renamed from `entities_admitted_by_broad`). The last
+  is counted **by records, not ids**: a broad entity is within the narrow scope if it is
+  a bootstrap entity or holds a record the narrow scope reaches.
+- **Since previous** (new, separately named): `continues_previous`,
+  `narrow_entities_admitted_since_previous`, `broad_entities_admitted_since_previous`,
+  `records_new_since_previous`, `quarantines_released_since_previous`. On a first
+  evaluation these are `null`, not zero.
+- One shared engine, `generate_catalogue_blocked`. No second resolver.
 
-`BROAD_DISCOVERY_ENABLED` is still `False`. `in_scope(..., BROAD)` still raises.
-`advance_catalogue` still defaults to the narrow scope. The evaluation does not go
-through that gate at all.
+### First versus repeated evaluation, 394 recorded records
 
-### Source-policy enforcement
-
-Every source among the records needs a `SourcePolicy`, handed in under its own name,
-that clears the **stated** stage for `CATALOGUE_METADATA`. `policies` and `stage` have
-no defaults. Refused: no mapping; an empty one; one missing that source; a policy under
-another source's name; no stage; a stage not cleared; an unknown source; a record posing
-as bootstrap evidence; an unknown or prohibited storage permission.
-
-No policy was changed. The recorded fixtures evaluate at private development and are
-refused at private collection (Steam's catalogue is not cleared there), public launch
-and commercial production.
-
-### Evidence, identity and quarantine
-
-Unchanged, and pinned by tests: bootstrap ids, slugs, identifiers, typed relationships
-and lifecycle preserved; proven identity joins without duplicating; an eligible new
-game becomes `NEW_ENTITY`; a shared title is never identity; related products, non-games
-and packaging variants never become entities; repeating inputs makes zero resolver
-calls and changes nothing; new evidence releases a quarantine by appending, with the
-earlier decision and bindings intact and a point-in-time read still showing the record
-unbound; no identifier is inferred from a title; cross-checked against all-pairs with
-no difference.
-
-## TESTED OFFLINE
-
-### Recorded inputs actually used
-
-The existing fixture `tests/fixtures/catalogue`, recorded 2026-10-05: **266 IGDB games
-and 128 Steam apps, 394 records.** Nothing new was fetched.
-
-| | |
-|---|---|
-| Records in production's scope / seen only by broad | 17 / 377 |
-| Bound | 327 (219 admitted as new entities, 108 resolved to existing) |
-| Quarantined | 44 (title only 21, conflicting evidence 12, id-link title mismatch 8, undetermined type 2, multiple candidates 1) |
-| Related products | 23 |
-| Entities: production's scope / broad | 15 / 234 |
-
-### Source coverage
-
-| Source | Eligible | Inapplicable | Unknown |
+| | First | Identical repeat, U5 (wrong) | Identical repeat, U5.1 |
 |---|---|---|---|
-| Wikimedia pageviews | 14 | 0 | 220 |
-| Steam concurrent players | 90 | 69 | 75 |
+| Narrow entities | 15 | **234** | 15 |
+| Broad entities | 234 | 234 | 234 |
+| Only in broad scope | 219 | **0** | 219 |
+| Broad admitted since previous | – | – | 0 |
+| Narrow admitted since previous | – | – | 0 |
+| Resolver calls | 9 + 380 | | 0 + 0 |
 
-Ready for both 5. **Without any eligible source 135.** These are identifier states, not
-measurements: no field can hold a count of players or views, and unknown or inapplicable
-is never zero.
+The U5 column was reproduced by running U5's module on the same repeat.
 
-### Synthetic-only scale tests
+A later update, synthetic records added to the recorded evaluation: one linked to a
+bootstrap entity, one linked to nothing. Narrow 16, broad 236, only-in-broad 220;
+since previous: narrow 1, broad 2, records 2.
 
-`tests/catalogue_samples.py` (pre-existing): invented games in fixed strata, shaped like
-IGDB and Steam records, deliberately heavy in hard cases. Measured on one laptop, one
-process per size:
+**One thing to know.** An entity that both catalogues create after the first evaluation
+gets a different canonical id in each, because each history issues its own ids. Existing
+identities are stable within each catalogue, bootstrap ids are identical in both, and
+nothing consumes an id across the two. Aligning them would need the broad pass to adopt
+the narrow pass's new entities, which I judged too fragile to do by replaying ids. It
+is documented; say if you want it closed differently.
 
-| Records | Entities | Quarantined | Resolver calls | Entities examined | All-pairs | Share | Full scans | Total time | Peak memory |
-|---|---|---|---|---|---|---|---|---|---|
-| 1,000 | 432 | 402 | 1,030 | 25,176 | 675,566 | 3.7% | 60 | 0.51 s | 54 MB |
-| 5,000 | 2,070 | 2,021 | 5,167 | 578,428 | 16,138,916 | 3.6% | 312 | 11.4 s | 108 MB |
-| 10,000 | 4,117 | 4,043 | 10,343 | 2,289,686 | 64,147,993 | 3.6% | 628 | 49.2 s | 169 MB |
-| 20,000 | 8,210 | 8,094 | 20,690 | 9,108,927 | 255,861,875 | 3.6% | 1,260 | 214.2 s | 306 MB |
+### Identity and quarantine invariants (tested)
 
-Nothing larger was run; nothing is claimed for 50,000. The existing 50,000-entity
-*scheduling* simulation is unrelated to resolving and was not re-run.
+On an identical repeat, for **both** catalogues: canonical ids, bindings, decisions,
+quarantine and related products are equal to the first evaluation's, three times
+running. On an update: earlier ids, bindings and decisions are a prefix of the later
+ones. A released quarantine is one appended decision and one appended binding; the
+earlier binding is not rewritten; a point-in-time read before the evidence still shows
+the record unbound; the summary's counts equal the final state's. Cross-checked against
+all-pairs while continuing: no difference.
 
-### Performance findings
+### B. Local generator policy
 
-1. Blocking holds at about 3.6% of all-pairs at every size.
-2. **Resolving is quadratic anyway** (about ×4.3 per doubling). A record whose title
-   cannot be keyed falls back to a full scan of every entity; about 6% of synthetic
-   records do, and those scans are at least 98% of the entities examined at 20,000. On
-   the 394 recorded records there were 0 full scans, so the real share is unknown.
-3. The coverage summary is quadratic too (22 s at 20,000): `steam_eligibility` scans
-   every binding per entity.
-4. Memory is linear, about 15 MB per thousand records.
-5. A stored snapshot is the whole state each generation: about 2.1 KB per record
-   (measured at 1,000 and 5,000).
+- `generate-catalogue` now **requires `--stage`**, with no default. Before anything is
+  resolved or written it calls `require_catalogue_sources`, the same gate the
+  evaluation uses, with the existing `SourcePolicy` definitions for
+  `CATALOGUE_METADATA`. With the recorded fixtures: private development proceeds;
+  private collection, public launch and commercial production are refused (Steam's
+  catalogue clears none of them), and nothing is written.
+- `sample` passes `PRIVATE_DEVELOPMENT` explicitly in its handler, the only stage its
+  own policy clears, and its local state goes through the same gate whether read or
+  generated. `_load_or_generate_state` takes `stage` with no default.
+- A written state now has a companion `<name>.provenance.json`:
+  `kind: local_offline_catalogue_state`, `is_production_catalogue: false`, the stage,
+  and each source with its record count and cleared stages. The command prints the
+  same.
+- No source-name exception, no hidden lookup: the command hands the mapping in.
+- Production's path is untouched: `advance_catalogue`, `CatalogueRepository`, the scope
+  gate and `CURRENT` have no diff.
 
-**None was fixed.** The first is in the resolver's blocking and needs its own reviewed
-change and equivalence proof.
+Stated as it is: `audit-bootstrap-bindings` is a read-only identity audit. It resolves
+in memory, prints to the terminal and persists nothing; it is **not** stage-gated.
+`ingest-events` and `probe-sources steam-players` use catalogue records in memory to
+resolve app ids and write no catalogue state; that use is not stage-gated either. A
+test pins that the audit writes nothing. Whether read-only uses should name a stage is
+open.
 
-## Current catalogue limitations identified
+### `as_of` semantics
 
-- Production resolves 17 of the 394 recorded records and has 15 entities.
-- Only 394 real recorded records exist. Behaviour on thousands of real games is
-  unmeasured.
-- Entities admitted by a broad pass have **no source identifier**. 220 of 234 are
-  unknown for Wikimedia, the only source cleared for unattended collection. No approved
-  way to obtain an article mapping exists, and a title may not be used.
-- The quadratic costs above. The production catalogue job has a one-hour timeout and
-  2 GiB; whether a first broad build fits has not been measured.
-- `metaspike generate-catalogue` and `audit-bootstrap-bindings` already resolve every
-  recorded record locally with no scope or policy check. They predate this checkpoint
-  and were left alone; `evaluate-catalogue` is the gated path. Flagged for a ruling.
+`as_of` is the **time of the evaluation**. It stamps `decided_at` and `valid_from`. It
+is **not** a historical visibility cutoff: it hides no record, the counts do not depend
+on it, and no point-in-time reconstruction is claimed.
 
-## NOT PRODUCTION-PROVEN
+What was wrong: nothing stopped an `as_of` earlier than the records' own `fetched_at`,
+which dates a binding before its evidence existed, and the mapping history is read
+point-in-time. Now:
 
-Everything above. It ran on a laptop over fixtures. No broad build has run on the
-production job, against real records at scale, or through the repository.
+- a record fetched after `as_of` is refused (evaluation and `generate-catalogue`);
+- an `as_of` earlier than the evaluation being continued is refused;
+- later evidence appends, and an earlier point-in-time read is unchanged.
 
-## BLOCKED BY SOURCE POLICY
+No collection time was invented. The recorded fixtures carry one fetch time for the
+whole file (2026-10-05 02:00 UTC).
 
-- Steam catalogue: private development only. Not cleared for unattended collection.
-- IGDB: cleared through private collection; nothing public or commercial.
-- Steam player counts: private development only. Ninety entities are identifier-ready
-  and none may be sampled in production.
-- Steam News: private development only.
+**Effect on recorded tests, reported explicitly.** U5's run and tests were stamped
+2026-10-05 00:00 UTC, two hours before that fetch time. That stamp is now refused, so
+the tests and the documented command moved to 2026-10-06. Every count is identical;
+only the timestamps on decisions and bindings differ. The core generators
+(`generate_catalogue`, `generate_catalogue_blocked`) were not changed and still accept
+any `as_of`; the check is in the evaluation and the local generator command.
 
-## DEFERRED UNTIL AFTER C2-F
+## Tests added or changed
 
-Turning broad discovery on; any live catalogue fetch; a fix to the full-scan fallback;
-an indexed eligibility; snapshot retention; a measured broad build on the real job; any
-new source in production; any change to the soak.
+Added (6): the repeat regression (A, B); a later update per scope (C); a released
+quarantine with summary-equals-state and cross-check (D, E); `as_of` semantics; the
+local generator's gate and provenance; the audit persisting nothing.
 
-## What was deliberately not activated
+Changed, deliberately:
 
-Broad production discovery; any live source call; any stored catalogue or pointer move;
-sampling, tiers or schedules; any score, component or weight; any change to the
-developer interface or the artifact contract (still 1.5.0).
+- `tests/test_catalogue_expansion.py`, `tests/catalogue_scale.py`: `as_of` moved from 5
+  to 6 October; `previous=` now an evaluation; the renamed field. Every pinned count is
+  unchanged, including the 1,000-record work counts.
+- `tests/test_generated_catalogue.py`: `--stage private_development` added; dates moved
+  one day. Its pinned "234 entities (219 new this run)" is unchanged.
+- `tests/test_steam_players.py`: the expected directory listing now includes the
+  provenance file.
 
-## What remains for multi-source demand signals
+No test was weakened. No golden label was touched.
 
-Reviewed, not rebuilt: source families with one voice each, four applicability states,
-`signal_semantics_v2`, signals normalised against their own history, the shadow-only
-access gate, Steam eligibility, event evidence and its gates, point-in-time validation.
-Nothing was added to them. No metric was aggregated, no source counted as independent
-agreement, no weight introduced.
+## Frozen U5 recorded-data results (unchanged, pinned in tests)
 
-Still needed, in order: (1) a Wikimedia identifier for entities beyond the bootstrap
-14, which is the largest gap; (2) permission; (3) a combination rule for entities with
-several Steam apps; (4) an agreement rule across families, defined before it is fitted.
+394 records; narrow 15 entities; broad 234; 219 only in broad; 327 bound; 44
+quarantined; 23 related products. Wikimedia identifier-ready 14; Steam identifier-ready
+90; without any eligible source 135.
 
-## Cost
+The U5 scale measurements stand as recorded and were not re-measured or replaced. One
+slow case (5,000 records) was **run as a test** in this checkpoint and passed with the
+same counts as the U5 measurement; that is a test execution, not a new benchmark.
 
-Nothing here costs anything. For a broad rollout, measured and estimated kept apart:
+## Remaining scale bottlenecks (not addressed)
 
-| Item | Measured | Assumed | Estimate |
-|---|---|---|---|
-| Discovery, requests | documented page limits (IGDB 500; Steam app list 50,000) | | 20,000 IGDB games is 40 requests; API price $0 |
-| Discovery, compute | 192 s to resolve 20,000 synthetic records, laptop | 2–4× slower on one Cloud Run vCPU; about $0.0000185 a vCPU-second (the approved table's rate) | one to two cents, once |
-| Metadata refresh | | one small daily execution at the one-minute minimum | about $0.03 a month |
-| Daily Wikimedia coverage | | approved planning figures, C2 plan §28, simulated, with a stand-in sampled source that is not approved | $4.28 at 1,000 catalogued; $4.69 at 5,000; $5.76 at 10,000; $11.55 at 50,000 a month |
-| Selective sampled monitoring | | C2 plan §4 estimate, 24,200 requests a day at the caps | about $9 a month at one request a second, or inside the allowance at four concurrent. Blocked by policy |
-| Storage | about 2.1 KB of snapshot per record | about $0.02 a GB-month; one generation a day | about 42 MB a generation at 20,000; about $0.03 a month, accumulating until pruned |
-
-Discovery, refresh and storage together are cents. Collection cadence is the cost that
-matters, and the approved figures are unchanged. Boundaries unchanged: preferred $5–10,
-scrutiny $10–15, hard $20. No expense was activated.
-
-## Proofs of no change
-
-| | |
-|---|---|
-| Score v0 | `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`: no diff; golden replay bit-for-bit |
-| Identity golden set | `tests/fixtures/resolution_golden.json` byte-identical (SHA-256 pinned in a test); version 3, 200 cases, 178 correct, **0 false automatic merges**; `evaluate-resolver` exit 0 with 100% auto-match precision (52/52) |
-| Resolver, blocking, generation, persistence, eligibility | `resolution/`, `catalogue/generate.py`, `incremental.py`, `persistence.py`, `eligibility.py`, `domain/`: no diff |
-| U3.1 | `validation/`: no diff; the publication-lag regression and the pinned no-event set hashes pass |
-| U4.2 | `event_sources/`, `events/`: no diff; the provenance and fail-closed tests pass |
-| Baselines, Event Heat, classifier, outcome rules, protocol | fingerprint tests pass |
-| Artifact contract | 1.5.0; `schemas/` and `apps/` have no diff |
+Unchanged from U5 and not touched here: the full-scan fallback in blocking, which makes
+resolving quadratic; the quadratic `steam_eligibility` scan behind the coverage
+summary; a whole-state snapshot per generation; and an unmeasured first broad build
+against the production job's one-hour, 2 GiB limits. Quadratic performance has **not**
+been fixed.
 
 ## Gates
 
-Backend: `ruff format --check` clean (218 files); `ruff check` clean; `mypy` clean (206
-files); `pytest` **1,478 passed, 8 deselected**; `export-schemas --check` up to date;
-`evaluate-resolver` exit 0.
-
-The 8 deselected are the `slow` and `live` markers, excluded by the project's default:
-the 5 that existed, and 3 new slow scale cases (5,000 / 10,000 / 20,000). Of the new
-ones the 5,000 case was run and passed; the other two were not run as tests, but the
-same measurement was run for all four sizes through `python -m tests.catalogue_scale`.
-The pre-existing 10,000-record blocked-versus-reference proof was not re-run.
+Backend: `ruff format --check` clean (219 files); `ruff check` clean; `mypy` clean (206
+files); `pytest` **1,484 passed, 8 deselected** (the default `slow` and `live`
+exclusions); `export-schemas --check` up to date; `evaluate-resolver` exit 0: golden
+set v3, 200 cases, 0 false automatic merges, precision 52/52.
 
 Frontend (no frontend change): `contract:check`, `typecheck`, `lint`, `test` (179
 passed), `build` all pass.
 
-## Production isolation (read-only, 02:34 UTC 2026-10-12)
+## Unchanged
 
-Verified by reading GCP and GitHub, not inferred:
+`resolution/` (`883d0775ac898ab1`), `catalogue/generate.py`, `incremental.py`,
+`persistence.py`, `eligibility.py`, `coverage.py`, `lifecycle/`, `domain/`: no diff.
+`scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`, `events/`
+`333373c61ae6c37f`, `event_sources/`, `validation/`: no diff. Golden set file
+byte-identical. Artifact contract 1.5.0; `schemas/` and `apps/` no diff. Score v0
+golden replay bit-for-bit. Broad production discovery still `False`.
 
-- `main` = `cb33198`, level with origin, clean. `product/local-ui` is not merged; no
-  pull request exists.
-- Workflow triggers: `deploy.yml` runs on push to `main` and manual dispatch only;
-  `ci.yml` on pull requests, calls and manual dispatch. A push to `product/local-ui`
-  starts nothing. Last workflow run is still 38104941975 (11 October).
-- Terraform state: latest generation `1791685217422653`, the launch apply. Unchanged.
-- Control record: generation `1791684706340016`. Unchanged.
-- Scheduler configuration: ENABLED, `0 * 12-18 10 *`. Unchanged.
-- Seven jobs, generation 6, image `sha256:a8680b2be8b5…`. Unchanged.
-- IAM, dataset schemas, secrets and alert policies identical to the previous snapshot.
-  0 secret versions, 0 user keys.
-- Repository variables unchanged.
-- No Wikimedia, Steam or IGDB call was made by U5. The local Steam quota ledger still
-  reads 3, from the U4 probe.
+## Production isolation (read-only, 03:20 UTC 2026-10-12)
+
+Read from GCP and GitHub:
+
+- `main` = `cb33198`, level with origin, clean; `product/local-ui` not merged; no pull
+  request.
+- `deploy.yml` runs on push to `main` and manual dispatch; `ci.yml` on pull requests,
+  calls and manual dispatch. A push to `product/local-ui` starts nothing. Last workflow
+  run still 38104941975 (11 October).
+- Terraform state generation `1791685217422653`: unchanged.
+- Control record generation `1791684706340016`: unchanged.
+- Scheduler configuration ENABLED, `0 * 12-18 10 *`: unchanged.
+- Seven jobs, generation 6, image `sha256:a8680b2be8b5…`: unchanged.
+- IAM, dataset schemas, secrets, alert policies: identical to the previous snapshot.
+  0 secret versions, 0 user keys. Repository variables unchanged.
+- No Wikimedia, Steam or IGDB call by U5.1. Local Steam quota ledger still 3.
 - The portfolio repository was not touched.
 
-## C2-F observation (read-only; separate from U5; not altered)
+## C2-F status (read-only; separate from U5.1; not altered; not judged)
 
-The soak window opened at 2026-10-12T00:00Z and is running by itself.
-
-| Tick | Execution | Result |
+| Time (UTC, 12 Oct) | Execution | Result |
 |---|---|---|
-| 00:00 UTC | `ms-dispatch-5lc87` | succeeded |
-| 01:00 UTC | `ms-dispatch-xv92w` | succeeded |
-| 02:00 UTC | `ms-dispatch-zbb72` | succeeded |
+| 00:00 | `ms-dispatch-5lc87` | succeeded |
+| 01:00 | `ms-dispatch-xv92w` | succeeded |
+| 02:00 | `ms-dispatch-zbb72` | succeeded |
+| 03:00 | `ms-dispatch-9vhnx` | succeeded |
+| 03:02 | `ms-wikimedia-gqf4b` | succeeded |
 
-Three dispatcher executions, no collector or warehouse run yet, which is what the launch
-plan expects before 03:00. Scheduler last attempt 02:00:04Z, next 03:00Z. Executions 35
-→ 38. Objects in the operations bucket 138 → 145 and in landing 102 → 114.
+Five executions since the window opened; total 40. The Wikimedia collector ran after
+the 03:00 tick, as the launch plan expects for the Monday reconciliation. The warehouse
+run expected at 04:00 had not happened yet, and warehouse row counts are as they were.
+Scheduler last attempt 03:00:04Z, next 04:00Z.
 
-This is an observation at one moment, not a judgement of the soak. The 03:00 collection
-and 04:00 warehouse run had not happened yet. Nothing was triggered, restarted or
-changed.
+This is what was observable at one moment. It is **not** a statement that C2-F has
+passed; that is judged after the window, against its criteria. Nothing was triggered,
+restarted or changed.
 
 ## Commits
 
-`c8b59c4` feat: add offline catalogue expansion foundation; then this handoff. Pushed
-to `origin/product/local-ui` only. No PR, no merge to `main`.
+`ea1ff17` fix: correct catalogue comparison and policy boundaries; then this handoff.
+Pushed to `origin/product/local-ui` only. No PR, no merge to `main`.
 
 ## Exact next approval required
 
-ChatGPT review of U5.
+ChatGPT review of U5.1.
 
-STOP. The next U5 checkpoint has not been started.
+STOP. U5.2 has not been started.
