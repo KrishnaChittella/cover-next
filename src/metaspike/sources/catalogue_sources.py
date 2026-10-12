@@ -12,6 +12,7 @@ from pathlib import Path
 
 import httpx
 
+from metaspike.domain.source_policy import SourcePolicy
 from metaspike.sources.credentials import (
     IGDB_CLIENT_ID_ENV,
     IGDB_CLIENT_SECRET_ENV,
@@ -31,6 +32,12 @@ from metaspike.sources.registry import SourceRegistry
 from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY, SteamCatalogueAdapter
 
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
+# The catalogue-metadata sources and the policy each runs under. A caller that uses
+# catalogue records hands this in explicitly; nothing looks it up on its own.
+CATALOGUE_SOURCE_POLICIES: Mapping[str, SourcePolicy] = {
+    IGDB_POLICY.source: IGDB_POLICY,
+    STEAM_CATALOGUE_POLICY.source: STEAM_CATALOGUE_POLICY,
+}
 # Catalogue calls are not time-critical, so retries are spread out with jitter.
 CATALOGUE_RETRY = RetryConfig(jitter=0.25)
 

@@ -20,7 +20,9 @@ from metaspike.catalogue.eligibility import (
     sampling_targets,
     steam_eligibility,
 )
+from metaspike.catalogue.evaluation import evaluate_broad_catalogue
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
+from metaspike.catalogue.persistence import BROAD_DISCOVERY_ENABLED
 from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
@@ -72,6 +74,7 @@ from metaspike.resolution.recorded import load_recorded_catalogue
 from metaspike.scoring.v0 import ScoreInvariantError
 from metaspike.sources.base import SourceError
 from metaspike.sources.catalogue_sources import (
+    CATALOGUE_SOURCE_POLICIES,
     build_igdb,
     build_steam,
     default_limiter_pool,
@@ -340,6 +343,36 @@ def _parser() -> argparse.ArgumentParser:
     generate.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
     generate.add_argument("--as-of", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
     generate.set_defaults(handler=_generate_catalogue)
+
+    expansion = commands.add_parser(
+        "evaluate-catalogue",
+        help="offline: what a broad catalogue would hold, from recorded source records",
+        description=(
+            "Resolve every recorded source record with the existing resolver and report, "
+            "in counts, what broad discovery would admit, quarantine and leave as related "
+            "products, and which monitoring sources could be asked about each entity. "
+            "Offline and in memory: no source is called, nothing is stored and the "
+            "catalogue pointer is not touched. Broad discovery itself stays off."
+        ),
+    )
+    expansion.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    expansion.add_argument(
+        "--stage",
+        type=DeploymentStage,
+        choices=list(DeploymentStage),
+        required=True,
+        help="the deployment stage this evaluation runs at; every source must clear it",
+    )
+    expansion.add_argument("--as-of", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
+    expansion.add_argument(
+        "--cross-check",
+        action="store_true",
+        help="re-ask every question the all-pairs way and fail on any difference (slow)",
+    )
+    expansion.add_argument("--json", action="store_true", help="print the summary as JSON")
+    expansion.set_defaults(handler=_evaluate_catalogue)
 
     audit = commands.add_parser(
         "audit-bootstrap-bindings",
@@ -764,6 +797,68 @@ def _audit_bootstrap_bindings(args: argparse.Namespace) -> int:
             f"{row.slug:<22}{row.legacy_id:<10}{','.join(row.igdb_ids) or '-':<8}"
             f"{','.join(row.steam_app_ids) or '-':<11}{row.steam_telemetry.value:<10}{row.reason}"
         )
+    return EXIT_OK
+
+
+def _evaluate_catalogue(args: argparse.Namespace) -> int:
+    """What a broad catalogue would hold, from records already on disk. Counts only."""
+    records = _recorded(args.recorded)
+    as_of = _now() if args.as_of is None else datetime.combine(args.as_of, time.min, tzinfo=UTC)
+    evaluation = evaluate_broad_catalogue(
+        records,
+        policies=CATALOGUE_SOURCE_POLICIES,
+        stage=args.stage,
+        as_of=as_of,
+        cross_check=args.cross_check,
+    )
+    summary = evaluation.summary
+    if args.json:
+        print(summary.model_dump_json(indent=1))
+        return EXIT_OK
+    coverage, work = summary.coverage, summary.broad_work
+    print(f"Catalogue evaluation ({summary.scope}), stage {summary.stage.value}")
+    print("  Offline and in memory. No source called; nothing stored; CURRENT untouched.")
+    print(f"  Broad discovery in production: {'ON' if BROAD_DISCOVERY_ENABLED else 'off'}")
+    print(f"  resolver {summary.resolver_version}, as of {summary.as_of:%Y-%m-%d}")
+    for source in summary.sources:
+        print(
+            f"    {source.source:<16} {source.records:>6} records   cleared for: "
+            f"{', '.join(source.cleared_stages)}   policy reviewed {source.reviewed_on}"
+        )
+    print("\n  Source records")
+    print(f"    supplied                         {summary.source_records}")
+    print(f"    in production's scope            {summary.records_in_production_scope}")
+    print(f"    seen only by a broad evaluation  {summary.records_only_broad_sees}")
+    print(f"    bound to an entity               {summary.bound_records}")
+    print(f"      admitted as a new entity       {summary.records_admitted_as_new_entities}")
+    print(f"      resolved to an existing entity {summary.records_resolved_to_existing_entities}")
+    print(f"    quarantined (no identity)        {summary.quarantined_records}")
+    print(f"      by reason                      {summary.quarantine_reasons}")
+    print(f"    related products (not entities)  {summary.related_products}")
+    print(f"      by type                        {summary.related_product_types}")
+    print("\n  Canonical entities")
+    print(f"    bootstrap                        {summary.bootstrap_entities}")
+    print(f"    in production's scope            {summary.entities_in_production_scope}")
+    print(f"    with a broad evaluation          {summary.canonical_entities}")
+    print(f"    admitted only by broad           {summary.entities_admitted_by_broad}")
+    print("\n  Monitoring readiness (an identifier exists; not that anything is collected)")
+    for name, states in coverage.by_source.items():
+        print(
+            f"    {name:<22} eligible {states['eligible']:>6}   inapplicable "
+            f"{states['ineligible']:>6}   unknown {states['unknown']:>6}"
+        )
+    print(f"    ready for both                   {coverage.entities_ready_for_both}")
+    print(f"    without any eligible source      {coverage.entities_without_an_eligible_source}")
+    print("    Unknown and inapplicable mean no data. They never mean zero demand.")
+    share = work.share_of_all_pairs
+    print("\n  Work (broad pass)")
+    print(f"    resolver calls                   {work.resolver_calls}")
+    print(f"    entities examined                {work.entities_offered}")
+    print(f"    all-pairs would examine          {work.entities_all_pairs}")
+    print(f"    share of all-pairs               {'n/a' if share is None else f'{share:.2%}'}")
+    print(f"    full scans                       {work.full_scans}")
+    print(f"    cross-checked                    {work.cross_checked}")
+    print(f"    seconds                          {work.seconds:.2f}")
     return EXIT_OK
 
 

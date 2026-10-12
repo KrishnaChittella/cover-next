@@ -335,6 +335,15 @@ its timing. Everything else stays a candidate and never reaches Event Heat.
 it offline on synthetic fixtures. Nothing Steam-derived is cleared for public or
 commercial use. See [docs/event-sources.md](docs/event-sources.md).
 
+## Catalogue expansion (internal, offline evaluation only)
+
+Broad catalogue discovery is off in production. `uv run metaspike evaluate-catalogue
+--stage private_development` answers, offline and in memory, what a broad catalogue
+would hold from the recorded source records: what would be admitted, quarantined or
+kept as a related product, and which monitoring sources could be asked about each
+entity. It calls no source, stores nothing and requires every source's policy to clear
+the stated stage. See [docs/catalogue-expansion.md](docs/catalogue-expansion.md).
+
 ## Architecture
 
 ```
