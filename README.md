@@ -241,7 +241,9 @@ uv sync
 
 `uv run metaspike evaluate-resolver` evaluates the resolver on the frozen golden
 set and fails if it makes a single false automatic merge. `uv run metaspike
-generate-catalogue` resolves recorded source records into a catalogue state file.
+generate-catalogue --stage private_development` resolves recorded source records into a
+LOCAL catalogue state file. It is not the production catalogue; every source of the
+records must clear the stated stage, and a provenance file beside the state says so.
 
 `uv run --env-file .env metaspike probe-sources` makes one small authenticated
 call per catalogue source and reports the field names and vocabularies it sees. It

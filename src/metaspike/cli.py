@@ -5,7 +5,8 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections import Counter
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -20,13 +21,17 @@ from metaspike.catalogue.eligibility import (
     sampling_targets,
     steam_eligibility,
 )
-from metaspike.catalogue.evaluation import evaluate_broad_catalogue
+from metaspike.catalogue.evaluation import (
+    evaluate_broad_catalogue,
+    require_catalogue_sources,
+    require_visible,
+)
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.catalogue.persistence import BROAD_DISCOVERY_ENABLED
 from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
-from metaspike.domain.source_policy import DeploymentStage
+from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
 from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1
 from metaspike.event_sources.ingest import IngestReport, ingest
@@ -335,13 +340,29 @@ def _parser() -> argparse.ArgumentParser:
 
     generate = commands.add_parser(
         "generate-catalogue",
-        help="resolve recorded source records into a generated catalogue state file",
+        help="resolve recorded source records into a LOCAL catalogue state file",
+        description=(
+            "Resolve recorded source records into a catalogue state file on local disk. "
+            "This is local, offline state for development: it is not the production "
+            "catalogue, it is not scoped as production is, and it does not move the "
+            "production pointer. Every source of the records must clear the stated stage."
+        ),
     )
     generate.add_argument(
         "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
     )
     generate.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
     generate.add_argument("--as-of", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
+    generate.add_argument(
+        "--stage",
+        type=DeploymentStage,
+        choices=list(DeploymentStage),
+        required=True,
+        help=(
+            "the deployment stage this local state is generated for; every source of the "
+            "records must clear it for catalogue metadata"
+        ),
+    )
     generate.set_defaults(handler=_generate_catalogue)
 
     expansion = commands.add_parser(
@@ -804,13 +825,16 @@ def _evaluate_catalogue(args: argparse.Namespace) -> int:
     """What a broad catalogue would hold, from records already on disk. Counts only."""
     records = _recorded(args.recorded)
     as_of = _now() if args.as_of is None else datetime.combine(args.as_of, time.min, tzinfo=UTC)
-    evaluation = evaluate_broad_catalogue(
-        records,
-        policies=CATALOGUE_SOURCE_POLICIES,
-        stage=args.stage,
-        as_of=as_of,
-        cross_check=args.cross_check,
-    )
+    try:
+        evaluation = evaluate_broad_catalogue(
+            records,
+            policies=CATALOGUE_SOURCE_POLICIES,
+            stage=args.stage,
+            as_of=as_of,
+            cross_check=args.cross_check,
+        )
+    except ValueError as error:  # an as_of earlier than the records it would stamp
+        return _fail(EXIT_INVALID_CATALOGUE, str(error))
     summary = evaluation.summary
     if args.json:
         print(summary.model_dump_json(indent=1))
@@ -819,7 +843,7 @@ def _evaluate_catalogue(args: argparse.Namespace) -> int:
     print(f"Catalogue evaluation ({summary.scope}), stage {summary.stage.value}")
     print("  Offline and in memory. No source called; nothing stored; CURRENT untouched.")
     print(f"  Broad discovery in production: {'ON' if BROAD_DISCOVERY_ENABLED else 'off'}")
-    print(f"  resolver {summary.resolver_version}, as of {summary.as_of:%Y-%m-%d}")
+    print(f"  resolver {summary.resolver_version}, evaluated at {summary.as_of:%Y-%m-%d %H:%M} UTC")
     for source in summary.sources:
         print(
             f"    {source.source:<16} {source.records:>6} records   cleared for: "
@@ -840,7 +864,7 @@ def _evaluate_catalogue(args: argparse.Namespace) -> int:
     print(f"    bootstrap                        {summary.bootstrap_entities}")
     print(f"    in production's scope            {summary.entities_in_production_scope}")
     print(f"    with a broad evaluation          {summary.canonical_entities}")
-    print(f"    admitted only by broad           {summary.entities_admitted_by_broad}")
+    print(f"    only in the broad scope          {summary.entities_only_in_broad_scope}")
     print("\n  Monitoring readiness (an identifier exists; not that anything is collected)")
     for name, states in coverage.by_source.items():
         print(
@@ -862,21 +886,78 @@ def _evaluate_catalogue(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+LOCAL_STATE_KIND = "local_offline_catalogue_state"
+
+
+def _provenance_path(state_path: Path) -> Path:
+    return state_path.with_name(f"{state_path.stem}.provenance.json")
+
+
+def _write_local_state(
+    path: Path,
+    state: CatalogueState,
+    records: Sequence[SourceRecord],
+    policies: Mapping[str, SourcePolicy],
+    stage: DeploymentStage,
+) -> None:
+    """Write a local catalogue state and, beside it, what it is and under what policy.
+
+    The state file alone looks like any catalogue state. The file beside it says that
+    this one is local and offline, which stage it was generated for and which sources'
+    records it was made from, so it cannot be taken for the production catalogue.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(to_json(state), encoding="utf-8")
+    by_source = Counter(record.key.source for record in records)
+    provenance = {
+        "kind": LOCAL_STATE_KIND,
+        "is_production_catalogue": False,
+        "note": (
+            "Generated locally and offline from recorded source records, without "
+            "production's scope. The production catalogue lives in the private state "
+            "bucket under catalogue/CURRENT and is not this file."
+        ),
+        "stage": stage.value,
+        "generated_at": state.generated_at.isoformat(),
+        "resolver_version": state.resolver_version,
+        "state_file": path.name,
+        "sources": [
+            {
+                "source": source,
+                "records": by_source[source],
+                "purpose": SourcePurpose.CATALOGUE_METADATA.value,
+                "cleared_stages": [c.stage.value for c in policy.stage_clearance if c.cleared],
+                "policy_reviewed_on": policy.reviewed_at.isoformat(),
+            }
+            for source, policy in sorted(policies.items())
+        ],
+    }
+    _provenance_path(path).write_text(json.dumps(provenance, indent=1) + "\n", encoding="utf-8")
+
+
 def _generate_catalogue(args: argparse.Namespace) -> int:
+    """Resolve recorded records into LOCAL state. Policy-gated; not the production catalogue."""
     records = _recorded(args.recorded)
+    # Before anything is resolved or written: every source must clear the stated stage.
+    policies = require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, args.stage)
     previous = (
         CatalogueState.model_validate_json(args.state.read_bytes())
         if args.state.is_file()
         else None
     )
     as_of = _now() if args.as_of is None else datetime.combine(args.as_of, time.min, tzinfo=UTC)
+    try:
+        # as_of dates the bindings made here; it cannot be earlier than their evidence.
+        require_visible(records, as_of)
+    except ValueError as error:
+        return _fail(EXIT_INVALID_CATALOGUE, str(error))
     state = generate_catalogue(records, as_of=as_of, previous=previous)
-    args.state.parent.mkdir(parents=True, exist_ok=True)
-    args.state.write_text(to_json(state), encoding="utf-8")
+    _write_local_state(args.state, state, records, policies, args.stage)
     metrics = state.quarantine.metrics(as_of)
     created = len(state.catalogue.games) - (
         len(bootstrap_catalogue().games) if previous is None else len(previous.catalogue.games)
     )
+    print(f"LOCAL catalogue state, stage {args.stage.value}. Not the production catalogue.")
     print(
         f"Catalogue: {len(state.catalogue.games)} entities ({created} new this run), "
         f"{len(state.mapping.bindings)} source bindings, "
@@ -884,7 +965,7 @@ def _generate_catalogue(args: argparse.Namespace) -> int:
     )
     print(f"Quarantine: {metrics.total} records  by reason {metrics.by_reason}")
     print(f"Decisions logged: {len(state.decisions.decisions)}  resolver {state.resolver_version}")
-    print(f"State: {args.state}")
+    print(f"State: {args.state}   Provenance: {_provenance_path(args.state)}")
     return EXIT_OK
 
 
@@ -936,13 +1017,19 @@ def _probe_steam(client: httpx.Client, pool: LimiterPool, registry: SourceRegist
     )
 
 
-def _load_or_generate_state(path: Path, records: list[SourceRecord]) -> CatalogueState:
-    """The persisted catalogue state, so bindings keep the dates they were made on."""
+def _load_or_generate_state(
+    path: Path, records: list[SourceRecord], stage: DeploymentStage
+) -> CatalogueState:
+    """The persisted LOCAL catalogue state, so bindings keep the dates they were made on.
+
+    Whether it is read or generated, the records it rests on must clear `stage` for
+    catalogue metadata. The caller states the stage; nothing is assumed here.
+    """
+    policies = require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, stage)
     if path.is_file():
         return CatalogueState.model_validate_json(path.read_bytes())
     state = generate_catalogue(records, as_of=_now())
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(to_json(state), encoding="utf-8")
+    _write_local_state(path, state, records, policies, stage)
     return state
 
 
@@ -999,7 +1086,9 @@ def _probe_steam_players(client: httpx.Client, pool: LimiterPool, args: argparse
 def _sample(args: argparse.Namespace) -> int:
     """One slot, every eligible in-scope app. Values go to the store, not the screen."""
     records = _recorded(args.recorded)
-    state = _load_or_generate_state(args.state, records)
+    # Sampling is a private-development command: its policy clears no other stage, and
+    # the local catalogue state it keeps is held to the same one, stated here.
+    state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
     eligibility = steam_eligibility(state, records)
     targets = sampling_targets(state, eligibility, bootstrap_scope())
     scheduled_for = args.scheduled_for

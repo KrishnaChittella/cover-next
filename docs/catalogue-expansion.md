@@ -45,9 +45,74 @@ Nothing here is a second catalogue system. The existing pieces do the work:
 question about records already in hand: *resolved by the existing rules, what would a
 broad catalogue hold?*
 
-It runs the blocked engine twice: once on the records production's scope would see,
-then on all of them on top of that. That gives the comparison directly: what exists
-today, and what only a broad pass adds.
+It builds two catalogues with the one shared engine and keeps them apart:
+
+- **Narrow scope**: what production's scope would build. The bootstrap entities and
+  every record an explicit link (a structured external id, a recognised source URL, a
+  parent or version-parent reference) ties to them. A title is never a link.
+- **Broad scope**: what a broad pass would build from every supplied record.
+
+### Scope difference and incremental change are different questions
+
+| | Question | Fields | On an identical repeat |
+|---|---|---|---|
+| **Scope difference** | How do the narrow and broad catalogues differ *now*? | `entities_in_production_scope` (narrow), `canonical_entities` (broad), `entities_only_in_broad_scope`, and the bound / quarantined / related counts | unchanged |
+| **Since previous** | What did *this* evaluation add to each catalogue? | `narrow_entities_admitted_since_previous`, `broad_entities_admitted_since_previous`, `records_new_since_previous`, `quarantines_released_since_previous` | all zero |
+
+On a first evaluation the "since previous" fields are **absent** (`null`), not zero:
+there is no previous evaluation to count from. `continues_previous` says which it is.
+
+**Each catalogue has its own history.** The first evaluation builds the narrow
+catalogue and then the broad one on top of it. A later evaluation is given the previous
+*evaluation* (`previous: BroadEvaluation`), and continues the narrow catalogue from the
+previous narrow one and the broad from the previous broad one. A bare `CatalogueState`
+is refused with a `TypeError`: a broad catalogue holds entities the narrow scope never
+admitted, so it is not a valid history for the narrow pass.
+
+`entities_only_in_broad_scope` is counted **by records, not by comparing ids**: a broad
+entity is within the narrow scope if it is a bootstrap entity or holds a record the
+narrow scope reaches. That makes it a property of the current state.
+
+One consequence, stated plainly: an entity that *both* catalogues come to create after
+the first evaluation (a new record that an explicit link ties to a bootstrap entity)
+gets a different canonical id in each, because each history issues its own. Every
+existing identity is stable within its catalogue, the bootstrap ids are the same in
+both, and neither is the production catalogue. Nothing consumes an id across the two.
+
+#### What was wrong before (corrected in U5.1)
+
+The first version took a single previous `CatalogueState`, in practice the earlier
+broad one, and gave it to the narrow pass as well. On an identical repeat of the 394
+recorded records it reported 234 entities "in production's scope" and 0 "admitted by
+broad", for a catalogue that had not changed: one field had quietly become a count of
+change since last time. Now the same repeat reports 15, 234 and 219 again, and zero
+under "since previous". `entities_admitted_by_broad` was renamed
+`entities_only_in_broad_scope` to say what it is.
+
+### Time: what `as_of` is and is not
+
+`as_of` is the **time of the evaluation**. It stamps the decisions and bindings made in
+it (`decided_at`, `valid_from`). It is **not** a historical cutoff: it does not hide
+records, the counts do not depend on it, and this module cannot reconstruct what was
+known at an earlier date. No such reconstruction is claimed.
+
+What it must not do is date a binding before its evidence existed, because the mapping
+history is read point-in-time and such a binding would later read as something known
+earlier than it was. So:
+
+- a record with `fetched_at` after `as_of` is **refused**;
+- an `as_of` earlier than the evaluation being continued is **refused**;
+- a later evaluation appends: an earlier point-in-time read of the mapping still shows
+  what was bound then, and nothing else.
+
+`fetched_at` is the record's own fetch time as the fixture recorded it. Nothing invents
+a collection time. The recorded fixtures carry one fetch time for the whole file
+(2026-10-05 02:00 UTC), so they cannot tell apart records fetched at different moments.
+
+Effect on the recorded runs: the first U5 run was stamped 2026-10-05 00:00 UTC, two
+hours before the fixtures' fetch time. That stamp is now refused. The same run stamped
+2026-10-06 gives **exactly the same counts**; only the timestamps on the decisions
+differ. The command below is shown with the corrected date.
 
 What keeps it from being a back door to broad discovery:
 
@@ -90,7 +155,7 @@ writes an artifact.
 ## What the recorded inputs come to
 
 `uv run metaspike evaluate-catalogue --stage private_development --recorded
-tests/fixtures/catalogue --as-of 2026-10-05`
+tests/fixtures/catalogue --as-of 2026-10-06`
 
 Input: the existing recorded fixture, rows as the sources returned them on 2026-10-05:
 **266 IGDB games and 128 Steam apps, 394 records.** No new record was fetched.
@@ -105,8 +170,9 @@ Input: the existing recorded fixture, rows as the sources returned them on 2026-
 | – resolved to an existing entity | 108 |
 | **Quarantined** (no identity) | **44** |
 | **Related products** (not entities) | **23** |
-| Canonical entities, production's scope | 15 (the bootstrap entities) |
-| Canonical entities, broad | 234 |
+| Canonical entities, narrow scope | 15 (the bootstrap entities) |
+| Canonical entities, broad scope | 234 |
+| Only in the broad scope | 219 |
 
 Every record is in exactly one of the three bold states: 327 + 44 + 23 = 394.
 
@@ -318,6 +384,39 @@ measured; they are planning numbers, not commitments.
 The real limits on breadth today are not money. They are: no identifier source for new
 entities, source policy, and the quadratic resolving cost above.
 
+## Local catalogue state: how each command is governed
+
+Several local commands read recorded external source records. Two of them write
+derived catalogue state to local disk. None of them touches production: no bucket, no
+generation, no `CURRENT` pointer.
+
+| Command | Reads recorded records | Writes catalogue state | Governed by |
+|---|---|---|---|
+| `evaluate-catalogue` | yes | **no** (in memory) | `--stage` required; every source must clear it for `CATALOGUE_METADATA` |
+| `generate-catalogue` | yes | **yes**, a local state file | `--stage` required, no default; the same gate, applied before anything is resolved or written; `--as-of` may not precede the records' fetch time |
+| `sample` (Steam player counts) | yes | **yes**, the same local state file if none exists | Private development, stated in the handler, the only stage its own policy clears; the same gate, whether the state is read or generated |
+| `audit-bootstrap-bindings` | yes | **no** | **Not stage-gated.** A read-only identity audit: it resolves in memory and prints the bootstrap entities' bindings to the terminal. It persists nothing |
+| `ingest-events` | yes, in memory, to resolve Steam app ids | **no** catalogue state | Gated by the Steam News policy for what it stores. Its in-memory use of catalogue records is not stage-gated |
+| `probe-sources steam-players` | yes, in memory, to check an app is an eligible target | **no** | Gated by the Steam player-count policy for the call it makes. Its in-memory use of catalogue records is not stage-gated |
+
+Before U5.1, `generate-catalogue` and `sample` wrote that state with no policy check at
+all. That was never a production mutation; it was local state that looked the same as
+authorised state.
+
+Both now go through `require_catalogue_sources`, the gate the evaluation uses, with the
+existing `SourcePolicy` definitions. No stage is defaulted, no source name is exempt and
+nothing is looked up behind the caller: the command hands in the mapping.
+
+A written state file now has a companion, `<name>.provenance.json`, saying what it is:
+`kind: local_offline_catalogue_state`, `is_production_catalogue: false`, the stage it
+was generated for, and each source with its record count and cleared stages. A local
+state is **not scoped** as production is: it resolves every recorded record, which is
+exactly why it must not be mistaken for the production catalogue.
+
+The rows marked "not stage-gated" are stated as they are, not as they might be
+wished. They write no catalogue state. Whether a read-only use of recorded records
+should also name a stage is open.
+
 ## What was not activated
 
 - Broad discovery in production. The constant is `False`; a test pins it.
@@ -347,8 +446,6 @@ All of it is after C2-F.
 - 394 real recorded records. Everything larger is synthetic and measures cost only.
 - Timings are from one laptop and one run per size.
 - The share of real records that need a full scan is unknown.
-- `metaspike generate-catalogue` and `audit-bootstrap-bindings` already resolve every
-  recorded record locally with no scope or policy check. They predate this checkpoint,
-  run only on files in the repository, store only to local disk, and were left as they
-  are. `evaluate-catalogue` is the gated path.
+- Local catalogue commands are governed as described under "Local catalogue state"
+  above. None of them is the production catalogue.
 - Coverage counts identifiers. It says nothing about whether a source's data is good.

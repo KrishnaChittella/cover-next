@@ -67,7 +67,9 @@ from tests.catalogue_scale import CATALOGUE_POLICIES, counting_ids, evaluate_syn
 
 REPO = Path(__file__).resolve().parents[1]
 FIXTURES = REPO / "tests" / "fixtures"
-AS_OF = datetime(2026, 10, 5, tzinfo=UTC)
+# The recorded fixtures were fetched at 02:00 UTC on 5 October. An evaluation is dated
+# after its evidence, never before it.
+AS_OF = datetime(2026, 10, 6, tzinfo=UTC)
 PRIVATE = DeploymentStage.PRIVATE_DEVELOPMENT
 FETCHED = datetime(2026, 10, 5, 2, 0, tzinfo=UTC)
 STEAM = "steam_current_players"
@@ -257,7 +259,12 @@ def test_the_recorded_evaluation_reports_each_kind_of_record_separately(
     assert (summary.records_in_production_scope, summary.records_only_broad_sees) == (17, 377)
     assert summary.bootstrap_entities == 15 == summary.entities_in_production_scope
     assert summary.canonical_entities == 234
-    assert summary.entities_admitted_by_broad == 219
+    assert summary.entities_only_in_broad_scope == 219
+    # A first evaluation has no previous one: "since previous" is absent, not zero.
+    assert summary.continues_previous is False
+    assert summary.broad_entities_admitted_since_previous is None
+    assert summary.narrow_entities_admitted_since_previous is None
+    assert summary.records_new_since_previous is None
     # Every record is in exactly one of three states.
     assert (summary.bound_records, summary.quarantined_records, summary.related_products) == (
         327,
@@ -443,7 +450,7 @@ def test_ambiguous_evidence_is_quarantined_and_related_products_are_not_entities
 
 def test_repeating_the_same_inputs_changes_nothing(recorded_evaluation: BroadEvaluation) -> None:
     # F. The same records, evaluated again on top of the first result, a day later.
-    again = run(recorded(), previous=recorded_evaluation.state, as_of=AS_OF + timedelta(days=1))
+    again = run(recorded(), previous=recorded_evaluation, as_of=AS_OF + timedelta(days=1))
     first, second = recorded_evaluation.state, again.state
     assert [g.canonical_game_id for g in second.catalogue.games] == [
         g.canonical_game_id for g in first.catalogue.games
@@ -453,7 +460,8 @@ def test_repeating_the_same_inputs_changes_nothing(recorded_evaluation: BroadEva
     assert second.quarantine == first.quarantine
     assert second.related_products == first.related_products
     assert again.summary.broad_work.resolver_calls == 0
-    assert again.summary.entities_admitted_by_broad == 0  # nothing new was admitted
+    assert again.summary.broad_entities_admitted_since_previous == 0  # nothing new
+    assert again.summary.entities_only_in_broad_scope == 219  # the scope difference stands
     assert again.summary.canonical_entities == 234
 
 
@@ -473,7 +481,7 @@ def test_new_evidence_resolves_a_quarantine_without_rewriting_history() -> None:
     later = AS_OF + timedelta(days=3)
     linked = igdb_game("9000001", "Glimmerfall Odyssey", steam="9000002")
     assert linked.content_hash != game.content_hash
-    second = run([linked, app], previous=first.state, as_of=later, id_factory=counting_ids(50_000))
+    second = run([linked, app], previous=first, as_of=later, id_factory=counting_ids(50_000))
     assert second.state.mapping.canonical_for(app.key) == entity.canonical_game_id
     assert second.state.quarantine.get(app.key) is None
     assert second.summary.quarantined_records == 0
@@ -497,7 +505,7 @@ def test_new_evidence_resolves_a_quarantine_without_rewriting_history() -> None:
     assert second.state.mapping.canonical_for(app.key, AS_OF + timedelta(days=1)) is None
     # The same title on a different game, with no link, is still not an identity.
     stranger = steam_app("9000003", "Glimmerfall Odyssey")
-    third = run([linked, app, stranger], previous=second.state, as_of=later + timedelta(days=1))
+    third = run([linked, app, stranger], previous=second, as_of=later + timedelta(days=1))
     assert third.state.mapping.canonical_for(stranger.key) is None
     assert third.summary.quarantined_records == 1
 
@@ -715,7 +723,7 @@ def test_the_command_is_offline_states_its_stage_and_prints_counts_only(
         "--recorded",
         str(FIXTURES / "catalogue"),
         "--as-of",
-        "2026-10-05",
+        "2026-10-06",
     ]
     assert cli.main([*base, "--stage", "private_development"]) == cli.EXIT_OK
     output = capsys.readouterr().out
@@ -754,3 +762,339 @@ def test_the_command_is_offline_states_its_stage_and_prints_counts_only(
         assert cli.main([*base, "--stage", stage]) == cli.EXIT_SOURCE_POLICY
         assert f"not cleared for {stage}" in capsys.readouterr().err
     assert list(tmp_path.iterdir()) == []
+
+
+# --- the comparison means the same thing on every evaluation --------------------------
+
+
+def _identity(state: object) -> tuple[object, ...]:
+    """Everything about a catalogue that must not move when nothing new is known."""
+    s = state
+    return (
+        [game.canonical_game_id for game in s.catalogue.games],  # type: ignore[attr-defined]
+        s.mapping,  # type: ignore[attr-defined]
+        s.decisions,  # type: ignore[attr-defined]
+        s.quarantine,  # type: ignore[attr-defined]
+        s.related_products,  # type: ignore[attr-defined]
+    )
+
+
+SCOPE_FIELDS = (
+    "records_in_production_scope",
+    "records_only_broad_sees",
+    "entities_in_production_scope",
+    "canonical_entities",
+    "entities_only_in_broad_scope",
+    "bound_records",
+    "quarantined_records",
+    "related_products",
+    "records_admitted_as_new_entities",
+    "records_resolved_to_existing_entities",
+)
+
+
+def test_repeating_an_evaluation_does_not_change_what_its_numbers_mean(
+    recorded_evaluation: BroadEvaluation,
+) -> None:
+    """The regression for the first version, which reused the broad catalogue as the
+    narrow one's history. On a repeat it reported 234 entities "in production's scope"
+    and 0 "admitted by broad", for a catalogue that had not changed at all."""
+    first = recorded_evaluation.summary
+    # A. The first evaluation of the 394 recorded records.
+    assert first.source_records == 394
+    assert first.entities_in_production_scope == 15  # narrow
+    assert first.canonical_entities == 234  # broad
+    assert first.entities_only_in_broad_scope == 219  # broad only
+    assert len(recorded_evaluation.scoped.catalogue.games) == 15
+    assert len(recorded_evaluation.state.catalogue.games) == 234
+    assert recorded_evaluation.record_keys == {record.key for record in recorded()}
+
+    # B. The same records, continued from the previous evaluation, three more times.
+    previous = recorded_evaluation
+    for round_number in range(1, 4):
+        again = run(recorded(), previous=previous, as_of=AS_OF + timedelta(days=round_number))
+        # Each catalogue continued its own history, and neither moved.
+        assert _identity(again.scoped) == _identity(recorded_evaluation.scoped)
+        assert _identity(again.state) == _identity(recorded_evaluation.state)
+        assert len(again.scoped.catalogue.games) == 15  # the narrow catalogue is still narrow
+        # The scope difference is a property of the state: every number is unchanged.
+        for field in SCOPE_FIELDS:
+            assert getattr(again.summary, field) == getattr(first, field), field
+        assert again.summary.coverage == first.coverage
+        assert again.summary.quarantine_reasons == first.quarantine_reasons
+        assert again.summary.decision_kinds == first.decision_kinds
+        # What changed since the previous evaluation is a different question: nothing.
+        assert again.summary.continues_previous is True
+        assert again.summary.narrow_entities_admitted_since_previous == 0
+        assert again.summary.broad_entities_admitted_since_previous == 0
+        assert again.summary.records_new_since_previous == 0
+        assert again.summary.quarantines_released_since_previous == 0
+        assert again.summary.scoped_work.resolver_calls == 0
+        assert again.summary.broad_work.resolver_calls == 0
+        previous = again
+
+    # A single catalogue state is not a previous evaluation, and is refused outright.
+    for not_an_evaluation in (recorded_evaluation.state, recorded_evaluation.scoped):
+        with pytest.raises(TypeError, match="cannot be continued"):
+            run(recorded(), previous=not_an_evaluation)
+    annotation = inspect.signature(evaluate_broad_catalogue).parameters["previous"].annotation
+    assert "BroadEvaluation" in str(annotation) and "CatalogueState" not in str(annotation)
+    # The narrow pass is only ever given the narrow history.
+    code = Path(str(evaluation_module.__file__)).read_text()
+    assert "previous=None if previous is None else previous.scoped" in code
+    assert "previous=scoped if previous is None else previous.state" in code
+
+
+def test_a_later_update_is_counted_per_scope_and_separately_from_the_scope_difference(
+    recorded_evaluation: BroadEvaluation,
+) -> None:
+    """SYNTHETIC additions on top of the recorded evaluation."""
+    later = AS_OF + timedelta(days=2)
+    by_key = {record.key: record for record in recorded()}
+    anchor = by_key[SourceRecordKey(source="igdb", source_id="242408")]  # Counter-Strike 2
+    # One record an explicit link ties to a bootstrap entity, and one nothing links.
+    linked = igdb_game(
+        "9200001", "Synthetic Linked Rework", kind=ProductType.REMASTER, parent=anchor, year=2031
+    ).model_copy(update={"fetched_at": later})
+    unlinked = igdb_game("9200002", "Quillhaven Drift", year=2025).model_copy(
+        update={"fetched_at": later}
+    )
+    updated = run(
+        [*recorded(), linked, unlinked],
+        previous=recorded_evaluation,
+        as_of=later,
+        id_factory=counting_ids(70_000),
+    )
+    summary = updated.summary
+    # C. Each scope reflects its own state.
+    assert summary.source_records == 396
+    assert summary.records_in_production_scope == 18  # the linked record is reachable
+    assert summary.entities_in_production_scope == 16  # narrow: 15 + the linked rework
+    assert summary.canonical_entities == 236  # broad: 234 + both
+    # The linked rework is within the narrow scope, so only one more entity is broad-only.
+    assert summary.entities_only_in_broad_scope == 220
+    # Incremental admission is counted separately, per scope.
+    assert summary.continues_previous is True
+    assert summary.narrow_entities_admitted_since_previous == 1
+    assert summary.broad_entities_admitted_since_previous == 2
+    assert summary.records_new_since_previous == 2
+    assert summary.quarantines_released_since_previous == 0
+    assert summary.records_admitted_as_new_entities == 221
+    assert summary.bound_records + summary.quarantined_records + summary.related_products == 396
+    # The narrow catalogue never saw the unlinked game.
+    assert updated.scoped.mapping.canonical_for(unlinked.key) is None
+    assert updated.scoped.mapping.canonical_for(linked.key) is not None
+    assert updated.state.mapping.canonical_for(unlinked.key) is not None
+    # Every earlier entity keeps its identity, in both catalogues, in the same order.
+    for before, after in (
+        (recorded_evaluation.scoped, updated.scoped),
+        (recorded_evaluation.state, updated.state),
+    ):
+        earlier = [game.canonical_game_id for game in before.catalogue.games]
+        assert [g.canonical_game_id for g in after.catalogue.games][: len(earlier)] == earlier
+        assert after.mapping.bindings[: len(before.mapping.bindings)] == before.mapping.bindings
+        assert (
+            after.decisions.decisions[: len(before.decisions.decisions)]
+            == before.decisions.decisions
+        )
+    # The rework carries its typed relationship to the bootstrap entity in both.
+    counter_strike = next(
+        g for g in updated.state.catalogue.games if g.slug == "counter-strike-2"
+    ).canonical_game_id
+    for state in (updated.scoped, updated.state):
+        rework = state.catalogue.get(state.mapping.canonical_for(linked.key) or "")
+        assert [(r.relationship_type, r.parent_game_id) for r in rework.relationships] == [
+            (RelationshipType.REMASTER, counter_strike)
+        ]
+    # Repeating the updated evaluation: the scope difference stands, nothing is new.
+    again = run([*recorded(), linked, unlinked], previous=updated, as_of=later + timedelta(days=1))
+    for field in SCOPE_FIELDS:
+        assert getattr(again.summary, field) == getattr(summary, field), field
+    assert again.summary.broad_entities_admitted_since_previous == 0
+    assert again.summary.narrow_entities_admitted_since_previous == 0
+    assert _identity(again.state) == _identity(updated.state)
+    assert _identity(again.scoped) == _identity(updated.scoped)
+    # The recorded evaluation itself was not altered by being continued.
+    assert recorded_evaluation.summary.canonical_entities == 234
+    assert len(recorded_evaluation.state.catalogue.games) == 234
+
+
+def test_a_released_quarantine_is_counted_once_and_the_summary_matches_the_state() -> None:
+    """SYNTHETIC. New evidence frees a quarantined record; nothing earlier is rewritten."""
+    game = igdb_game("9300001", "Vellumgate Reverie")
+    app = steam_app("9300002", "Vellumgate Reverie")
+    first = run([game, app])
+    assert first.summary.quarantined_records == 1
+    assert first.summary.quarantines_released_since_previous is None  # a first evaluation
+    later = AS_OF + timedelta(days=3)
+    linked = igdb_game("9300001", "Vellumgate Reverie", steam="9300002").model_copy(
+        update={"fetched_at": later}
+    )
+    second = run([linked, app], previous=first, as_of=later, id_factory=counting_ids(80_000))
+    summary = second.summary
+    # D. Released, once, and counted as such.
+    assert summary.quarantines_released_since_previous == 1
+    assert summary.broad_entities_admitted_since_previous == 0  # it joined; nothing was created
+    assert summary.records_new_since_previous == 0  # the same two records
+    assert summary.quarantined_records == 0 == len(second.state.quarantine.entries)
+    # The summary agrees with the final state, count for count.
+    active = [b for b in second.state.mapping.bindings if b.valid_to is None]
+    assert summary.bound_records == len(active) == 2
+    assert summary.canonical_entities == len(second.state.catalogue.games)
+    assert summary.entities_in_production_scope == len(second.scoped.catalogue.games) == 15
+    assert summary.records_resolved_to_existing_entities == 1
+    assert summary.records_admitted_as_new_entities == 1
+    assert summary.bound_records + summary.quarantined_records + summary.related_products == 2
+    # Historical bindings and decisions are intact; the release is appended.
+    assert (
+        second.state.mapping.bindings[: len(first.state.mapping.bindings)]
+        == first.state.mapping.bindings
+    )
+    earlier = first.state.decisions.decisions
+    assert second.state.decisions.decisions[: len(earlier)] == earlier
+    entity = first.state.mapping.canonical_for(game.key)
+    assert second.state.mapping.canonical_for(game.key) == entity  # not rewritten
+    assert second.state.mapping.canonical_for(app.key) == entity
+    assert second.state.mapping.canonical_for(app.key, AS_OF + timedelta(days=1)) is None
+    # E. Asked both ways while continuing, the blocked engine still agrees with all-pairs.
+    checked = run(
+        [linked, app],
+        previous=first,
+        as_of=later,
+        id_factory=counting_ids(80_000),
+        cross_check=True,
+    )
+    assert checked.summary.broad_work.cross_checked == checked.summary.broad_work.resolver_calls > 0
+    assert checked.summary.model_dump(
+        exclude={"scoped_work": True, "broad_work": True}
+    ) == summary.model_dump(exclude={"scoped_work": True, "broad_work": True})
+
+
+def test_as_of_is_the_time_of_the_evaluation_and_never_earlier_than_its_evidence() -> None:
+    records = recorded()
+    fetched = max(record.fetched_at for record in records)
+    assert fetched == datetime(2026, 10, 5, 2, 0, tzinfo=UTC)
+    # A binding may not be dated before the record it rests on was fetched.
+    for early in (fetched - timedelta(seconds=1), datetime(2026, 10, 5, tzinfo=UTC)):
+        with pytest.raises(ValueError, match="fetched after as_of"):
+            run(records, as_of=early)
+    exact = run(records, as_of=fetched)  # at the moment of the fetch is allowed
+    assert exact.summary.canonical_entities == 234
+    assert all(b.valid_from == fetched for b in exact.state.mapping.bindings)
+    assert all(d.decided_at == fetched for d in exact.state.decisions.decisions)
+    assert exact.summary.as_of == fetched
+    with pytest.raises(ValueError, match="timezone-aware"):
+        run(records, as_of=datetime(2026, 10, 6))
+    # It is not a historical cutoff: it does not hide records, and the counts do not
+    # depend on it. Only the stamps do.
+    much_later = run(records, as_of=fetched + timedelta(days=400))
+    for field in SCOPE_FIELDS:
+        assert getattr(much_later.summary, field) == getattr(exact.summary, field), field
+    assert all(
+        b.valid_from == fetched + timedelta(days=400) for b in much_later.state.mapping.bindings
+    )
+    # An evaluation cannot be dated before the one it continues.
+    with pytest.raises(ValueError, match="earlier than the evaluation being continued"):
+        run(records, previous=much_later, as_of=fetched + timedelta(days=1))
+    # A record that arrives later is refused by an evaluation dated before it...
+    newcomer = igdb_game("9400001", "Synthetic Latecomer").model_copy(
+        update={"fetched_at": fetched + timedelta(days=5)}
+    )
+    with pytest.raises(ValueError, match="1 record\\(s\\) were fetched after as_of"):
+        run([*records, newcomer], previous=exact, as_of=fetched + timedelta(days=1))
+    # ...and an earlier state is never rewritten by it: what was known then still reads so.
+    continued = run([*records, newcomer], previous=exact, as_of=fetched + timedelta(days=5))
+    assert continued.state.mapping.canonical_for(newcomer.key) is not None
+    assert continued.state.mapping.canonical_for(newcomer.key, fetched + timedelta(days=4)) is None
+    before = [game.canonical_game_id for game in exact.state.catalogue.games]
+    assert [g.canonical_game_id for g in continued.state.catalogue.games][:234] == before
+
+
+# --- local catalogue state is policy-gated and says what it is -------------------------
+
+
+def test_the_local_generator_requires_a_cleared_stage_and_marks_what_it_writes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def no_network(*_: object, **__: object) -> None:
+        raise AssertionError("the local generator tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", no_network)
+    state_file = tmp_path / "local" / "state.json"
+    base = [
+        "generate-catalogue",
+        "--recorded",
+        str(FIXTURES / "catalogue"),
+        "--state",
+        str(state_file),
+        "--as-of",
+        "2026-10-06",
+    ]
+    # A stage must be stated; there is no default that grants one.
+    with pytest.raises(SystemExit):
+        cli.main(base)
+    assert "--stage" in capsys.readouterr().err
+    # A stage the sources do not clear: refused before anything is resolved or written.
+    for stage in ("private_collection", "public_launch", "commercial_production"):
+        assert cli.main([*base, "--stage", stage]) == cli.EXIT_SOURCE_POLICY
+        assert f"not cleared for {stage}" in capsys.readouterr().err
+    assert not state_file.parent.exists()
+    # An as_of earlier than the records it would stamp: refused, nothing written.
+    early = [*base[:-1], "2026-10-05", "--stage", "private_development"]
+    assert cli.main(early) == cli.EXIT_INVALID_CATALOGUE
+    assert "fetched after as_of" in capsys.readouterr().err
+    assert not state_file.parent.exists()
+
+    assert cli.main([*base, "--stage", "private_development"]) == cli.EXIT_OK
+    output = capsys.readouterr().out
+    assert (
+        "LOCAL catalogue state, stage private_development. Not the production catalogue." in output
+    )
+    assert "234 entities (219 new this run)" in output
+    provenance_file = tmp_path / "local" / "state.provenance.json"
+    assert sorted(p.name for p in state_file.parent.iterdir()) == [
+        "state.json",
+        "state.provenance.json",
+    ]
+    provenance = json.loads(provenance_file.read_text())
+    assert provenance["kind"] == "local_offline_catalogue_state"
+    assert provenance["is_production_catalogue"] is False
+    assert provenance["stage"] == "private_development"
+    assert "catalogue/CURRENT" in provenance["note"]
+    assert [(s["source"], s["records"], s["purpose"]) for s in provenance["sources"]] == [
+        ("igdb", 266, "catalogue_metadata"),
+        ("steam_catalogue", 128, "catalogue_metadata"),
+    ]
+    assert provenance["sources"][1]["cleared_stages"] == ["private_development"]
+    # The handler gates before it resolves, and uses the same gate as the evaluation.
+    source = (REPO / "src/metaspike/cli.py").read_text()
+    handler = source[source.index("def _generate_catalogue(") : source.index("def _probe_sources(")]
+    assert handler.index("require_catalogue_sources(") < handler.index("generate_catalogue(records")
+    assert "CATALOGUE_SOURCE_POLICIES, args.stage" in handler
+    # The other path that persists catalogue state states its stage too, with no default.
+    stage_parameter = inspect.signature(cli._load_or_generate_state).parameters["stage"]
+    assert stage_parameter.default is inspect.Parameter.empty
+    loader = source[
+        source.index("def _load_or_generate_state(") : source.index("def _probe_steam_players(")
+    ]
+    assert loader.index("require_catalogue_sources(") < loader.index("path.is_file()")
+    assert "startswith" not in handler + loader
+    # Production's own path is untouched: still scoped, still gated by its repository.
+    assert persistence.BROAD_DISCOVERY_ENABLED is False
+    assert "_write_local_state" not in Path(persistence.__file__).read_text()
+
+
+def test_the_read_only_identity_audit_persists_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`audit-bootstrap-bindings` reads recorded records and prints. It writes no state."""
+    monkeypatch.chdir(tmp_path)
+    arguments = ["audit-bootstrap-bindings", "--recorded", str(FIXTURES / "bootstrap_catalogue")]
+    assert cli.main(arguments) == cli.EXIT_OK
+    assert "counter-strike-2" in capsys.readouterr().out
+    assert list(tmp_path.iterdir()) == []
+    source = (REPO / "src/metaspike/cli.py").read_text()
+    handler = source[
+        source.index("def _audit_bootstrap_bindings(") : source.index("def _evaluate_catalogue(")
+    ]
+    assert "write_text" not in handler and "_write_local_state" not in handler

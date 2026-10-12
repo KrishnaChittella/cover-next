@@ -426,10 +426,13 @@ def test_cli_generates_a_catalogue_state_and_reuses_it(
         str(CATALOGUE_FIXTURES),
         "--state",
         str(state_file),
+        "--stage",
+        "private_development",
     ]
-    assert cli.main([*arguments, "--as-of", "2026-10-05"]) == cli.EXIT_OK
-    assert "234 entities (219 new this run)" in capsys.readouterr().out
+    # The fixtures were fetched on 5 October at 02:00 UTC, so the state is dated after.
     assert cli.main([*arguments, "--as-of", "2026-10-06"]) == cli.EXIT_OK
+    assert "234 entities (219 new this run)" in capsys.readouterr().out
+    assert cli.main([*arguments, "--as-of", "2026-10-07"]) == cli.EXIT_OK
     assert "234 entities (0 new this run)" in capsys.readouterr().out
 
     saved = CatalogueState.model_validate_json(state_file.read_bytes())

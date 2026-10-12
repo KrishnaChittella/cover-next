@@ -22,6 +22,39 @@ What keeps it from being a back door:
 
 Synthetic records are for measuring scale only. They carry a source name, so they need
 a policy like any other; tests supply a test-only one.
+
+TWO CATALOGUES, TWO HISTORIES
+An evaluation holds two catalogues and never lets one stand in for the other:
+
+    narrow   what production's scope would build: the bootstrap entities and the
+             records an explicit link ties to them
+    broad    what a broad pass would build from every supplied record
+
+The first evaluation builds the narrow catalogue and then the broad one on top of it.
+A later evaluation continues EACH from its own predecessor: the narrow catalogue from
+the previous narrow one, the broad from the previous broad one. A broad catalogue is
+never given to the narrow pass as its history, because it holds entities the narrow
+scope never admitted.
+
+Two kinds of number follow, and they are named apart:
+
+    scope difference   how the two catalogues differ NOW. A property of the current
+                       state, so repeating an evaluation does not change it.
+    since previous     what this evaluation added to each catalogue. Absent on a first
+                       evaluation; zero on an identical repeat.
+
+The scope difference is counted by records, not by comparing ids: an entity of the
+broad catalogue is within the narrow scope if it is a bootstrap entity or holds a
+record the narrow scope reaches. An entity both catalogues came to create after the
+first evaluation has a different id in each, since each history issues its own; neither
+is the production catalogue.
+
+TIME
+`as_of` is the moment of the evaluation. It stamps the decisions and bindings made in
+it. It is NOT a historical cutoff that hides later records: this module cannot
+reconstruct what was known at an earlier time, and does not pretend to. To keep a
+binding from being dated before its evidence existed, a record fetched after `as_of`
+is refused, and so is an `as_of` earlier than the evaluation being continued.
 """
 
 import uuid
@@ -39,6 +72,7 @@ from metaspike.catalogue.incremental import GenerationStats, generate_catalogue_
 from metaspike.catalogue.overrides import PRODUCTION_OVERRIDES, OverrideSet
 from metaspike.catalogue.persistence import directly_reachable
 from metaspike.catalogue.seed import bootstrap_catalogue
+from metaspike.domain.identity import SourceRecordKey
 from metaspike.domain.model import FrozenModel
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
@@ -91,14 +125,26 @@ class EvaluationSummary(FrozenModel):
     resolver_version: str
     sources: tuple[SourceUse, ...]
     source_records: int = Field(ge=0)
+    # --- the scope difference: the two catalogues as they stand now -----------------
     # What production's scope would resolve from the same records, for comparison.
     records_in_production_scope: int = Field(ge=0)
     records_only_broad_sees: int = Field(ge=0)
     bootstrap_entities: int = Field(ge=0)
+    # Entities in the narrow catalogue, and in the broad one.
     entities_in_production_scope: int = Field(ge=0)
     canonical_entities: int = Field(ge=0)
-    # Entities that exist only because broad evaluation resolved a record.
-    entities_admitted_by_broad: int = Field(ge=0)
+    # Entities of the broad catalogue that the narrow scope does not reach: not a
+    # bootstrap entity, and holding no record the narrow scope sees. A property of the
+    # current state; an identical repeat leaves it unchanged.
+    entities_only_in_broad_scope: int = Field(ge=0)
+    # --- since the previous evaluation ----------------------------------------------
+    # None on a first evaluation: there is no previous one to count from. Zero is a
+    # count, and means nothing was added.
+    continues_previous: bool
+    narrow_entities_admitted_since_previous: int | None = Field(default=None, ge=0)
+    broad_entities_admitted_since_previous: int | None = Field(default=None, ge=0)
+    records_new_since_previous: int | None = Field(default=None, ge=0)
+    quarantines_released_since_previous: int | None = Field(default=None, ge=0)
     # Each source record is in exactly one of these three states.
     bound_records: int = Field(ge=0)
     quarantined_records: int = Field(ge=0)
@@ -115,13 +161,38 @@ class EvaluationSummary(FrozenModel):
 
 
 class BroadEvaluation(FrozenModel):
-    """The evaluated catalogue, in memory only, and its summary."""
+    """Both evaluated catalogues, in memory only, and their summary.
+
+    This is what a later evaluation continues from. It carries both catalogues because
+    each has its own history; see the module docstring.
+    """
 
     summary: EvaluationSummary
-    # The catalogue production's scope gives from these records.
+    # The narrow catalogue: what production's scope gives from these records.
     scoped: CatalogueState
-    # The catalogue a broad pass would give on top of it. Never stored by this module.
+    # The broad catalogue. Never stored by this module.
     state: CatalogueState
+    # Every source record this evaluation has been given, by key.
+    record_keys: frozenset[SourceRecordKey]
+
+
+def require_visible(records: Iterable[SourceRecord], as_of: datetime) -> None:
+    """Refuse a record fetched after the moment the evaluation is stamped with.
+
+    `as_of` dates the decisions and bindings an evaluation makes. A binding dated
+    before its evidence was fetched would read, afterwards, as something known earlier
+    than it was.
+    """
+    if as_of.tzinfo is None:
+        raise ValueError("as_of must be timezone-aware")
+    late = [record for record in records if record.fetched_at > as_of]
+    if late:
+        newest = max(record.fetched_at for record in late)
+        raise ValueError(
+            f"{len(late)} record(s) were fetched after as_of ({as_of.isoformat()}); the "
+            f"latest at {newest.isoformat()}. as_of is the time of the evaluation and "
+            "cannot be earlier than the records it uses"
+        )
 
 
 def require_catalogue_sources(
@@ -180,23 +251,35 @@ def evaluate_broad_catalogue(
     as_of: datetime,
     overrides: OverrideSet = PRODUCTION_OVERRIDES,
     id_factory: Callable[[], uuid.UUID] = uuid.uuid4,
-    previous: CatalogueState | None = None,
+    previous: BroadEvaluation | None = None,
     cross_check: bool = False,
 ) -> BroadEvaluation:
     """Resolve every given record, offline, and say what a broad catalogue would hold.
 
-    `previous` continues an earlier evaluation's catalogue (its `state`), so that the
-    effect of new evidence can be seen without anything already decided being redone.
-    `cross_check` re-asks every question the all-pairs way and raises on a difference.
+    `previous` is the earlier EVALUATION to continue, with both of its catalogues. A
+    bare `CatalogueState` is refused: a broad catalogue is not a valid history for the
+    narrow one. `cross_check` re-asks every question the all-pairs way and raises on a
+    difference.
     """
+    if previous is not None and not isinstance(previous, BroadEvaluation):
+        raise TypeError(
+            "previous must be the earlier BroadEvaluation, which carries the narrow and "
+            "the broad catalogue separately; a single CatalogueState cannot be continued"
+        )
     everything = list(records)
     keys = [record.key for record in everything]
     if len(keys) != len(set(keys)):
         raise ValueError("the same source record was supplied more than once")
     used = require_catalogue_sources(everything, policies, stage)
     assert stage is not None
+    require_visible(everything, as_of)
+    if previous is not None and as_of < previous.summary.as_of:
+        raise ValueError(
+            "as_of is earlier than the evaluation being continued; an evaluation cannot "
+            "be dated before the one it builds on"
+        )
 
-    # What production would resolve from these records: the comparison, and the base.
+    # The narrow catalogue, continued from the previous NARROW catalogue only.
     reachable = directly_reachable(everything)
     scoped_stats = GenerationStats()
     started = perf_counter()
@@ -205,12 +288,14 @@ def evaluate_broad_catalogue(
         as_of=as_of,
         overrides=overrides,
         id_factory=id_factory,
-        previous=previous,
+        previous=None if previous is None else previous.scoped,
         stats=scoped_stats,
         cross_check=cross_check,
     )
     scoped_seconds = perf_counter() - started
 
+    # The broad catalogue: on top of the narrow one the first time, and from the
+    # previous BROAD catalogue ever after.
     broad_stats = GenerationStats()
     started = perf_counter()
     state = generate_catalogue_blocked(
@@ -218,7 +303,7 @@ def evaluate_broad_catalogue(
         as_of=as_of,
         overrides=overrides,
         id_factory=id_factory,
-        previous=scoped,
+        previous=scoped if previous is None else previous.state,
         stats=broad_stats,
         cross_check=cross_check,
     )
@@ -234,7 +319,40 @@ def evaluate_broad_catalogue(
     for logged in state.decisions.decisions:
         latest[logged.record] = logged.decision.kind
     created = sum(1 for key in bound if latest.get(key) is DecisionKind.NEW_ENTITY)
-    scoped_ids = {game.canonical_game_id for game in scoped.catalogue.games}
+
+    # The scope difference, by records: which broad entities the narrow scope reaches.
+    bootstrap_ids = {game.canonical_game_id for game in bootstrap_catalogue().games}
+    reachable_keys = {record.key for record in reachable}
+    within_narrow = bootstrap_ids | {
+        binding.canonical_game_id for key, binding in active.items() if key in reachable_keys
+    }
+    only_broad = sum(
+        1 for game in state.catalogue.games if game.canonical_game_id not in within_narrow
+    )
+
+    # What this evaluation added, counted against each catalogue's own predecessor.
+    since: dict[str, int | None] = {
+        "narrow_entities_admitted_since_previous": None,
+        "broad_entities_admitted_since_previous": None,
+        "records_new_since_previous": None,
+        "quarantines_released_since_previous": None,
+    }
+    if previous is not None:
+        narrow_before = {game.canonical_game_id for game in previous.scoped.catalogue.games}
+        broad_before = {game.canonical_game_id for game in previous.state.catalogue.games}
+        held_before = {entry.record.key for entry in previous.state.quarantine.entries}
+        held_now = {entry.record.key for entry in state.quarantine.entries}
+        since = {
+            "narrow_entities_admitted_since_previous": sum(
+                1 for g in scoped.catalogue.games if g.canonical_game_id not in narrow_before
+            ),
+            "broad_entities_admitted_since_previous": sum(
+                1 for g in state.catalogue.games if g.canonical_game_id not in broad_before
+            ),
+            "records_new_since_previous": len(supplied - previous.record_keys),
+            "quarantines_released_since_previous": len(held_before - held_now),
+        }
+
     by_source = Counter(record.key.source for record in everything)
     summary = EvaluationSummary(
         scope=EVALUATION_SCOPE,
@@ -253,12 +371,12 @@ def evaluate_broad_catalogue(
         source_records=len(everything),
         records_in_production_scope=len(reachable),
         records_only_broad_sees=len(everything) - len(reachable),
-        bootstrap_entities=len(bootstrap_catalogue().games),
-        entities_in_production_scope=len(scoped_ids),
+        bootstrap_entities=len(bootstrap_ids),
+        entities_in_production_scope=len(scoped.catalogue.games),
         canonical_entities=len(state.catalogue.games),
-        entities_admitted_by_broad=sum(
-            1 for game in state.catalogue.games if game.canonical_game_id not in scoped_ids
-        ),
+        entities_only_in_broad_scope=only_broad,
+        continues_previous=previous is not None,
+        **since,
         bound_records=len(bound),
         quarantined_records=len(quarantined),
         related_products=len(related),
@@ -273,4 +391,7 @@ def evaluate_broad_catalogue(
         scoped_work=_work(scoped_stats, scoped_seconds),
         broad_work=_work(broad_stats, broad_seconds),
     )
-    return BroadEvaluation(summary=summary, scoped=scoped, state=state)
+    known = supplied if previous is None else supplied | previous.record_keys
+    return BroadEvaluation(
+        summary=summary, scoped=scoped, state=state, record_keys=frozenset(known)
+    )

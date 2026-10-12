@@ -27,7 +27,8 @@ from metaspike.sources.igdb import IGDB_POLICY
 from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY
 from tests.catalogue_samples import stratified_sample
 
-AS_OF = datetime(2026, 10, 5, tzinfo=UTC)
+# After every synthetic record's fetch time: an evaluation is never dated before its evidence.
+AS_OF = datetime(2026, 10, 6, tzinfo=UTC)
 CATALOGUE_POLICIES: dict[str, SourcePolicy] = {
     IGDB_POLICY.source: IGDB_POLICY,
     STEAM_CATALOGUE_POLICY.source: STEAM_CATALOGUE_POLICY,

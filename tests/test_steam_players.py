@@ -578,7 +578,11 @@ def test_sample_runs_one_slot_and_is_safe_to_rerun(
         assert "app 730       already_observed" in second
         assert "7 requests sent" in second  # only the failed apps were retried
     # Nothing was scheduled: the command ran once and left no job behind.
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["samples", "state.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "samples",
+        "state.json",
+        "state.provenance.json",  # says the state is local, and under which policy
+    ]
 
 
 def test_sample_keeps_the_catalogue_state_so_bindings_keep_their_dates(
