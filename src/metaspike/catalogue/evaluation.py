@@ -49,6 +49,33 @@ record the narrow scope reaches. An entity both catalogues came to create after 
 first evaluation has a different id in each, since each history issues its own; neither
 is the production catalogue.
 
+SOURCES: WHAT IS SUPPLIED NOW IS NOT WHAT A STATE WAS MADE FROM
+Four things are kept apart:
+
+    records supplied now      the batch given to this call
+    records processed before  every record an earlier evaluation was given
+    sources retained          every source whose record left something in a catalogue
+                              being continued: a binding, a decision, a quarantine
+                              entry or a related product
+    sources authorised        those whose policy clears the stated stage
+
+A catalogue that is continued still holds what earlier sources put into it, whether or
+not those sources appear in the new batch. So the policy gate covers the sources
+supplied now AND the sources retained in the state being continued. Leaving a source
+out of a later batch does not remove it from the state, and does not excuse it: a
+catalogue made with a source at one stage cannot be continued at a stage that source
+does not clear, however small or empty the new batch is.
+
+Retained sources are read from the state itself, never from a declaration about it.
+
+CONTINUING NEEDS EVERY RECORD AGAIN
+The engine reads the records it is given as ALL the evidence there is. Records left out
+are evidence withdrawn: quarantined records that leaned on them would be decided again
+with less to go on. So a continued evaluation must be given every record the previous
+one was given, plus whatever is new. A partial or empty batch is refused. The policy
+check comes first, so a batch that leaves out a source the stage does not clear is
+refused for that reason, by name.
+
 TIME
 `as_of` is the moment of the evaluation. It stamps the decisions and bindings made in
 it. It is NOT a historical cutoff that hides later records: this module cannot
@@ -108,10 +135,13 @@ class WorkCount(FrozenModel):
 
 
 class SourceUse(FrozenModel):
-    """One source whose records were evaluated, and the policy that allowed it."""
+    """One source the evaluated catalogues rest on, and the policy that allowed it."""
 
     source: str
+    # Records of this source supplied to this call.
     records: int = Field(ge=0)
+    # Whether the catalogues being continued already held something from this source.
+    retained_from_previous: bool
     cleared_stages: tuple[str, ...]
     reviewed_on: str
 
@@ -176,6 +206,43 @@ class BroadEvaluation(FrozenModel):
     record_keys: frozenset[SourceRecordKey]
 
 
+class IncompleteRecords(ValueError):
+    """A continuation was not given every record its predecessor was made from."""
+
+
+def require_complete(records: Iterable[SourceRecord], known: Iterable[SourceRecordKey]) -> None:
+    """Refuse a batch that omits a record the state being continued was made from.
+
+    The engine takes its records as all the evidence there is. A record left out is
+    evidence withdrawn, and what leaned on it would be decided again without it.
+    """
+    supplied = {record.key for record in records}
+    missing = sorted(
+        (key for key in known if key not in supplied), key=lambda k: (k.source, k.source_id)
+    )
+    if missing:
+        by_source = Counter(key.source for key in missing)
+        detail = ", ".join(f"{count} from {source}" for source, count in sorted(by_source.items()))
+        raise IncompleteRecords(
+            f"{len(missing)} record(s) the state being continued was made from are not "
+            f"among the records supplied ({detail}). A continuation needs every earlier "
+            "record again, plus what is new"
+        )
+
+
+def known_record_keys(state: CatalogueState) -> frozenset[SourceRecordKey]:
+    """Every source record a catalogue state was made from, read from its decision log.
+
+    Each record a generation is given is logged at least once, as a binding, a
+    quarantine, a related product or a new entity.
+    """
+    return frozenset(
+        logged.record
+        for logged in state.decisions.decisions
+        if logged.record.source != BOOTSTRAP_SOURCE
+    )
+
+
 def require_visible(records: Iterable[SourceRecord], as_of: datetime) -> None:
     """Refuse a record fetched after the moment the evaluation is stamped with.
 
@@ -195,13 +262,36 @@ def require_visible(records: Iterable[SourceRecord], as_of: datetime) -> None:
         )
 
 
+def retained_sources(state: CatalogueState) -> frozenset[str]:
+    """Every external source whose records left something in a catalogue state.
+
+    Read from the state's own content: bindings (closed ones too), logged decisions,
+    quarantine entries and related products. Every record a generation is given leaves
+    at least a decision, so this is complete for what the state was made from. The
+    bootstrap entities are not an external source.
+    """
+    sources = {binding.key.source for binding in state.mapping.bindings}
+    sources |= {decision.record.source for decision in state.decisions.decisions}
+    sources |= {entry.record.key.source for entry in state.quarantine.entries}
+    sources |= {product.record.source for product in state.related_products}
+    return frozenset(sources - {BOOTSTRAP_SOURCE})
+
+
 def require_catalogue_sources(
     records: Iterable[SourceRecord],
     policies: Mapping[str, SourcePolicy] | None,
     stage: DeploymentStage | None,
+    retained: Iterable[str] = (),
 ) -> dict[str, SourcePolicy]:
-    """The policy for every source among `records`, or a refusal. Fails closed."""
-    sources = sorted({record.key.source for record in records})
+    """The policy for every source in use, or a refusal. Fails closed.
+
+    A source is in use if a record of it is supplied now, or if it is `retained`: it
+    already left something in a state that is being continued. Both are held to the
+    stated stage. Being absent from the current batch excuses nothing.
+    """
+    current = {record.key.source for record in records}
+    held = set(retained)
+    sources = sorted(current | held)
     if stage is None:
         raise SourcePolicyError("a catalogue evaluation must state the deployment stage it runs at")
     used: dict[str, SourcePolicy] = {}
@@ -210,10 +300,11 @@ def require_catalogue_sources(
             raise SourcePolicyError(
                 f"{source}: a bootstrap record is not source data and cannot be supplied"
             )
+        where = "" if source in current else " (retained in the state being continued)"
         policy = (policies or {}).get(source)
         if policy is None:
             raise SourcePolicyError(
-                f"{source}: no source policy, so its records cannot be evaluated"
+                f"{source}{where}: no source policy, so its records cannot be evaluated"
             )
         if policy.source != source:
             raise SourcePolicyError(
@@ -221,7 +312,7 @@ def require_catalogue_sources(
             )
         refusal = policy.registration_refusal(SourcePurpose.CATALOGUE_METADATA, stage)
         if refusal is not None:
-            raise SourcePolicyError(f"{source}: {refusal}")
+            raise SourcePolicyError(f"{source}{where}: {refusal}")
         used[source] = policy
     return used
 
@@ -258,8 +349,10 @@ def evaluate_broad_catalogue(
 
     `previous` is the earlier EVALUATION to continue, with both of its catalogues. A
     bare `CatalogueState` is refused: a broad catalogue is not a valid history for the
-    narrow one. `cross_check` re-asks every question the all-pairs way and raises on a
-    difference.
+    narrow one. Every source retained in `previous` must clear `stage`, as every source
+    supplied now must, whether or not `records` includes it. And `records` must include
+    every record `previous` was given: a partial or empty batch is refused.
+    `cross_check` re-asks every question the all-pairs way and raises on a difference.
     """
     if previous is not None and not isinstance(previous, BroadEvaluation):
         raise TypeError(
@@ -270,14 +363,20 @@ def evaluate_broad_catalogue(
     keys = [record.key for record in everything]
     if len(keys) != len(set(keys)):
         raise ValueError("the same source record was supplied more than once")
-    used = require_catalogue_sources(everything, policies, stage)
+    # Everything the catalogues being continued were made from is still in them.
+    held: frozenset[str] = frozenset()
+    if previous is not None:
+        held = retained_sources(previous.scoped) | retained_sources(previous.state)
+    used = require_catalogue_sources(everything, policies, stage, retained=held)
     assert stage is not None
     require_visible(everything, as_of)
-    if previous is not None and as_of < previous.summary.as_of:
-        raise ValueError(
-            "as_of is earlier than the evaluation being continued; an evaluation cannot "
-            "be dated before the one it builds on"
-        )
+    if previous is not None:
+        if as_of < previous.summary.as_of:
+            raise ValueError(
+                "as_of is earlier than the evaluation being continued; an evaluation "
+                "cannot be dated before the one it builds on"
+            )
+        require_complete(everything, previous.record_keys)
 
     # The narrow catalogue, continued from the previous NARROW catalogue only.
     reachable = directly_reachable(everything)
@@ -363,6 +462,7 @@ def evaluate_broad_catalogue(
             SourceUse(
                 source=source,
                 records=by_source[source],
+                retained_from_previous=source in held,
                 cleared_stages=tuple(c.stage.value for c in policy.stage_clearance if c.cleared),
                 reviewed_on=policy.reviewed_at.isoformat(),
             )

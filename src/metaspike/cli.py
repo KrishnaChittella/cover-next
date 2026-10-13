@@ -1,6 +1,7 @@
 """Command-line interface. `metaspike run` performs the complete local vertical slice."""
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -23,8 +24,11 @@ from metaspike.catalogue.eligibility import (
 )
 from metaspike.catalogue.evaluation import (
     evaluate_broad_catalogue,
+    known_record_keys,
     require_catalogue_sources,
+    require_complete,
     require_visible,
+    retained_sources,
 )
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.catalogue.persistence import BROAD_DISCOVERY_ENABLED
@@ -893,6 +897,10 @@ def _provenance_path(state_path: Path) -> Path:
     return state_path.with_name(f"{state_path.stem}.provenance.json")
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _write_local_state(
     path: Path,
     state: CatalogueState,
@@ -900,14 +908,26 @@ def _write_local_state(
     policies: Mapping[str, SourcePolicy],
     stage: DeploymentStage,
 ) -> None:
-    """Write a local catalogue state and, beside it, what it is and under what policy.
+    """Write a local catalogue state and, beside it, what it is and what it rests on.
 
     The state file alone looks like any catalogue state. The file beside it says that
-    this one is local and offline, which stage it was generated for and which sources'
-    records it was made from, so it cannot be taken for the production catalogue.
+    this one is local and offline, which stage it was generated for, and every source
+    RETAINED in the state: not the sources of the latest batch of records, but every
+    source that left something in it, read from the state itself. It carries the
+    state file's digest, so that it describes that file and no other.
+
+    It is a description, never a grant. Permission comes from the source policies, and
+    is checked again every time the state is used.
     """
+    retained = sorted(retained_sources(state))
+    missing = [source for source in retained if source not in policies]
+    if missing:
+        raise StoragePolicyError(
+            f"{', '.join(missing)}: retained in the state with no policy checked for it"
+        )
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(to_json(state), encoding="utf-8")
+    body = to_json(state).encode("utf-8")
+    path.write_bytes(body)
     by_source = Counter(record.key.source for record in records)
     provenance = {
         "kind": LOCAL_STATE_KIND,
@@ -915,40 +935,109 @@ def _write_local_state(
         "note": (
             "Generated locally and offline from recorded source records, without "
             "production's scope. The production catalogue lives in the private state "
-            "bucket under catalogue/CURRENT and is not this file."
+            "bucket under catalogue/CURRENT and is not this file. This file describes "
+            "the state beside it; it grants nothing."
         ),
         "stage": stage.value,
         "generated_at": state.generated_at.isoformat(),
         "resolver_version": state.resolver_version,
         "state_file": path.name,
+        "state_sha256": _sha256(body),
+        # Every source that left a binding, a decision, a quarantine entry or a related
+        # product in the state, whenever it was supplied.
+        "retained_sources": retained,
         "sources": [
             {
                 "source": source,
-                "records": by_source[source],
+                "records_in_this_run": by_source[source],
                 "purpose": SourcePurpose.CATALOGUE_METADATA.value,
-                "cleared_stages": [c.stage.value for c in policy.stage_clearance if c.cleared],
-                "policy_reviewed_on": policy.reviewed_at.isoformat(),
+                "cleared_stages": [
+                    c.stage.value for c in policies[source].stage_clearance if c.cleared
+                ],
+                "policy_reviewed_on": policies[source].reviewed_at.isoformat(),
             }
-            for source, policy in sorted(policies.items())
+            for source in retained
         ],
     }
     _provenance_path(path).write_text(json.dumps(provenance, indent=1) + "\n", encoding="utf-8")
+
+
+def _load_local_state(path: Path) -> CatalogueState:
+    """A previously written local state, only if what it rests on can be established.
+
+    Refused, and left exactly as it is on disk, when: there is no provenance file (a
+    state from before provenance was written); the provenance file is unreadable or is
+    not for a local state; its digest is not this state file's; or the sources it
+    declares are not the sources the state actually retains. A refused state is never
+    repaired, rewritten or deleted here.
+
+    Passing this says only that the state and its description belong together. The
+    caller still has to clear every retained source for the stage it wants.
+    """
+    sidecar = _provenance_path(path)
+    how = (
+        f"Leave {path} where it is or move it aside, and generate a new state with "
+        "`metaspike generate-catalogue --stage ... --state <a new path>` from recorded "
+        "inputs that clear the stage."
+    )
+    if not sidecar.is_file():
+        raise StoragePolicyError(
+            f"{path} has no provenance file, so the sources it was made from cannot be "
+            f"established. It will not be reused. {how}"
+        )
+    body = path.read_bytes()
+    try:
+        provenance = json.loads(sidecar.read_text(encoding="utf-8"))
+    except ValueError:
+        provenance = None
+    if not isinstance(provenance, dict) or provenance.get("kind") != LOCAL_STATE_KIND:
+        raise StoragePolicyError(f"{sidecar} is not the provenance of a local state. {how}")
+    if provenance.get("is_production_catalogue") is not False:
+        raise StoragePolicyError(f"{sidecar} does not describe a local state. {how}")
+    if provenance.get("state_sha256") != _sha256(body):
+        raise StoragePolicyError(
+            f"{sidecar} does not describe {path.name} as it is now: the state's digest "
+            f"differs. {how}"
+        )
+    try:
+        state = CatalogueState.model_validate_json(body)
+    except ValidationError as error:
+        raise StoragePolicyError(f"{path} is not a readable catalogue state: {error}") from None
+    retained = sorted(retained_sources(state))
+    if provenance.get("retained_sources") != retained:
+        raise StoragePolicyError(
+            f"{sidecar} declares sources {provenance.get('retained_sources')!r}, but the "
+            f"state retains {retained!r}. {how}"
+        )
+    return state
 
 
 def _generate_catalogue(args: argparse.Namespace) -> int:
     """Resolve recorded records into LOCAL state. Policy-gated; not the production catalogue."""
     records = _recorded(args.recorded)
     # Before anything is resolved or written: every source must clear the stated stage.
-    policies = require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, args.stage)
-    previous = (
-        CatalogueState.model_validate_json(args.state.read_bytes())
-        if args.state.is_file()
-        else None
+    require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, args.stage)
+    previous = _load_local_state(args.state) if args.state.is_file() else None
+    # A state being continued still holds what earlier sources put into it. Those
+    # sources are held to this stage too, whether or not today's records include them.
+    retained = frozenset() if previous is None else retained_sources(previous)
+    policies = require_catalogue_sources(
+        records, CATALOGUE_SOURCE_POLICIES, args.stage, retained=retained
     )
     as_of = _now() if args.as_of is None else datetime.combine(args.as_of, time.min, tzinfo=UTC)
     try:
-        # as_of dates the bindings made here; it cannot be earlier than their evidence.
+        # as_of dates the bindings made here; it cannot be earlier than their evidence,
+        # or than the state this run builds on.
         require_visible(records, as_of)
+        if previous is not None:
+            if as_of < previous.generated_at:
+                raise ValueError(
+                    f"as_of ({as_of.isoformat()}) is earlier than the state being "
+                    f"continued ({previous.generated_at.isoformat()}); a generation "
+                    "cannot be dated before the one it builds on"
+                )
+            # The engine reads its records as all the evidence there is.
+            require_complete(records, known_record_keys(previous))
     except ValueError as error:
         return _fail(EXIT_INVALID_CATALOGUE, str(error))
     state = generate_catalogue(records, as_of=as_of, previous=previous)
@@ -958,6 +1047,7 @@ def _generate_catalogue(args: argparse.Namespace) -> int:
         len(bootstrap_catalogue().games) if previous is None else len(previous.catalogue.games)
     )
     print(f"LOCAL catalogue state, stage {args.stage.value}. Not the production catalogue.")
+    print(f"Sources retained in the state: {', '.join(sorted(policies)) or 'none'}")
     print(
         f"Catalogue: {len(state.catalogue.games)} entities ({created} new this run), "
         f"{len(state.mapping.bindings)} source bindings, "
@@ -1022,13 +1112,21 @@ def _load_or_generate_state(
 ) -> CatalogueState:
     """The persisted LOCAL catalogue state, so bindings keep the dates they were made on.
 
-    Whether it is read or generated, the records it rests on must clear `stage` for
-    catalogue metadata. The caller states the stage; nothing is assumed here.
+    Whether it is read or generated, everything it rests on must clear `stage` for
+    catalogue metadata: the records supplied now, and every source retained in a state
+    that is being reused. The caller states the stage; nothing is assumed here.
     """
-    policies = require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, stage)
+    require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, stage)
     if path.is_file():
-        return CatalogueState.model_validate_json(path.read_bytes())
+        state = _load_local_state(path)
+        require_catalogue_sources(
+            records, CATALOGUE_SOURCE_POLICIES, stage, retained=retained_sources(state)
+        )
+        return state
     state = generate_catalogue(records, as_of=_now())
+    policies = require_catalogue_sources(
+        records, CATALOGUE_SOURCE_POLICIES, stage, retained=retained_sources(state)
+    )
     _write_local_state(path, state, records, policies, stage)
     return state
 

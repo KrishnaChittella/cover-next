@@ -27,10 +27,13 @@ from metaspike.catalogue.eligibility import SourceEligibility, steam_eligibility
 from metaspike.catalogue.evaluation import (
     EVALUATION_SCOPE,
     BroadEvaluation,
+    IncompleteRecords,
     evaluate_broad_catalogue,
+    known_record_keys,
     require_catalogue_sources,
+    retained_sources,
 )
-from metaspike.catalogue.generate import BOOTSTRAP_SOURCE, generate_catalogue
+from metaspike.catalogue.generate import BOOTSTRAP_SOURCE, CatalogueState, generate_catalogue
 from metaspike.catalogue.incremental import generate_catalogue_blocked
 from metaspike.catalogue.legacy_ids import LEGACY_ID_TO_CANONICAL
 from metaspike.catalogue.persistence import (
@@ -62,6 +65,7 @@ from metaspike.sources.registry import SourcePolicyError
 from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY
 from metaspike.sources.steam_players import STEAM_CURRENT_PLAYERS_POLICY
 from metaspike.sources.wikimedia import SOURCE_ID as WIKIMEDIA
+from metaspike.storage.base import StoragePolicyError
 from tests.catalogue_samples import stratified_sample
 from tests.catalogue_scale import CATALOGUE_POLICIES, counting_ids, evaluate_synthetic
 
@@ -1061,10 +1065,14 @@ def test_the_local_generator_requires_a_cleared_stage_and_marks_what_it_writes(
     assert provenance["is_production_catalogue"] is False
     assert provenance["stage"] == "private_development"
     assert "catalogue/CURRENT" in provenance["note"]
-    assert [(s["source"], s["records"], s["purpose"]) for s in provenance["sources"]] == [
+    assert [
+        (s["source"], s["records_in_this_run"], s["purpose"]) for s in provenance["sources"]
+    ] == [
         ("igdb", 266, "catalogue_metadata"),
         ("steam_catalogue", 128, "catalogue_metadata"),
     ]
+    assert provenance["retained_sources"] == ["igdb", "steam_catalogue"]
+    assert provenance["state_sha256"] == hashlib.sha256(state_file.read_bytes()).hexdigest()
     assert provenance["sources"][1]["cleared_stages"] == ["private_development"]
     # The handler gates before it resolves, and uses the same gate as the evaluation.
     source = (REPO / "src/metaspike/cli.py").read_text()
@@ -1098,3 +1106,356 @@ def test_the_read_only_identity_audit_persists_nothing(
         source.index("def _audit_bootstrap_bindings(") : source.index("def _evaluate_catalogue(")
     ]
     assert "write_text" not in handler and "_write_local_state" not in handler
+
+
+# --- source policy follows the state, not just the latest batch of records -------------
+
+
+def igdb_only_fixture(directory: Path) -> Path:
+    """The recorded catalogue fixture with its Steam apps left out. Still recorded rows."""
+    directory.mkdir(parents=True)
+    source = FIXTURES / "catalogue"
+    (directory / "igdb_games.json").write_bytes((source / "igdb_games.json").read_bytes())
+    steam = json.loads((source / "steam_apps.json").read_text())
+    (directory / "steam_apps.json").write_text(json.dumps({**steam, "apps": []}))
+    return directory
+
+
+def generate_arguments(recorded_from: Path, state_file: Path, stage: str, as_of: str) -> list[str]:
+    return [
+        "generate-catalogue",
+        "--recorded", str(recorded_from),
+        "--state", str(state_file),
+        "--stage", stage,
+        "--as-of", as_of,
+    ]  # fmt: skip
+
+
+def files_under(directory: Path) -> dict[str, bytes]:
+    return {path.name: path.read_bytes() for path in sorted(directory.iterdir())}
+
+
+def test_a_continued_evaluation_is_held_to_every_source_it_retains(
+    recorded_evaluation: BroadEvaluation,
+) -> None:
+    """The gap: the gate looked only at the records supplied now. A catalogue made with
+    Steam's records at private development could be continued at a stage Steam does not
+    clear, simply by leaving Steam's records out of the next batch."""
+    records = recorded()
+    igdb_only = [record for record in records if record.key.source == "igdb"]
+    assert retained_sources(recorded_evaluation.state) == {"igdb", "steam_catalogue"}
+    assert retained_sources(recorded_evaluation.scoped) == {"igdb", "steam_catalogue"}
+    collection = DeploymentStage.PRIVATE_COLLECTION
+    next_day = AS_OF + timedelta(days=1)
+    # G. Steam is retained in the state. Omitting it from the batch excuses nothing.
+    for batch in (igdb_only, igdb_only[:5], []):
+        with pytest.raises(SourcePolicyError) as refused:
+            run(batch, previous=recorded_evaluation, stage=collection, as_of=next_day)
+        assert "steam_catalogue (retained in the state being continued)" in str(refused.value)
+        assert "not cleared for private_collection" in str(refused.value)
+    for stage in (DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION):
+        for batch in (igdb_only, []):
+            with pytest.raises(SourcePolicyError, match="not cleared for"):
+                run(batch, previous=recorded_evaluation, stage=stage, as_of=next_day)
+    # Nor does leaving its policy out of the mapping: a retained source needs one.
+    with pytest.raises(SourcePolicyError) as unpolicied:
+        run(
+            igdb_only,
+            previous=recorded_evaluation,
+            policies={"igdb": IGDB_POLICY},
+            as_of=next_day,
+        )
+    assert "steam_catalogue (retained in the state being continued): no source policy" in str(
+        unpolicied.value
+    )
+    # The same batch that is refused when continuing is fine on its own: IGDB alone
+    # clears private collection, and a catalogue made only from it may be evaluated there.
+    alone = run(igdb_only, stage=collection)
+    assert retained_sources(alone.state) == {"igdb"}
+    assert [(u.source, u.retained_from_previous) for u in alone.summary.sources] == [
+        ("igdb", False)
+    ]
+    # A legitimate stage change: nothing retained fails to clear the new stage.
+    promoted = run(igdb_only, previous=run(igdb_only), stage=collection, as_of=next_day)
+    assert promoted.summary.stage is collection
+    assert [(u.source, u.records, u.retained_from_previous) for u in promoted.summary.sources] == [
+        ("igdb", 266, True)
+    ]
+
+    # A partial batch is refused even where every source is cleared. The engine reads
+    # its records as all the evidence there is; records left out are evidence withdrawn.
+    # Records supplied now, records processed before, and sources retained are three
+    # different things, and none stands in for another.
+    for batch, detail in (
+        (igdb_only, "128 record(s)"),
+        (igdb_only[:5], "389 record(s)"),
+        ([], "394 record(s)"),
+    ):
+        with pytest.raises(IncompleteRecords) as incomplete:
+            run(batch, previous=recorded_evaluation, as_of=next_day)
+        assert detail in str(incomplete.value), detail
+    assert "128 from steam_catalogue" in str(incomplete.value)
+    assert "266 from igdb" in str(incomplete.value)
+    # The policy refusal comes first, so a batch that drops a source the stage does not
+    # clear is refused for that reason, by name, and never merely as "incomplete".
+    with pytest.raises(SourcePolicyError, match=r"steam_catalogue \(retained"):
+        run(igdb_only, previous=recorded_evaluation, stage=collection, as_of=next_day)
+    # Nothing was changed by any refusal.
+    assert len(recorded_evaluation.state.catalogue.games) == 234
+    assert known_record_keys(recorded_evaluation.state) == recorded_evaluation.record_keys
+
+    # H, I. Complete records, appropriate policies: succeeds, with the frozen numbers.
+    complete = run(records, previous=recorded_evaluation, as_of=next_day)
+    summary = complete.summary
+    assert summary.entities_in_production_scope == 15
+    assert summary.canonical_entities == 234
+    assert summary.entities_only_in_broad_scope == 219
+    assert summary.broad_entities_admitted_since_previous == 0
+    assert summary.narrow_entities_admitted_since_previous == 0
+    assert (summary.bound_records, summary.quarantined_records, summary.related_products) == (
+        327,
+        44,
+        23,
+    )
+    assert summary.coverage == recorded_evaluation.summary.coverage
+    assert [(u.source, u.records, u.retained_from_previous) for u in summary.sources] == [
+        ("igdb", 266, True),
+        ("steam_catalogue", 128, True),
+    ]
+    assert not any(use.retained_from_previous for use in recorded_evaluation.summary.sources)
+    # L. Nothing already decided moved: same entities, bindings and decisions.
+    assert _identity(complete.state) == _identity(recorded_evaluation.state)
+    assert _identity(complete.scoped) == _identity(recorded_evaluation.scoped)
+    assert complete.summary.broad_work.resolver_calls == 0
+    assert retained_sources(complete.state) == {"igdb", "steam_catalogue"}
+    assert complete.record_keys == recorded_evaluation.record_keys
+
+
+def test_with_no_external_source_an_evaluation_is_just_the_bootstrap_catalogue() -> None:
+    # J. Nothing supplied and nothing retained: there is no source to authorise.
+    empty = run([])
+    assert empty.summary.sources == () and empty.summary.source_records == 0
+    assert empty.summary.canonical_entities == 15 == empty.summary.entities_in_production_scope
+    assert empty.summary.entities_only_in_broad_scope == 0
+    assert retained_sources(empty.state) == frozenset()
+    assert empty.summary.coverage.entities_with_wikimedia_mapping == 14
+    # The stage is still stated, and such a catalogue can be continued at any stage,
+    # because it holds nothing from any external source.
+    with pytest.raises(SourcePolicyError, match="must state the deployment stage"):
+        run([], stage=None)
+    public = run(
+        [], previous=empty, stage=DeploymentStage.PUBLIC_LAUNCH, as_of=AS_OF + timedelta(days=1)
+    )
+    assert public.summary.canonical_entities == 15 and public.summary.sources == ()
+    assert _identity(public.state) == _identity(empty.state)
+    # Bootstrap is not an external source, and is never counted as one.
+    assert BOOTSTRAP_SOURCE not in retained_sources(run(recorded()).state)
+
+
+def test_a_local_state_is_not_reusable_at_a_stage_its_retained_sources_do_not_clear(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def no_network(*_: object, **__: object) -> None:
+        raise AssertionError("the local generator tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", no_network)
+    both = FIXTURES / "catalogue"
+    igdb_only = igdb_only_fixture(tmp_path / "igdb-only")
+    state_file = tmp_path / "local" / "state.json"
+    provenance_file = tmp_path / "local" / "state.provenance.json"
+    private = "private_development"
+
+    # A. A private-development state from IGDB and Steam catalogue records.
+    assert cli.main(generate_arguments(both, state_file, private, "2026-10-06")) == 0
+    assert "Sources retained in the state: igdb, steam_catalogue" in capsys.readouterr().out
+    first = CatalogueState.model_validate_json(state_file.read_bytes())
+    assert retained_sources(first) == {"igdb", "steam_catalogue"}
+    written = files_under(state_file.parent)
+
+    # B. Reused at private collection with ONLY IGDB supplied: IGDB clears that stage,
+    # Steam's catalogue does not, and Steam is still in the state.
+    assert (
+        cli.main(generate_arguments(igdb_only, state_file, "private_collection", "2026-10-07"))
+        == cli.EXIT_SOURCE_POLICY
+    )
+    refused = capsys.readouterr().err
+    assert "steam_catalogue (retained in the state being continued)" in refused
+    assert "not cleared for private_collection" in refused
+    # C. The same at public launch and at commercial production.
+    for stage in ("public_launch", "commercial_production"):
+        assert (
+            cli.main(generate_arguments(igdb_only, state_file, stage, "2026-10-07"))
+            == cli.EXIT_SOURCE_POLICY
+        )
+        assert f"not cleared for {stage}" in capsys.readouterr().err
+    # Nothing was resolved, written or relabelled by a refusal.
+    assert files_under(state_file.parent) == written
+    assert json.loads(provenance_file.read_text())["stage"] == private
+
+    # A batch that omits records the state was made from is refused even at a stage
+    # every source clears: leaving records out withdraws evidence.
+    assert (
+        cli.main(generate_arguments(igdb_only, state_file, private, "2026-10-07"))
+        == cli.EXIT_INVALID_CATALOGUE
+    )
+    incomplete = capsys.readouterr().err
+    assert "128 record(s) the state being continued was made from" in incomplete
+    assert "128 from steam_catalogue" in incomplete
+    assert files_under(state_file.parent) == written
+
+    # D. Reused at private development, where every retained source is cleared, with
+    # the complete records: permitted.
+    assert cli.main(generate_arguments(both, state_file, private, "2026-10-07")) == 0
+    output = capsys.readouterr().out
+    assert "234 entities (0 new this run)" in output
+    assert "Sources retained in the state: igdb, steam_catalogue" in output
+    second = CatalogueState.model_validate_json(state_file.read_bytes())
+    # The provenance describes the retained state.
+    provenance = json.loads(provenance_file.read_text())
+    assert provenance["retained_sources"] == ["igdb", "steam_catalogue"]
+    assert [(s["source"], s["records_in_this_run"]) for s in provenance["sources"]] == [
+        ("igdb", 266),
+        ("steam_catalogue", 128),
+    ]
+    assert provenance["state_sha256"] == hashlib.sha256(state_file.read_bytes()).hexdigest()
+    # L. Identities and histories are stable.
+    assert [g.canonical_game_id for g in second.catalogue.games] == [
+        g.canonical_game_id for g in first.catalogue.games
+    ]
+    assert second.mapping == first.mapping and second.decisions == first.decisions
+    assert second.quarantine == first.quarantine
+    assert retained_sources(second) == {"igdb", "steam_catalogue"}
+    # Still refused at private collection afterwards: Steam is still in the state.
+    assert (
+        cli.main(generate_arguments(igdb_only, state_file, "private_collection", "2026-10-08"))
+        == cli.EXIT_SOURCE_POLICY
+    )
+    capsys.readouterr()
+
+    # K. A generation cannot be dated before the state it continues.
+    assert cli.main(generate_arguments(both, state_file, private, "2026-10-09")) == 0
+    capsys.readouterr()
+    later = files_under(state_file.parent)
+    assert (
+        cli.main(generate_arguments(both, state_file, private, "2026-10-08"))
+        == cli.EXIT_INVALID_CATALOGUE
+    )
+    assert "earlier than the state being continued" in capsys.readouterr().err
+    assert files_under(state_file.parent) == later
+
+    # A state made only from IGDB may move to private collection: nothing retained
+    # fails to clear it. That is a legitimate stage change, and the provenance says so.
+    igdb_state = tmp_path / "igdb-local" / "state.json"
+    assert cli.main(generate_arguments(igdb_only, igdb_state, private, "2026-10-06")) == 0
+    assert (
+        cli.main(generate_arguments(igdb_only, igdb_state, "private_collection", "2026-10-07")) == 0
+    )
+    moved = json.loads((tmp_path / "igdb-local" / "state.provenance.json").read_text())
+    assert (moved["stage"], moved["retained_sources"]) == ("private_collection", ["igdb"])
+    capsys.readouterr()
+    # Adding Steam's records to it at that stage is refused as a current input.
+    assert (
+        cli.main(generate_arguments(both, igdb_state, "private_collection", "2026-10-08"))
+        == cli.EXIT_SOURCE_POLICY
+    )
+    assert "steam_catalogue: not cleared for private_collection" in capsys.readouterr().err
+
+
+def test_a_local_state_without_trustworthy_provenance_is_refused_and_left_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    both = FIXTURES / "catalogue"
+    made = tmp_path / "made" / "state.json"
+    assert cli.main(generate_arguments(both, made, "private_development", "2026-10-06")) == 0
+    capsys.readouterr()
+    good_state = made.read_bytes()
+    good_provenance = json.loads((tmp_path / "made" / "state.provenance.json").read_text())
+
+    def attempt(name: str, state: bytes, provenance: object | None, expected: str) -> None:
+        directory = tmp_path / name
+        directory.mkdir()
+        state_file = directory / "state.json"
+        state_file.write_bytes(state)
+        if provenance is not None:
+            body = provenance if isinstance(provenance, str) else json.dumps(provenance)
+            (directory / "state.provenance.json").write_text(body)
+        before = files_under(directory)
+        for stage in ("private_development", "private_collection", "public_launch"):
+            code = cli.main(generate_arguments(both, state_file, stage, "2026-10-07"))
+            assert code == cli.EXIT_SOURCE_POLICY, (name, stage)
+            message = capsys.readouterr().err
+            if stage == "private_development":
+                assert expected in message, (name, message)
+        # Refused, and neither repaired, rewritten nor deleted.
+        assert files_under(directory) == before, name
+        # The other path that reuses a local state refuses it in the same way.
+        with pytest.raises(StoragePolicyError):
+            cli._load_or_generate_state(state_file, recorded(), PRIVATE)
+        assert files_under(directory) == before, name
+
+    # E. A state from before provenance was written: no file beside it.
+    attempt("no-provenance", good_state, None, "has no provenance file")
+    # F. A provenance file that cannot be read, or is for something else.
+    attempt("garbage", good_state, "{not json", "is not the provenance of a local state")
+    attempt("not-an-object", good_state, [1, 2], "is not the provenance of a local state")
+    attempt(
+        "wrong-kind", good_state, {**good_provenance, "kind": "something"}, "is not the provenance"
+    )
+    attempt(
+        "claims-production",
+        good_state,
+        {**good_provenance, "is_production_catalogue": True},
+        "does not describe a local state",
+    )
+    # Stale or mismatched: the provenance of some other state, or of this one before an edit.
+    attempt("edited-state", good_state + b"\n", good_provenance, "the state's digest differs")
+    attempt(
+        "other-digest",
+        good_state,
+        {**good_provenance, "state_sha256": "0" * 64},
+        "the state's digest differs",
+    )
+    attempt(
+        "no-digest",
+        good_state,
+        {k: v for k, v in good_provenance.items() if k != "state_sha256"},
+        "the state's digest differs",
+    )
+    # Inconsistent with what the state retains: a declaration that leaves Steam out.
+    attempt(
+        "hides-a-source",
+        good_state,
+        {**good_provenance, "retained_sources": ["igdb"]},
+        "but the state retains ['igdb', 'steam_catalogue']",
+    )
+    attempt(
+        "no-sources",
+        good_state,
+        {k: v for k, v in good_provenance.items() if k != "retained_sources"},
+        "but the state retains",
+    )
+
+    # A declaration is never a grant. A provenance file edited to claim a later stage,
+    # with a digest that matches, still cannot make Steam's catalogue clear that stage.
+    claimed = tmp_path / "claims-a-stage"
+    claimed.mkdir()
+    (claimed / "state.json").write_bytes(good_state)
+    for claim in ({"stage": "public_launch"}, {"stage": "private_collection"}):
+        (claimed / "state.provenance.json").write_text(json.dumps({**good_provenance, **claim}))
+        before = files_under(claimed)
+        for stage in ("private_collection", "public_launch"):
+            code = cli.main(generate_arguments(both, claimed / "state.json", stage, "2026-10-07"))
+            assert code == cli.EXIT_SOURCE_POLICY
+            assert "not cleared for" in capsys.readouterr().err
+        assert files_under(claimed) == before
+    # And the intact pair is still accepted at the stage its sources do clear.
+    assert cli.main(generate_arguments(both, made, "private_development", "2026-10-07")) == 0
+    assert "234 entities (0 new this run)" in capsys.readouterr().out
+    # The loader reads sources from the state, and takes no permission from the file.
+    source = (REPO / "src/metaspike/cli.py").read_text()
+    loader = source[
+        source.index("def _load_local_state(") : source.index("def _generate_catalogue(")
+    ]
+    assert "retained_sources(state)" in loader
+    assert "cleared_stages" not in loader and 'provenance.get("stage")' not in loader
+    assert "unlink" not in loader and "write_" not in loader

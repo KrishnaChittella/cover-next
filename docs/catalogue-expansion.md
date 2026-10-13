@@ -417,6 +417,109 @@ The rows marked "not stage-gated" are stated as they are, not as they might be
 wished. They write no catalogue state. Whether a read-only use of recorded records
 should also name a stage is open.
 
+## Source policy follows the state, not the latest batch (U5.1.1)
+
+The first policy gate looked at the records supplied to a call. That is not enough once
+a state is continued: what earlier sources put into a catalogue is still in it, whether
+or not those sources appear in the next batch. A state made with Steam's catalogue
+records at private development could be continued at private collection, which Steam
+does not clear, simply by supplying only IGDB records the second time.
+
+Four things are now kept apart, in both the evaluation and the local state files:
+
+| | What it is |
+|---|---|
+| Records supplied now | The batch given to this call |
+| Records processed before | Every record the state being continued was made from |
+| Sources retained | Every source whose record left a binding, a decision, a quarantine entry or a related product in that state |
+| Sources authorised | Those whose policy clears the stated stage |
+
+**Retained sources are read from the state itself** (`retained_sources`), from its
+bindings (closed ones included), decision log, quarantine and related products. The
+bootstrap entities are not an external source. This is the same reading production's
+repository uses before it commits a generation.
+
+Two rules follow, and the first is checked first:
+
+1. **Every retained source must clear the stated stage**, exactly as every supplied
+   source must. A missing policy, a policy under another name, or a stage not cleared
+   is a refusal that names the source and says it is retained. Being left out of the
+   current batch excuses nothing.
+2. **A continuation must be given every earlier record again**, plus what is new
+   (`require_complete`). The engine reads its records as all the evidence there is, so
+   a record left out is evidence withdrawn: quarantined records that leaned on it would
+   be decided again with less to go on. A partial or empty batch is refused.
+
+A stage change is authorised by the policies and nothing else: a state made only from
+IGDB records may move from private development to private collection, because IGDB
+clears both; a state that retains Steam's catalogue may not.
+
+### Continuing a broad evaluation
+
+`evaluate_broad_catalogue(records, previous=earlier_evaluation, ...)`:
+
+- `stage` and `policies` must cover the sources supplied **and** the sources retained in
+  both of `previous`'s catalogues;
+- `records` must include every key in `previous.record_keys`;
+- `as_of` may not be earlier than `previous`'s, nor than any record's `fetched_at`.
+
+With no external source supplied and none retained there is nothing to authorise: the
+result is the bootstrap catalogue, and it can be continued at any stage. The stage must
+still be stated.
+
+`EvaluationSummary.sources` lists each source in use, the records of it supplied to the
+call, and `retained_from_previous`.
+
+### Reusing a local state file
+
+A local state file is reused only if what it rests on can be established. Beside
+`state.json` is `state.provenance.json`, which now carries:
+
+- `state_sha256`: the digest of the state file it describes;
+- `retained_sources`: every source retained in that state, read from the state;
+- per retained source, the records supplied in the run that wrote it, and that source's
+  cleared stages;
+- `kind`, `is_production_catalogue: false`, the stage, and when it was generated.
+
+On reuse (`generate-catalogue` with an existing `--state`, and the `sample` command):
+
+| Check | Refused when |
+|---|---|
+| Provenance exists | there is no provenance file |
+| Provenance is readable and is a local state's | unreadable, not an object, wrong `kind`, or `is_production_catalogue` is not `false` |
+| It describes *this* file | `state_sha256` is not the state file's digest: the state was edited, or the file belongs to another state |
+| It agrees with the state | its `retained_sources` are not the sources the state actually retains |
+| Policy | any retained or supplied source does not clear the stated stage |
+| Completeness | the supplied records omit a record in the state's decision log |
+| Time | `as_of` is earlier than the state's `generated_at`, or than a record's `fetched_at` |
+
+**The provenance file is a description, never a grant.** Its declared stage and cleared
+stages are not read when deciding anything. A file edited to claim "public_launch",
+with a matching digest, changes nothing: the retained sources are read from the state
+and held to the source policies. The digest is not a signature and is not meant to
+resist a determined forger with access to both files; it ties a description to the
+state it describes and catches a stale or mismatched pair. Nobody can widen a
+permission by editing either file, because no permission is taken from them.
+
+A refused state is **left exactly as it is**: not repaired, not rewritten, not deleted.
+
+### Old local states
+
+A local state written before provenance existed (or by U5.1, whose provenance has no
+digest) is **refused**. It does not inherit permission from whatever records are
+supplied today.
+
+What to do with one: leave it where it is or move it aside, and generate a new state
+into a new path from recorded inputs that clear the stage:
+
+```
+uv run metaspike generate-catalogue --stage private_development --state <a new path>
+```
+
+The new state will have new canonical ids for entities beyond the bootstrap ones and
+new binding dates. There is no automatic migration, because nothing in an old state
+says under what policy it was made, and guessing would be the thing this closes.
+
 ## What was not activated
 
 - Broad discovery in production. The constant is `False`; a test pins it.
