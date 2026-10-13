@@ -23,6 +23,7 @@ from metaspike.catalogue.eligibility import (
     steam_eligibility,
 )
 from metaspike.catalogue.evaluation import (
+    IncompleteRecords,
     evaluate_broad_catalogue,
     known_record_keys,
     require_catalogue_sources,
@@ -1115,6 +1116,12 @@ def _load_or_generate_state(
     Whether it is read or generated, everything it rests on must clear `stage` for
     catalogue metadata: the records supplied now, and every source retained in a state
     that is being reused. The caller states the stage; nothing is assumed here.
+
+    A reused state must also be given every record it was made from, exactly as
+    `generate-catalogue` requires. The state's bindings are then read beside `records`
+    to decide which Steam apps are eligible, and bindings made from one set of records
+    must not be judged against a different, smaller one. Raises `IncompleteRecords`
+    otherwise, having changed nothing.
     """
     require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, stage)
     if path.is_file():
@@ -1122,6 +1129,7 @@ def _load_or_generate_state(
         require_catalogue_sources(
             records, CATALOGUE_SOURCE_POLICIES, stage, retained=retained_sources(state)
         )
+        require_complete(records, known_record_keys(state))
         return state
     state = generate_catalogue(records, as_of=_now())
     policies = require_catalogue_sources(
@@ -1186,7 +1194,11 @@ def _sample(args: argparse.Namespace) -> int:
     records = _recorded(args.recorded)
     # Sampling is a private-development command: its policy clears no other stage, and
     # the local catalogue state it keeps is held to the same one, stated here.
-    state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    try:
+        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    except IncompleteRecords as error:
+        # Refused before any target is chosen, any client is opened or anything is written.
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
     eligibility = steam_eligibility(state, records)
     targets = sampling_targets(state, eligibility, bootstrap_scope())
     scheduled_for = args.scheduled_for

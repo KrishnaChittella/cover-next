@@ -394,7 +394,7 @@ generation, no `CURRENT` pointer.
 |---|---|---|---|
 | `evaluate-catalogue` | yes | **no** (in memory) | `--stage` required; every source must clear it for `CATALOGUE_METADATA` |
 | `generate-catalogue` | yes | **yes**, a local state file | `--stage` required, no default; the same gate, applied before anything is resolved or written; `--as-of` may not precede the records' fetch time |
-| `sample` (Steam player counts) | yes | **yes**, the same local state file if none exists | Private development, stated in the handler, the only stage its own policy clears; the same gate, whether the state is read or generated |
+| `sample` (Steam player counts) | yes | **yes**, the same local state file if none exists | Private development, stated in the handler, the only stage its own policy clears; the same gate, whether the state is read or generated; a reused state needs its provenance and every record it was made from |
 | `audit-bootstrap-bindings` | yes | **no** | **Not stage-gated.** A read-only identity audit: it resolves in memory and prints the bootstrap entities' bindings to the terminal. It persists nothing |
 | `ingest-events` | yes, in memory, to resolve Steam app ids | **no** catalogue state | Gated by the Steam News policy for what it stores. Its in-memory use of catalogue records is not stage-gated |
 | `probe-sources steam-players` | yes, in memory, to check an app is an eligible target | **no** | Gated by the Steam player-count policy for the call it makes. Its in-memory use of catalogue records is not stage-gated |
@@ -492,6 +492,24 @@ On reuse (`generate-catalogue` with an existing `--state`, and the `sample` comm
 | Policy | any retained or supplied source does not clear the stated stage |
 | Completeness | the supplied records omit a record in the state's decision log |
 | Time | `as_of` is earlier than the state's `generated_at`, or than a record's `fetched_at` |
+
+Both paths that reuse a local state enforce every row of that table, the full-record
+requirement included:
+
+- **`generate-catalogue`** continuing an existing `--state`;
+- **`sample`**, which reuses the state to decide which Steam apps to sample (enforced
+  from U5.1.2; before that it checked provenance and policy but not completeness).
+
+Completeness matters to the sampler for a specific reason. Steam sampling eligibility is
+read from two things together: the state's bindings, and the supplied records' own
+assertions (a bound record must list the app as a structured external id). Bindings
+made from the complete records, read beside a smaller set, give an eligibility that
+matches neither. So the sampler refuses incomplete evidence **before** it chooses a
+target, opens a client, sends a request or writes a sample, with an ordinary error
+that says how many records are missing and from which source. Nothing on disk changes.
+
+Both use the same two functions, `known_record_keys` and `require_complete`; there is
+one definition of completeness.
 
 **The provenance file is a description, never a grant.** Its declared stage and cleared
 stages are not read when deciding anything. A file edited to claim "public_launch",
