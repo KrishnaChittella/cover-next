@@ -312,9 +312,244 @@ six times as long as 20,000. Whether that fits the job has to be measured, not a
 ### Tests and CI
 
 The 1,000-record evaluation runs in ordinary CI with exact pinned counts (about half a
-second). The 5,000, 10,000 and 20,000 cases are marked `slow` and excluded by default.
+second in U5; less since U5.2). The 5,000, 10,000 and 20,000 cases are marked `slow` and
+excluded by default.
 The pre-existing 10,000-record blocked-versus-reference proof is unchanged and also
 `slow`.
+
+## Scaling optimisation (U5.2)
+
+**Offline, on the product branch only.** This section describes two changes to how the
+catalogue is *processed*. It changes no identity decision and no eligibility rule, it
+has not run in production, and it does not move the rollout gate: broad discovery is
+still off and adopting any of this in production is still after C2-F.
+
+The measurements in "Scale" above are U5's and stay as they were recorded. They
+describe the code before this section. The measurements below are new.
+
+### The two bottlenecks
+
+Both were measured in U5 at 20,000 synthetic records: 191.9 s resolving, almost all of
+it in 1,260 full scans, and 22.2 s in the coverage summary.
+
+### A. Candidate blocking: no more full scans
+
+The resolver calls an entity a packaging variant when
+
+```
+incoming core − rework words − numbers equal to one of THE OTHER record's release years
+        ==  the other record's core − rework words
+```
+
+Which numbers are dropped depends on the record being compared with. The old index
+handled that by trying every way of dropping the incoming title's numbers, which is
+exponential in them, and above ten distinct numbers it gave up and had every entity
+assessed. That was correct, and quadratic.
+
+The index now does it in two steps:
+
+1. **A necessary condition as the key.** Dropping numbers can only make two cores equal
+   if they already have the same *words* in the same order. So every record is filed
+   under its core with all numbers removed, and an incoming title is looked up under
+   its own. A record filed anywhere else cannot be a packaging variant, whatever its
+   release years. "A number" is tested exactly as the resolver tests it.
+2. **The resolver's own comparison, on that bucket.** Each record in the bucket keeps
+   its core and its release years. The lookup evaluates the expression above with
+   them by calling the resolver's `_without` and `_release_years`, the same two
+   functions the resolver calls.
+
+So for this rule the index returns **exactly** the entities the resolver would relate
+by packaging: nothing is missed, and nothing is guessed. The work is linear in the
+records that share a title's words, however many numbers the title carries.
+
+What it is not: no threshold was lowered, no top-K, no similarity, no probabilistic
+filter, no assumption that a number is a year or that a title is unique. Every other
+key (ids, URLs, parent links, exact and alternative titles) is unchanged. Overrides and
+existing bindings are still added by reference. The resolver is untouched
+(`resolution/resolver.py` has no diff) and is still the only thing that decides.
+
+**Remaining full-scan conditions: none.** No input makes the index ask for every
+entity. The `None` return that means "assess everything" is kept in `wanted_refs`'
+contract, unused, so a future case the index cannot key has a safe, already-handled way
+out instead of a reason to prune.
+
+The cost that remains for this rule is a bucket scan: titles made of the same words in
+the same order (a long numbered series; titles that are nothing but numbers) share a
+bucket, and each lookup compares against every distinct core in it. Those are tuple
+comparisons, not resolver calls.
+
+### Proof of equivalence
+
+- **Per question.** `resolve(blocked_view(view)) == resolve(view)`, the whole decision:
+  kind, target, assessments, vetoes, explanation, relationships; and the quarantine
+  fingerprint. Held on every golden case, on hand-built adversarial views and on 120
+  seeded random questions against 300 held records.
+- **Per build.** `generate_catalogue_blocked(...) == generate_catalogue(...)`, as whole
+  states and as serialised JSON: every binding, logged decision in order, quarantine
+  entry and fingerprint, related product, lifecycle history and id. Held on both
+  recorded fixtures, a 700-record stratified sample, three input orderings, the seeded
+  random catalogue, and the pre-existing **10,000-record** proof, re-run in this
+  checkpoint.
+- **Cross-check mode**, unchanged, re-asks every question the all-pairs way and raises
+  on any difference. It ran clean on all of the above.
+- **Golden set**: byte-identical file; version 3, 200 cases, 178 correct, 0 false
+  automatic merges, as before.
+- **Why it cannot miss**, tested directly: for 2,000 seeded token lists, removing any
+  set of numbers never changes the words, so two cores made equal by dropping numbers
+  always share a key.
+
+Adversarial cases, all synthetic, each asserting the offered set equals the resolver's
+own candidate set: a title with 37 distinct numbers; twelve numbers of which exactly
+one is the other record's release year; several year-like tokens with different
+subsets released; a sequel numeral that is not a year, and the same numeral when it
+really is one; a number written two ways (`2016`, `02016`); titles that are only
+numbers; a repeated year; exact and alternative titles in both directions; one
+normalised title on three distinct games (all offered; the resolver quarantines);
+series siblings in Arabic and Roman numerals; remasters, HD and packaging editions; a
+title that is only packaging words; id links with unrelated titles in both directions;
+a store URL alone, corroborated, and claimed by two games; parent and version-parent
+links; conflicting evidence; an override target with no evidence; an existing binding;
+no key at all; an empty index.
+
+### B. Steam eligibility: grouped once per call
+
+`steam_eligibility` asked the mapping history for one entity's records, and the
+quarantine for one entity's candidates, once per entity: every binding and every
+quarantine entry was read again for each of them.
+
+It now builds a lookup once per call, from the same state, records and `as_of`: games
+by id; per entity, the records bound to it at `as_of`, in binding order; per entity,
+the Steam apps currently in quarantine that name it; records by key. Each entity is
+then answered from the lookup. `sampling_targets` groups each Steam record's binding
+history once in the same way.
+
+The lookup is a local value thrown away at the end of the call. Nothing is stored and
+nothing new can disagree with the mapping history.
+
+**The rule did not change.** From the first line that decides anything to the end of
+the function, the code is character for character what it was; a test compares the two
+texts. Signatures are unchanged.
+
+Parity is checked against `tests/eligibility_reference.py`, the previous implementation
+kept verbatim under `tests/`. Every comparison is output for output: classification,
+confirmed app ids, asserted-unconfirmed apps, quarantined apps, the reason sentence and
+the order, and the sampling targets with their binding references. It holds on the 394
+recorded rows (and both fixture sets together), on every bootstrap entity, on the
+reference engine's state, at moments before, at and after binding, on a binding closed
+and replaced and on one closed without replacement, with records withheld, on the empty
+catalogue, on a state with no bindings or quarantine, on one synthetic entity per branch
+of the rule, and on a 3,000-record synthetic catalogue.
+
+Preserved exactly:
+
+- Bindings are point-in-time: a later binding does not appear earlier and a closed one
+  stops counting from the moment it closed.
+- Quarantine is the **current** quarantine at every `as_of`. It was not turned into a
+  historical reconstruction.
+- An asserted app that Steam's list does not confirm is not eligible. A quarantined app
+  is not a binding. A bound app nothing asserts is not confirmed. A title is not an
+  identifier. Several eligible apps stay several ids; no primary is chosen.
+
+Recorded coverage is unchanged: 90 eligible, 69 inapplicable, 75 unknown; 91 apps.
+
+### Before and after
+
+Same machine, same day, same synthetic datasets, same deterministic id factory, one
+process per size, nothing else running. Apple M3, 8 cores, 8 GB, macOS 26.6.2, Python
+3.12.15. One run per size per side; laptop timings, not production metrics.
+
+- **Before**: commit `c89ea4b` (U5.1.2), run from an untouched export of that commit.
+- **After**: this checkpoint's working tree, committed as the U5.2 commit.
+
+`uv run python -m tests.catalogue_scale 1000 5000 10000 20000`
+
+| Records | | Resolving | Coverage | Total | Entities examined | Full scans | Resolver calls | Peak memory |
+|---|---|---|---|---|---|---|---|---|
+| 1,000 | before | 0.46 s | 0.05 s | 0.51 s | 25,176 | 60 | 1,030 | 54 MB |
+| | after | 0.14 s | 0.01 s | 0.15 s | 2,233 | 0 | 1,030 | 54 MB |
+| 5,000 | before | 10.38 s | 0.96 s | 11.33 s | 578,428 | 312 | 5,167 | 105 MB |
+| | after | 1.09 s | 0.08 s | 1.18 s | 11,858 | 0 | 5,167 | 109 MB |
+| 10,000 | before | 44.73 s | 4.00 s | 48.74 s | 2,289,686 | 628 | 10,343 | 170 MB |
+| | after | 3.22 s | 0.20 s | 3.41 s | 23,887 | 0 | 10,343 | 177 MB |
+| 20,000 | before | 191.41 s | 21.87 s | 213.28 s | 9,108,927 | 1,260 | 20,690 | 305 MB |
+| | after | 10.70 s | 0.25 s | 10.95 s | 47,982 | 0 | 20,690 | 308 MB |
+
+At every size the outcome is identical before and after: the same number of entities
+(432 / 2,070 / 4,117 / 8,210), quarantined records, related products, resolver calls and
+fingerprint checks. Only how many entities were looked at changed.
+
+The "before" column also reproduces U5's original measurements to within a second
+(213.3 s against 214.2 s at 20,000), on a different day.
+
+What the numbers show:
+
+- **Entities examined is now linear**: about 2.3 per resolver call at every size, down
+  from 440 per call at 20,000.
+- **Coverage went from 21.9 s to 0.25 s** at 20,000.
+- **Memory is unchanged** within a few megabytes. The new index adds one small entry per
+  distinct title core.
+- **Resolving is still superlinear**, though far less so: each doubling now multiplies
+  it by about 3 (it was 4.3). See below.
+
+### What is still superlinear
+
+Profiled at 5,000, 10,000 and 20,000. The remaining growth is in the **quarantine
+fingerprint**, not in blocking: each time a quarantined record is re-examined,
+`evaluation_fingerprint` hashes every record of every candidate entity, and
+`SourceRecord.content_hash` is recomputed on each call rather than kept (59,515 calls
+at 5,000; 204,525 at 10,000; 747,955 at 20,000).
+
+It grows faster than the data because a few synthetic entities accumulate records in
+proportion to the sample: the largest holds 8 records at 5,000, 16 at 10,000 and 32 at
+20,000, while the mean stays at 1.26. Every record that is a candidate for such an
+entity re-hashes all of it. Whether real catalogues contain entities like that is not
+known.
+
+This was **not** changed. It is in the quarantine and source-record code, outside the
+two operations this checkpoint was for, and the fingerprint decides when a quarantined
+record is re-resolved, so it deserves its own equivalence argument.
+
+Also not addressed: a whole-state snapshot per generation; and `directly_reachable`,
+`_Links` and the evaluation summary are linear passes that were not examined closely.
+
+### A latent fault found, not fixed
+
+The resolver's `_without` tests a token with `str.isdigit()` and then calls `int()` on
+it. A few characters satisfy the first and fail the second (Ethiopic digits, for
+example), so a title containing one raises `ValueError` inside the resolver. This
+predates the checkpoint, is the same before and after, and was left alone because the
+resolver is frozen here. The new index uses only the `isdigit` test for its key and
+calls `_without` for the comparison, so it neither adds nor removes the fault.
+
+### Limits of what this shows
+
+- Everything at scale is synthetic. The sample is built to be hard; about 6% of its
+  records carried a dozen numbers in the title precisely to exercise the old fallback.
+  On the 394 recorded rows there were **0** full scans before this change, so on data
+  like that the blocker's gain is small and the eligibility gain is what remains.
+- One laptop, one run per size per side. No variance was measured.
+- No 50,000-record run was made. Nothing is claimed for it.
+- Nothing was run on Cloud Run. Whether a first broad build fits the production job's
+  one-hour, 2 GiB limits is still unmeasured, and is a post-soak question.
+
+### What this changes about cost
+
+Nothing is activated and no cost is incurred. The one estimate it affects is the
+compute for a first broad build: measured resolving for 20,000 synthetic records fell
+from 192 s to 11 s on a laptop, so under the same assumptions as the Cost section
+(2–4× slower on one Cloud Run vCPU, about $0.0000185 a vCPU-second) that build is a
+fraction of a cent, not one to two cents. It was already negligible; it is more so.
+Collection cadence remains the cost that matters, and those figures are unchanged.
+
+### Still to be verified after the soak
+
+- A measurement on real records at scale, which do not exist here.
+- A first broad build on the production job's actual vCPU and memory.
+- The fingerprint cost above, on real data.
+- Adoption itself: the blocked engine is what production's `advance_catalogue` already
+  calls, so this code would be picked up by a production image built from it. No such
+  image has been built, and none may be until this branch is reviewed and merged after
+  C2-F.
 
 ## Multi-source foundation: what exists, and what was not added
 
@@ -549,9 +784,10 @@ says under what policy it was made, and guessing would be the thing this closes.
 
 ## What remains for a broad rollout
 
-1. A reviewed fix for the full-scan fallback in blocking, with the equivalence proof
-   re-run, and a measurement on real records at scale.
-2. An indexed `steam_eligibility`.
+1. ~~A fix for the full-scan fallback in blocking~~ and 2. ~~an indexed
+   `steam_eligibility`~~: done offline in U5.2, with the equivalence proofs re-run.
+   Still needed: review, a measurement on real records at scale, and the remaining
+   fingerprint cost.
 3. A snapshot retention or delta policy.
 4. A measured first broad build on the real job's vCPU and memory.
 5. A source of Wikimedia identifiers that is not a title match.

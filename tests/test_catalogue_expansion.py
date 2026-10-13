@@ -668,9 +668,12 @@ def test_a_thousand_synthetic_records_resolve_with_a_fraction_of_all_pairs_work(
     )
     assert summary.bound_records + summary.quarantined_records + summary.related_products == 1_000
     work = summary.broad_work
-    assert (work.resolver_calls, work.fingerprint_checks, work.full_scans) == (1_030, 804, 60)
-    assert (work.entities_offered, work.entities_all_pairs) == (25_176, 675_566)
-    assert work.share_of_all_pairs is not None and work.share_of_all_pairs < 0.05
+    # The same questions as before the blocker was reworked (U5: 1,030 calls, 804
+    # fingerprint checks), now with no record assessed against every entity. U5 had 60
+    # such full scans here and offered 25,176 entities; the decisions are identical.
+    assert (work.resolver_calls, work.fingerprint_checks, work.full_scans) == (1_030, 804, 0)
+    assert (work.entities_offered, work.entities_all_pairs) == (2_233, 675_566)
+    assert work.share_of_all_pairs is not None and work.share_of_all_pairs < 0.005
     assert work.most_entities_offered <= 8 and work.passes == 3
     # Bootstrap identities survive any amount of synthetic company.
     ids = {game.canonical_game_id for game in evaluation.state.catalogue.games}
@@ -702,7 +705,8 @@ def test_larger_synthetic_catalogues_stay_far_below_all_pairs(
     with capsys.disabled():
         print(f"\\n{json.dumps(measured)}")
     assert measured["records"] == size
-    assert measured["share_of_all_pairs"] < 0.05  # type: ignore[operator]
+    assert measured["share_of_all_pairs"] < 0.005  # type: ignore[operator]
+    assert measured["full_scans"] == 0
     assert measured["most_entities_offered"] <= 8  # type: ignore[operator]
     assert (
         measured["entities"] + measured["quarantined"] + measured["related_products"]  # type: ignore[operator]
