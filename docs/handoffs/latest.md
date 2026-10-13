@@ -5,221 +5,160 @@ on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and
 touched. It supports communication only and replaces no code, test or document.
 
 Production baseline: **PHASE 4 PART C2-F: SEVEN-DAY SOAK RUNNING** (observed read-only
-at 00:04 UTC on 2026-10-13; see the last section. Not altered. Not judged.)
+at 00:30 UTC on 2026-10-13; see the last section. Not altered. Not judged.)
 
-Parallel checkpoint: **PRODUCT BUILD U5.1.1: HISTORICAL CATALOGUE SOURCE POLICY CLOSED — CHATGPT REVIEW REQUIRED**
+Parallel checkpoint: **PRODUCT BUILD U5.1.2: SAMPLER CATALOGUE REUSE CONSISTENCY CLOSED — CHATGPT REVIEW REQUIRED**
 
-Offline only. No source was called. No policy permission, identity rule or performance
-characteristic was changed.
+Offline only. No source was called. One small correctness fix.
 
-Details: `docs/catalogue-expansion.md`, section "Source policy follows the state".
+## The inconsistency
 
-## The gap
+`generate-catalogue` required every earlier record when continuing a local catalogue
+state. The other path that reuses a local state, `_load_or_generate_state`, used by the
+`sample` command, did not. It validated provenance and policy, returned the state, and
+`_sample` then called `steam_eligibility(state, records)`: bindings made from the
+complete records, read beside whatever smaller set was supplied.
 
-U5.1's policy gate checked the sources of the records supplied to a call. A state that
-is continued still holds what earlier sources put into it. So:
+Reproduced against U5.1.1: the sampler given the state plus IGDB-only records exited 0
+and went on to sample.
 
-1. generate a local state from IGDB and Steam catalogue records at private development;
-2. reuse it at private collection, supplying only IGDB records;
-3. the gate sees only IGDB, which clears that stage; Steam's bindings, decisions and
-   entities stay in the state; the provenance file is rewritten for the later stage
-   without declaring Steam.
+Local and offline only. Nothing suggests C2-F or any artifact was affected.
 
-The same was possible when continuing a `BroadEvaluation` with a batch that omitted a
-source. No production effect; local and offline only.
+## The fix
 
-## The corrections
+One call in the loader, and one handler for its error:
 
-Four things are kept apart: records supplied now; records processed before; sources
-retained in a state; sources authorised at the stated stage.
+- `_load_or_generate_state`, when it loads an existing state, now calls
+  `require_complete(records, known_record_keys(state))` after the provenance check and
+  the policy check. These are the same two functions `generate-catalogue` uses; there
+  is one definition of completeness.
+- `_sample` catches `IncompleteRecords` and returns `EXIT_INVALID_CATALOGUE` with
+  `catalogue state cannot be reused: N record(s) the state being continued was made
+  from are not among the records supplied (… from igdb, … from steam_catalogue)`.
 
-### Retained-source policy enforcement
+### Affected code paths
 
-- `retained_sources(state)` reads, **from the state itself**, every external source
-  that left something in it: bindings (closed ones included), the decision log,
-  quarantine and related products. The bootstrap entities are not a source. It mirrors
-  what production's repository already reads before a commit.
-- `require_catalogue_sources(records, policies, stage, retained=...)` holds supplied
-  **and** retained sources to the stated stage for `CATALOGUE_METADATA`. A refusal
-  names the source and says it is retained. Absence from the batch excuses nothing.
-- Used in `evaluate_broad_catalogue` (retained in both of the previous evaluation's
-  catalogues), in `generate-catalogue`, and in the `sample` command's state loader.
-- The existing `SourcePolicy` definitions are the only authority. No stage is
-  defaulted, no source name is exempt.
+`src/metaspike/cli.py` only: `_load_or_generate_state` and `_sample`. Net 13 lines
+added, 1 removed. `_load_local_state`, `_generate_catalogue`, `_write_local_state` and
+everything under `catalogue/` are unchanged.
 
-### Complete records are required to continue (found while fixing this)
+### Refusal semantics
 
-My first version allowed a partial batch at a stage every source clears. Its tests
-showed that was wrong: with Steam's records left out, the engine **re-decided**
-quarantined records. It reads its records as all the evidence there is, so a record
-left out is evidence withdrawn.
+Order in the loader: policy for the supplied records; provenance (exists, readable,
+digest, declared sources agree); policy for retained sources; completeness. Policy
+therefore still wins over completeness: the same state at private collection is refused
+as "not cleared" with complete records or with none.
 
-So the input contract is the stricter of the two you offered: a continuation must be
-given **every earlier record again**, plus what is new (`require_complete`). A partial
-or empty batch is refused. The policy check runs first, so a batch that drops a source
-the stage does not clear is refused for that reason, by name.
+An incomplete set is an expected refusal: exit code 2 (`EXIT_INVALID_CATALOGUE`), a
+plain message on stderr, nothing on stdout, no traceback and no "unexpected failure".
 
-For an evaluation the earlier records are `previous.record_keys`. For a local state
-they are read from its decision log (`known_record_keys`); on the recorded data that
-log names all 394 records.
+### Proof that nothing happens on incomplete evidence
 
-### Previous-state validation and sidecar integrity
+The test replaces the replay client factory with a counter. On each of four refusals
+(IGDB only; Steam only; nothing; one fixture directory of two):
 
-`state.provenance.json` now carries `state_sha256` (the digest of the state file it
-describes) and `retained_sources` (read from the state), with each retained source's
-record count for that run and its cleared stages.
+- the client factory is **not called**, so no request can be sent;
+- stdout is empty: no target was chosen or reported;
+- every file under the working directory is byte-identical before and after: no
+  sample, and state and provenance unchanged.
 
-A local state is reused only if all of these hold, in order:
+The test also asserts, from the source, that the loader runs before
+`steam_eligibility` and before the client is opened.
 
-| Check | Refused when |
-|---|---|
-| Provenance exists | no provenance file |
-| Readable, and a local state's | unreadable; not an object; wrong `kind`; `is_production_catalogue` not `false` |
-| Describes this file | digest differs: the state was edited, or the file belongs to another state; or no digest |
-| Agrees with the state | declared `retained_sources` are not what the state retains |
-| Policy | a retained or supplied source does not clear the stated stage |
-| Completeness | the records omit one the state was made from |
-| Time | `as_of` earlier than the state's `generated_at`, or than a record's `fetched_at` |
+### Existing sampling replay behaviour
 
-**The provenance file is a description, never a grant.** Its declared stage and cleared
-stages are not read when deciding anything; a test asserts the loader does not read
-them. A file edited to claim `public_launch`, with a matching digest, changes nothing.
-The digest is not a signature: it ties a description to its state and catches a stale
-or mismatched pair. Nobody can widen a permission by editing either file, because none
-is taken from them.
+Unchanged. With the complete recorded inputs the sampler reuses the state across four
+slots in the test: 8 targets each time, state and provenance never rewritten. The
+pre-existing sampler tests pass unmodified apart from the U5.1 directory listing.
 
-A refused state is left exactly as it is: not repaired, rewritten or deleted. Tested by
-comparing the directory's bytes before and after every refusal.
+### Provenance and stage-policy regression
 
-### Old local states
+Still refused through the sampler, with nothing touched: no provenance file; a
+provenance declaring fewer sources than the state retains; a wrong digest. Still
+refused at private collection whatever records are supplied. All of U5.1.1's tests
+pass.
 
-A state with no provenance file, or with U5.1's provenance (no digest), is **refused**.
-It does not inherit permission from today's records. There is no automatic migration:
-nothing in such a state says under what policy it was made. The documented handling is
-to leave it or move it aside and generate a new state into a new path. Neither
-worktree on this machine currently has a local catalogue state file.
+## Tests
 
-### Stage changes
+One new test, `test_the_sampler_reuses_a_state_only_with_the_evidence_it_was_made_from`
+in `tests/test_steam_players.py`, covering A to I. It **fails against U5.1.1** (the
+IGDB-only reuse returns 0) and passes now. It uses the recorded fixtures; the partial
+sets are those same recorded rows with one source's rows left out. No synthetic record.
 
-Authorised by the policies and nothing else. A state made only from IGDB records moves
-from private development to private collection (IGDB clears both), and its provenance
-then says so. A state retaining Steam's catalogue does not.
+J and K are covered by tests that already existed and still pass.
 
-### `as_of`
+## Frozen recorded catalogue counts (unchanged, pinned)
 
-Unchanged from U5.1: the time of the evaluation or generation, not a historical cutoff.
-A record fetched after it is refused. Added: `generate-catalogue` refuses an `as_of`
-earlier than the `generated_at` of the state it continues (the evaluation already
-refused this). Mapping and decision history remain append-only; no binding is dated
-before its evidence; no historical record is invented.
-
-## Regression tests
-
-Four new tests in `tests/test_catalogue_expansion.py`, one earlier test extended:
-
-| Case | Result |
-|---|---|
-| A. Private-development state from IGDB + Steam | built; provenance names both |
-| B. Reused at private collection, IGDB only | refused: Steam retained, not cleared; nothing written |
-| C. Same at public launch and commercial | refused |
-| D. Reused at private development, complete records | permitted; ids, bindings, decisions, quarantine equal |
-| – Reused at private development, IGDB only | refused: 128 records missing |
-| E. No provenance | refused; files untouched |
-| F. Unreadable, not an object, wrong kind, claims production, edited state, other digest, no digest, hides a source, no sources declared | each refused; files untouched |
-| – Provenance edited to claim a later stage | still refused by policy |
-| G. Evaluation with Steam-derived state, continued where Steam is not cleared, with IGDB-only, five-record and empty batches | refused, naming Steam as retained |
-| – Same with Steam's policy left out of the mapping | refused |
-| H. Evaluation continued with complete records and policies | succeeds |
-| – IGDB-only evaluation promoted to private collection | succeeds |
-| I. Identical repeat | narrow 15, broad 234, broad-only 219, zero incremental admissions |
-| J. No source supplied or retained | bootstrap catalogue; stage still required; continuable at any stage |
-| K. Backdating a continuation | refused; files untouched |
-| L. No identity change or rewrite | asserted on every permitted reuse |
-| M. Sampling replay tests | pass, offline, under the stated private stage |
-
-No test was weakened.
-
-## Frozen recorded-data results (unchanged, pinned)
-
-394 records; 15 narrow entities; 234 broad; 219 broad-only; 327 bound; 44 quarantined;
-23 related products. Wikimedia identifier-ready 14; Steam identifier-ready 90; without
-any eligible source 135. First and repeated evaluations give the same numbers. No new
-catalogue data was collected and no synthetic record is in these results.
-
-## Source-policy permissions unchanged
-
-`sources/` and `domain/source_policy.py` have no diff. IGDB: private development and
-private collection. Steam catalogue: private development only. Steam players and Steam
-News: private development only.
-
-## Performance bottlenecks still open
-
-Not touched: the full-scan fallback that makes resolving quadratic; the quadratic
-`steam_eligibility` scan; whole-state snapshots per generation; an unmeasured first
-broad build against the production job's limits. The U5 measurements stand. Nothing
-was re-benchmarked. `require_complete` and `retained_sources` add a linear pass each.
+394 source records; 15 narrow entities; 234 broad; 219 broad-only; 327 bound; 44
+quarantined; 23 related products.
 
 ## Gates
 
 Backend: `ruff format --check` clean (219 files); `ruff check` clean; `mypy` clean (206
-files); `pytest` **1,488 passed, 8 deselected**; `export-schemas --check` up to date;
+files); `pytest` **1,489 passed, 8 deselected**; `export-schemas --check` up to date;
 `evaluate-resolver` exit 0 (golden set v3, 200 cases, 0 false automatic merges,
 precision 52/52).
 
-The 8 deselected are the default `slow` and `live` exclusions. No slow test and no
-benchmark was run in this checkpoint.
+The 8 deselected are the default `slow` and `live` exclusions. **No slow test and no
+benchmark was run.**
 
 Frontend (no frontend change): `contract:check`, `typecheck`, `lint`, `test` (179
 passed), `build` all pass.
 
-## Unchanged
+## Existing intelligence unchanged
 
-`resolution/` (`883d0775ac898ab1`), `catalogue/generate.py`, `incremental.py`,
-`persistence.py`, `eligibility.py`, `coverage.py`, `lifecycle/`, `domain/`, `sources/`:
-no diff. `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`, `events/`
-`333373c61ae6c37f`, `event_sources/`, `validation/`: no diff. Golden set file
-byte-identical. Artifact contract 1.5.0; `schemas/` and `apps/` no diff. Broad
-production discovery still `False`. Production's `CatalogueRepository` and `CURRENT`
+No diff under `catalogue/`, `resolution/` (`883d0775ac898ab1`), `domain/`, `sources/`,
+`pipeline/`, `lifecycle/`, `scoring/` (`3b857c551d5ab5b0`), `features/`
+(`24cf7d170f57d8ab`), `events/` (`333373c61ae6c37f`), `event_sources/`, `validation/`.
+Steam eligibility rules, source bindings and identities: untouched. Source permissions:
+untouched. Golden set byte-identical. Score v0 golden replay, U3.1 publication-lag and
+U4.2 provenance tests pass. Artifact contract 1.5.0; `schemas/` and `apps/` no diff.
+Broad production discovery still `False`; production's catalogue path and `CURRENT`
 untouched.
 
-## Production isolation (read-only, 00:04 UTC 2026-10-13)
+## Remaining catalogue scale bottlenecks
+
+Not touched: the full-scan fallback that makes resolving quadratic; the quadratic
+`steam_eligibility` scan; whole-state snapshots per generation; an unmeasured first
+broad build against the production job's limits. Nothing was optimised.
+
+## Production branch isolation (read-only, 00:30 UTC 2026-10-13)
 
 Read from GCP and GitHub:
 
 - `main` = `cb33198`, level with origin, clean; `product/local-ui` not merged; no pull
-  request. A push to `product/local-ui` starts no workflow; last workflow run still
-  38104941975 (11 October).
+  request; a push to it starts no workflow; last workflow run still 38104941975.
 - Terraform state generation `1791685217422653`: unchanged.
 - Control record generation `1791684706340016`: unchanged.
 - Scheduler configuration ENABLED, `0 * 12-18 10 *`: unchanged.
 - Seven jobs, generation 6, image `sha256:a8680b2be8b5…`: unchanged.
 - IAM, dataset schemas, secrets, alert policies: identical to the previous snapshot.
   0 secret versions, 0 user keys. Repository variables unchanged.
-- No Wikimedia, Steam or IGDB call by U5.1.1. Local Steam quota ledger still 3.
+- No Wikimedia, Steam or IGDB call by U5.1.2. Local Steam quota ledger still 3.
 - The portfolio repository was not touched.
 
-## C2-F observation (read-only; separate; not altered; not judged)
+## C2-F observation (read-only, 00:30 UTC 2026-10-13; separate; not altered; not judged)
 
 | | |
 |---|---|
 | Executions since the window opened | 27, none failed |
-| 12 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse: 26 |
+| 12 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
 | 13 October so far | 1 dispatcher (00:00) |
-| Scheduler | last attempt 00:00:48Z on 13 October; next 01:00Z |
-| Warehouse rows, written by the soak | `collection_runs` 54 → 68; `expected_targets` 28 → 42; `period_observations` 1,372 → 1,568 |
+| Scheduler | last attempt 00:00:48Z; next 01:00Z |
+| Warehouse rows | `collection_runs` 68, `expected_targets` 42, `period_observations` 1,568 (unchanged since the 00:04 reading) |
 
-Those row changes are the soak's own. This is what was observable at one moment, one
-day into a seven-day window. It is not a statement that C2-F has passed or will; that
-is judged after 18 October against its criteria. Nothing was triggered, restarted or
-changed.
+Read from Cloud Run, Cloud Scheduler and BigQuery, not from GitHub. One day into a
+seven-day window. This is not a statement that C2-F has passed. Nothing was triggered,
+restarted or changed.
 
 ## Commits
 
-`835b96e` fix: preserve catalogue source policy across state reuse; then this handoff.
-Pushed to `origin/product/local-ui` only. No PR, no merge to `main`.
+The fix commit "fix: enforce complete catalogue evidence on sampler reuse", then this
+handoff. Pushed to `origin/product/local-ui` only. No PR, no merge to `main`, no
+deployment.
 
 ## Exact next approval required
 
-ChatGPT review of U5.1.1.
+ChatGPT review of U5.1.2.
 
 STOP. U5.2 has not been started.
