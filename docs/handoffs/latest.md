@@ -1,275 +1,307 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U5.3: QUARANTINE FINGERPRINT SCALING — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.0: OFFLINE MULTI-SOURCE EVIDENCE INTEGRATION — CHATGPT REVIEW REQUIRED
 
 Branch `product/local-ui` only. Offline. No production action, no live source call, no
-deployment, no pull request, no merge to `main`. This file is the product-branch
-handoff; `main`'s handoff was not touched. No further checkpoint has been started.
+credential, no cloud resource, no deployment, no pull request, no merge to `main`. This
+file is the product-branch handoff; `main`'s handoff was not touched. **No further
+checkpoint has been started.**
 
-- **Approved baseline (rollback point):** `55531e03183bff90ec85140528c3a3d7d694803c`
-  (U5.2 handoff; U5.2 implementation `4eface9`).
-- **Implementation commit:** `2494916` — `perf: reduce redundant quarantine
-  fingerprint hashing`.
+- **Approved starting SHA:** `a009ea3315f8b0df389d1e039b99dbc387040522` (U5.3 handoff).
+  Verified at the start: on `product/local-ui`, at that commit, tree clean.
+- **Implementation SHA:** `18b72bc38f869039515b45e0f327a10c58423d3b` —
+  `feat: integrate offline multi-source game evidence`.
 - **Production `main`:** `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, unchanged.
-- At the start the checkout was on `product/local-ui` at `55531e0`, level with
-  `origin/product/local-ui`, tree clean; the previous handoff was U5.2.
 
-**Result in one line:** each record's content hash is now computed once per run instead
-of once per fingerprint that reads it; every fingerprint, decision and catalogue state
-is identical to the original; resolving time roughly halved at 10,000 records and
-above.
+**In one line:** a local, private command now reads what is held about a canonical game
+at a moment, source by source, using the existing components unchanged; and the honest
+result on real data is that **no game has two real demand signals at the same moment**,
+so multi-source integration is demonstrated only on clearly labelled synthetic data.
 
-## Files changed
+## Three things to review first
+
+1. **Pageview freshness is read at the source's due boundary, not the wall clock.** The
+   frozen engine's daily freshness counts whole days from the last bucket to the moment
+   it is read and knows nothing of publication lag. Read at the wall clock, daily
+   pageviews are `stale` even when every due day is held (seen on the recorded data at
+   2026-10-05 12:00). The evidence layer hands the engine the end of the latest period
+   the source was due to have published. Pageviews are then stale exactly when a due day
+   is missing, as score v0 treats it. **No engine rule or constant changed**
+   (`pageviews_read_at` in `evidence/assemble.py`). This is a judgement call of mine.
+2. **Metadata history is not kept.** Only a source record's latest version is held. A
+   reading before a record's latest fetch does not use it, and what leaned on it reads
+   as `unknown`. It never borrows the later version. This is a limit, not a fix.
+3. **Synthetic origin is declared, not detected.** Stores carry no origin. The command
+   labels its own scenario synthetic and refuses to mix it with stored evidence, but a
+   store someone filled by replaying the synthetic Steam News fixtures and then passed
+   as `--events-dir` would be labelled `local_store`. The fixtures' README and the
+   doc say so; nothing enforces it.
+
+## Exact changed files
 
 | File | Change |
 |---|---|
-| `src/metaspike/domain/source_records.py` | New `ContentHashMemo` (per-run, keyed by record object). `SourceRecord.content_hash` itself is untouched. |
-| `src/metaspike/resolution/quarantine.py` | `evaluation_fingerprint(view, overrides, hashes=None)`: reads content hashes through the memo when one is given. Payload, ordering, canonical JSON and SHA-256 untouched. |
-| `src/metaspike/catalogue/incremental.py` | `generate_catalogue_blocked` creates one memo per call and passes it to both fingerprint calls and the decision log. `GenerationStats` gained `content_hashes_requested` / `content_hashes_computed`. The cross-check side stays unmemoised. |
-| `src/metaspike/catalogue/evaluation.py` | `WorkCount` reports the two new counters (offline evaluation summary only). |
-| `tests/catalogue_scale.py` | Harness counts real `content_hash` computations by wrapping the property, in a separate second run. |
-| `tests/fingerprint_reference.py` | New. Verbatim copy of the U5.2 `evaluation_fingerprint` (checked by diff), used as the reference. |
-| `tests/test_fingerprint_memo.py` | New. 9 tests. |
-| `docs/catalogue-expansion.md` | New section "Quarantine fingerprint hashing (U5.3)". U5 and U5.2 figures left as recorded. |
+| `src/metaspike/evidence/__init__.py` | New package. |
+| `src/metaspike/evidence/model.py` | New. The typed reading and its eight states. |
+| `src/metaspike/evidence/assemble.py` | New. `assess_evidence`, the policy gate, the pageview cut. |
+| `src/metaspike/evidence/render.py` | New. Text output; no source text printed. |
+| `src/metaspike/evidence/synthetic.py` | New. The labelled synthetic scenario. |
+| `src/metaspike/cli.py` | New `evidence` command and its helpers. No existing command changed. |
+| `tests/test_evidence.py` | New. 27 tests. |
+| `docs/multi-source-evidence.md` | New. |
+| `README.md` | One paragraph pointing to the command and the document. |
 
-Not changed (no diff): `resolver.py`, `normalize.py`, `blocking.py`,
-`catalogue/generate.py` (the reference engine), `persistence.py`, `eligibility.py`,
-`sources/`, `scoring/`, `features/`, `events/`, `event_sources/`, `validation/`,
-`schemas/`, `apps/`, `tests/fixtures`, `.github/`, the golden set. No persisted format
-changed; no schema changed; no migration concern. The memo is never written anywhere.
+Nothing else. No change under `infra/`, `.github/`, `apps/`, `schemas/`,
+`tests/fixtures/`, or to any resolver, feature, scoring, event, validation, publishing,
+source or policy module. No artifact schema changed (contract still 1.5.0;
+`export-schemas --check` is clean). No new persisted format: the report is printed, or
+written only where `--out` says.
 
-## Root cause
+## Integrated sources
 
-`SourceRecord.content_hash` is a property that serialises the whole record and takes a
-SHA-256 every time it is read. `evaluation_fingerprint` reads it for the incoming
-record, for every record of every candidate entity and for every unresolved linking
-record, on every pass. At 20,000 synthetic records that was 747,955 computations over
-20,000 records. Confirmed by counting, not inferred (see Benchmark).
+| Source | Kind | How it is read |
+|---|---|---|
+| IGDB | catalogue metadata | Recorded rows, resolved by `resolver_v2`; bindings at `as_of` |
+| Steam app list | catalogue metadata | The same |
+| Wikimedia pageviews | demand signal | Recorded responses, cut to what was published by `as_of` |
+| Steam concurrent players | demand signal | The sample store, point in time, through the binding valid at observation |
+| Steam News | event evidence | The event store and the source store, as of `as_of` |
+| Creator supply | — | `not_integrated` |
+| Community interest | — | `not_integrated` |
 
-## The optimisation, exactly
+## Reused components (none modified)
 
-`ContentHashMemo.of(record)` returns `record.content_hash`, computed the first time
-that object is asked about and kept for the rest of the run. That is all. Larger
-designs (per-entity evidence summaries) were considered and not used: they add state
-that must be kept in step with entities, and were not needed for a clear gain.
+`MappingHistory` · `steam_eligibility`, `sampling_targets`, `active_binding` ·
+`build_time_series`, `latest_due_period` · `steam_family_v2`, `wikimedia_family_v2`,
+`read_entity_history` · `hourly_aggregates`, `daily_aggregates`, `current_level` ·
+`usable_features` (as `Consumer.OPPORTUNITY_SCORE`, so the shadow-only change point is
+withheld) · `entity_evidence_v2` · `assess_entity` (score v0) · `assess_events`,
+`upcoming_radar`, `coverage_of` · `EventStore`, `EventSourceStore.latest_candidates` ·
+`require_catalogue_sources`, `retained_sources`, `require_event_source`,
+`SourcePolicy.registration_refusal` · and, in the scenario, the real `SteamNewsAdapter`,
+`ingest`, classifier and promotion gate through `replay_news_client`.
 
-## Cache lifetime and invalidation
+## Real versus synthetic
 
-- **Key: the record object** (`id(record)`), and the entry holds the record itself, so
-  it checks `held is record` and the address cannot be reused by another record while
-  the entry exists. **Not** the source-native key, and nothing a record says.
-- A `SourceRecord` is a frozen model: one object has one content hash for its life.
-- Any change is a new object (`model_copy(update=...)`, re-parse, re-fetch), which is
-  looked up afresh. Changed content under the same source id can never be answered by
-  the older record's entry.
-- **Lifetime: one call of `generate_catalogue_blocked`.** Created inside it, dropped
-  when it returns. Not module-level, not shared between runs, not stored. A
-  continuation is a new run with a new memo. Bounded by the records of that run.
-- Candidate membership, `bound_to`, linking context and overrides are still read
-  directly on every fingerprint; only the per-record hash is reused.
+**Real and recorded, in the repository:** 402 catalogue rows; daily pageviews for six
+games through 3 October 2026.
 
-Cases from the brief, and where each is shown (`tests/test_fingerprint_memo.py`):
+**Real, local to this machine only:** the fifteen announcements of the one supervised
+Steam News probe of 11 October (three apps). Not in the repository; no new request made.
 
-| Case | Shown by |
+**Not held anywhere:** player-sample history. No sample store has ever been filled.
+
+**Synthetic:** everything the scenario writes (player samples for four apps,
+announcements for three), and one rebinding built inside two tests. Labelled in every
+place it surfaces; never `usable`; never counted as a demand family observing a game.
+
+Tests on recorded data: identity, metadata, quarantine, pageviews, the publication-lag
+cut, score v0 parity, policy. Tests on synthetic data only: everything about player
+samples, promoted and upcoming events, candidates.
+
+## Working demonstration command
+
+```
+uv run metaspike evidence --as-of 2026-10-05T12:00:00+00:00 \
+    --wikimedia-replay tests/fixtures/wikimedia --recorded-through 2026-10-03
+
+uv run metaspike evidence --as-of 2026-10-20T12:00:00+00:00 \
+    --wikimedia-replay tests/fixtures/wikimedia --recorded-through 2026-10-03 \
+    --synthetic-scenario
+```
+
+Both were run. Offline, read-only, byte-identical on a second run (tested).
+
+## End-to-end examples (actual output, abridged)
+
+**Real, 2026-10-05 12:00 UTC — Minecraft:**
+
+```
+Minecraft  (minecraft)
+  canonical id d1c9712e-1691-49c0-be37-a3ea0dd06760  [frozen_bootstrap]  lifecycle EVERGREEN
+    no source record was bound to this game at this moment
+    quarantined, NOT bound: igdb:121 (title_only)
+  igdb                  catalogue_metadata unresolved
+  wikimedia_pageviews   demand_signal      available      latest 2026-10-04 00:00Z ids Minecraft
+  steam_current_players demand_signal      unknown        No source record is bound to this entity.
+  steam_news            event_evidence     not_collected
+  creator_supply        creator_supply     not_integrated
+    families that could observe this game: 1; with current REAL observations: 1
+    wikimedia_readership: current_level 6013, expected_level 5138, log_lift 0.1573, robust_z 0.1506
+      not usable for scoring (shadow-only): change_point
+  Score v0 (pageviews only, unchanged): 12.2, confidence 59 (medium)
+  Events: UNAVAILABLE (no_event_coverage). That is not the same as no events.
+  Usable now: wikimedia_pageviews
+```
+
+**Real, the fifteen original games at that moment:** pageviews available for 6, missing
+for 8 (no recording held), unknown for 1; Steam players eligible but not collected for 8,
+inapplicable for 5, unknown for 2. **Games with two demand families: 0.**
+
+**Real, 2026-10-12 00:00 UTC with this machine's local event stores:** the six pageview
+series are `stale`; Counter-Strike 2, Dota 2 and Baldur's Gate 3 have current Steam News
+coverage, five announcements read each, none promoted, event heat 0.
+
+**SYNTHETIC, 2026-10-20 12:00 UTC — Dota 2 (invented; not a finding):**
+
+```
+  steam_current_players demand_signal      available      latest 2026-10-20 11:45Z ids 570   [SYNTHETIC, private only]
+  steam_news            event_evidence     available      latest 2026-10-20 11:00Z ids 570   [SYNTHETIC, private only]
+    families that could observe this game: 2; with current REAL observations: 0
+    steam_players (concurrent_players, maturity partial_baseline)  [SYNTHETIC]
+  Events: coverage current; event heat 30.720; 2 relevant event(s)
+    upcoming: season starts 2026-10-23 00:00Z (day precision), in 60 h
+    announcements read: 3; promoted to events 2; candidates only 1
+  SYNTHETIC, not observations: steam_current_players, steam_news
+```
+
+## Point-in-time correctness
+
+- Bindings at `as_of`; a later rebinding leaves an earlier reading identical to one made
+  from the state that never had it; samples before and after a rebinding stay with the
+  entity bound at the time; stored samples byte-identical afterwards.
+- Samples, announcements, events and checks stored after `as_of` are not read; the same
+  stores read two days apart show the announcements and the synthetic climb only later.
+- Pageviews: the cut equals `RecordedHistory.inputs_at` at four moments; on 4 October at
+  noon the 3rd is recorded and not yet published, and is not used.
+- A moment before the catalogue state existed is refused, as is a naive time.
+- Quarantine entries first seen later are not listed. Metadata: see item 2 above.
+
+## Acceptance tests A–T
+
+| | Covered by |
 |---|---|
-| A same record repeatedly; B re-fetched unchanged | hash test: same value; a re-fetched object is computed afresh and equal |
-| C changed title; D changed external ids; E changed release dates; F `model_copy` | hash test and fingerprint test: new value each time, never the older answer |
-| G candidate gains or loses evidence; O a record in several candidate views; P several records on one entity | fingerprint test (gain, loss, one field of a candidate's record); real-build test (205,277 requests over 10,397 computations at 10,394 records) |
-| H rebinding / existing binding | fingerprint test (`bound_to`); quarantine test (a bound candidate record changes and reopens the quarantine) |
-| I corroborating evidence arrives | quarantine test: released by path A, one appended decision and binding |
-| J linking context changes | linking test: an unresolved linking record arriving later reopens the record |
-| K override changes | fingerprint test (applied, different, newer version, removed); linking test |
-| L continuation from previous state | builds test and quarantine test, both engines |
-| M two evaluations in one process | separate-runs test; no module-level memo exists |
-| N same title, different source ids | hash test: different content, different hash |
+| A, B | `test_pageviews_alone…`, `test_metadata_gives_identity…` (recorded) |
+| C–I | samples association, inapplicable, never sampled, reported zero, stale/fresh, incomplete hour and day, several apps (synthetic samples) |
+| J | `test_a_quarantined_record_is_never_treated_as_bound` (recorded: `igdb:121`) |
+| K | `test_a_later_rebinding_changes_nothing_before_it` |
+| L–O | candidate only, promoted event, upcoming with timing, timing not established |
+| P | `test_a_reading_uses_nothing_later…`, `test_pageviews_are_cut…` |
+| Q | `test_restricted_evidence_cannot_be_read_for_a_public_stage_or_published` |
+| R | `test_synthetic_evidence_is_never_presented_as_an_observation` |
+| S | `test_creator_supply_and_community_interest_are_absent_not_zero` |
+| T | `test_score_v0_is_what_it_has_always_been`, `test_other_evidence_does_not_move_score_v0` |
 
-## Fingerprint and build parity
+Plus the command's own tests (offline, deterministic, refusals) and one asserting the
+layer defines no rule of its own.
 
-- **Content hash:** `memo.of(r) == r.content_hash` for unchanged, re-fetched and
-  changed records, and across 3,000 short-lived records with garbage collection.
-- **Fingerprint:** current-with-memo == current-without == original U5.2 function, on
-  hand-built views; the value moves for 16 distinct evidence changes and stays for
-  changes that are not evidence.
-- **Every fingerprint in real builds:** more than 2,500 fingerprints computed while
-  building the recorded fixtures and a 1,500-record synthetic sample (first builds and
-  continuations) were each re-derived by the original function and matched.
-- **First generation:** blocked engine == reference engine (`==` and identical JSON) on
-  the recorded fixtures and synthetic samples, cross-check on.
-- **Incremental generation:** the same, for unchanged re-runs, new records, changed
-  records, newly corroborated quarantines, a changed bound record reopening a
-  quarantine, and a changed override.
-- **10,394 records (slow proof, run in this checkpoint):** blocked == reference, equal
-  JSON. 4,336 entities, 5,494 bindings, 4,087 quarantined, 0 full scans; 205,277 hashes
-  requested, 10,397 computed. (The three beyond the record count are records the run
-  holds as separate objects; a few more on small fixtures for the same reason. It is
-  one per object, as designed.)
+## Source-policy gate results
 
-The reference engine was not edited and was not given a memo, so every engine
-comparison is also a memo-versus-no-memo comparison. No mismatch was found at any
-point.
+- Every input's source must have a policy clearing the stated stage for its purpose
+  before anything is read. Missing policy, or a policy under another source's name: refused.
+- At `public_launch`: the recorded catalogue is refused (IGDB not cleared); with only
+  pageviews and the bootstrap entities it is allowed; adding synthetic samples, the event
+  store or the source store is refused, each by its own policy. `private_collection` and
+  `commercial_production` with the scenario: refused.
+- The report is `private_development_only` always. Nothing in `publishing/` imports it;
+  `schemas/` has no entry for it; `--out` refuses the artifacts directory.
+- No source policy was changed and no unknown permission was read as granted.
 
-## Quarantine re-evaluation behaviour (unchanged)
+What stands between each source and a noncommercial public launch, from the policies:
+Wikimedia nothing; IGDB attribution in the product and IGDB's answer on the partnership
+question; Steam app list branding, links, disclaimers and a privacy policy (the branding
+guidance has not been located); Steam players and Steam News an explicit answer on
+derived metrics and events (both `unknown`). Detail in `docs/multi-source-evidence.md`.
 
-Each step run through both engines, states equal:
+## Existing score parity
 
-- unchanged evidence: skipped; the entry (evaluations, `first_seen`, `last_evaluated`,
-  fingerprint, history) is exactly what it was, including after a re-fetch;
-- a bound candidate record changes: the quarantine leaning on it is examined again
-  (`evaluations` 2, `first_seen` kept, `last_evaluated` moved) and, still ambiguous,
-  stays; an unrelated quarantine is not touched;
-- conflicting evidence examined again is still a conflict;
-- corroborating id evidence releases a title-only quarantine through the frozen
-  resolver; earlier history intact; a point-in-time read before the evidence still
-  shows the record unbound;
-- a later unresolved linking record reopens the record it links to;
-- an override resolves the record it names;
-- no record is dropped: every supplied record is bound or in quarantine.
+With the publication lag set to zero, the reading at midnight after the recording
+reproduces the frozen `score_v0_replay_golden.json` score and confidence for all fifteen
+games (six scored). Under the real one-day lag it equals `assess_entity` on the
+backtest's own inputs. Adding samples and events changes no score or confidence.
 
-No threshold moved. A title alone is still never an identity. No auto-merge was added.
+## Golden resolver parity
 
-## Frozen recorded counts (unchanged, pinned by tests)
-
-394 records · 15 narrow entities · 234 broad · 219 broad-only · 327 bound ·
-44 quarantined · 23 related. Steam: 90 eligible / 69 inapplicable / 75 unknown,
-91 apps. Wikimedia mapped 14. 135 without an eligible source. Golden set v3: 200 cases,
-178 correct, 0 false auto merges; file and content hashes unchanged. On the recorded
-394 rows the engine requests 749 content hashes and computes 397.
-
-## Benchmark
-
-**Method.** Same machine, same synthetic datasets (`tests/catalogue_samples.py`), same
-deterministic id factory, one fresh process per size (so peak memory is not
-cumulative). Apple M3, 8 cores, 8 GB, macOS 26.6.2, Python 3.12.15. Before = commit
-`55531e0` run from an untouched `git archive` export with only the measuring harness
-replaced; after = the working tree that became `2494916`. Times come from an
-uninstrumented run; hash computations are counted in a second run of the same
-evaluation with the `content_hash` property wrapped on the class, so the figure is real
-computations, not accesses. "Requested" is the engine's own count of accesses.
-
-**One run per size per side.** Variability was not measured; treat differences of a few
-percent, and all memory differences here, as noise. Laptop timings on synthetic data,
-not production measurements, and not a prediction for real records.
-
-| Records | | Resolving | Coverage | Total | Hashes computed | Requested | Fingerprint checks | Resolver calls | Entities examined | Peak memory |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1,000 | before | 0.14 s | 0.01 s | 0.15 s | 5,184 | – | 804 | 1,030 | 2,233 | 56 MB |
-| | after | 0.10 s | 0.01 s | 0.11 s | 1,000 | 5,184 | 804 | 1,030 | 2,233 | 55 MB |
-| 5,000 | before | 1.08 s | 0.08 s | 1.16 s | 59,515 | – | 4,042 | 5,167 | 11,858 | 108 MB |
-| | after | 0.71 s | 0.03 s | 0.75 s | 5,000 | 59,515 | 4,042 | 5,167 | 11,858 | 111 MB |
-| 10,000 | before | 3.33 s | 0.24 s | 3.57 s | 204,525 | – | 8,086 | 10,343 | 23,887 | 171 MB |
-| | after | 1.75 s | 0.19 s | 1.94 s | 10,000 | 204,525 | 8,086 | 10,343 | 23,887 | 179 MB |
-| 20,000 | before | 10.49 s | 0.29 s | 10.78 s | 747,955 | – | 16,188 | 20,690 | 47,982 | 307 MB |
-| | after | 5.41 s | 0.29 s | 5.69 s | 20,000 | 747,955 | 16,188 | 20,690 | 47,982 | 311 MB |
-| 50,000 | before | 78.03 s | 1.00 s | 79.03 s | 4,401,151 | – | 41,532 | 51,729 | 121,421 | 707 MB |
-| | after | 36.48 s | 0.98 s | 37.47 s | 50,000 | 4,401,151 | 41,532 | 51,729 | 121,421 | 719 MB |
-
-Entities (432 / 2,070 / 4,117 / 8,210 / 20,230) and quarantined counts are identical on
-both sides at every size. The baseline's hash counts equal the figures U5.2 profiled.
-Memory: up to 12 MB more at 50,000 (one 64-character string per record), not
-distinguishable from noise with one run. The U5 and U5.2 figures in
-`docs/catalogue-expansion.md` are left as historical.
-
-## Remaining performance issues
-
-Resolving is still superlinear: about ×2.5 from 5,000 to 10,000, ×3.1 from 10,000 to
-20,000 and ×6.7 from 20,000 to 50,000. Profiling puts the remainder inside the frozen
-resolver's own assessment (`_assess`, `_has_id_link`, `_names`, `_title_relation`) when
-a candidate entity holds many records; the largest synthetic entity holds 8 / 16 / 32
-records at 5,000 / 10,000 / 20,000. That is resolver work, not hashing, and reducing it
-would mean touching or wrapping frozen identity code, so it was left alone. Whether
-real catalogues produce such entities is not known.
-
-## Known Unicode issue (separate, not fixed)
-
-The resolver's `_without` uses `str.isdigit()` and then `int()`. Some Unicode digits
-(for example Ethiopic) pass the first and fail the second with `ValueError`. It
-predates U5.2, is in frozen resolver code, and is not touched here. Nothing in U5.3
-testing showed a wider consequence. It needs its own reviewed decision.
+`uv run metaspike evaluate-resolver`: golden set v3, 200 cases, hash `c2b3aef7b372`,
+**0 false automatic merges**, exit 0. No resolver file changed.
 
 ## Quality gates
 
-Backend (in the product worktree):
+Backend, on the committed tree (2026-10-14):
 
-- `uv run ruff format --check` — 223 files already formatted
+- `uv run ruff format --check` — 229 files already formatted (230 after the handoff's
+  doc-only follow-up check; clean both times)
 - `uv run ruff check` — All checks passed
-- `uv run mypy` — no issues in 210 source files
-- `uv run pytest` — **1,508 passed, 8 deselected in 306.44s** (default `slow`/`live`
-  exclusions; includes the 9 new fingerprint tests and all catalogue and quarantine
-  regressions)
+- `uv run mypy` — no issues in 216 source files
+- `uv run pytest` — **1,535 passed, 8 deselected in 347.17s** (1,508 before, plus the 27
+  new tests). The three test files that read the docs and README were re-run after the
+  documentation was written: 146 passed.
 - `uv run metaspike export-schemas --check` — Schemas are up to date
-- `uv run metaspike evaluate-resolver` — exit 0; 200 cases, 0 false auto merges
+- `uv run metaspike evaluate-resolver` — exit 0, 0 false auto merges
+- `uv run pytest tests/test_evidence.py` — 27 passed in about 40 s
 
-All re-run on 2026-10-14 on the exact tree that was committed.
+Not run: `live` tests (no live call is permitted) and the four `slow` catalogue proofs
+(no catalogue or resolver code changed; last run in U5.3, 4 passed).
 
-Slow tests, run explicitly (`pytest -v -m slow tests/test_catalogue_blocking.py
-tests/test_catalogue_expansion.py`): **4 passed, 43 deselected in 1286.77s** — the
-10,394-record blocked-versus-reference proof (1,267.79 s) and the 5,000 / 10,000 /
-20,000 scale cases. No slow test was excluded. `live` tests were not run (no live
-source calls are permitted).
+Frontend: **not touched** (no file under `apps/` changed, no artifact contract changed).
+Not re-run here; last verified in U5.3 on 2026-10-13: `contract:check`, `typecheck`,
+`lint`, `test` (179 passed), `build`, all passed.
 
-Frontend (`apps/dev-ui`, no frontend change; run 2026-10-13 before the implementation
-commit, tree unchanged since): `contract:check`, `typecheck`, `lint`, `test`
-(179 passed), `build` — all passed.
+## Measured local cost
 
-A note on elapsed time: the slow proof was first attempted on 2026-10-13 and did not
-finish because the laptop, on a nearly empty battery, kept sleeping. It was re-run on
-2026-10-14 on a charged machine; the result above is that run. The benchmark table was
-measured earlier on 2026-10-13, before the battery ran down.
+Apple M3, Python 3.12.15, one run each: fifteen games on recorded inputs 1.4 s, 72 MB;
+all 234 entities as JSON 1.5 s, 87 MB; fifteen games with the synthetic scenario 7.3 s,
+95 MB; all 234 entities with a synthetic sample store about 35 s in process. Laptop
+figures only. No cloud resource was used.
 
-## Production isolation (read-only, 2026-10-14 00:44–00:46 UTC)
+## Production isolation (read-only, 2026-10-14 01:51 UTC)
 
-- `main` = `cb33198`, level with `origin/main`, clean. `product/local-ui` not merged.
-  No pull request. Last workflow run still 38104941975 (11 Oct, `main`); a push to the
-  product branch starts no workflow. `.github/` not modified.
+- `main` = `cb33198`, level with `origin/main`, clean. No pull request. Last workflow
+  run still 38104941975 (11 October, `main`).
 - Terraform state generation `1791685217422653`: unchanged. No Terraform was run.
 - Control record generation `1791684706340016`: unchanged.
 - Scheduler ENABLED, configuration unchanged; only `lastAttemptTime` differs from the
-  previous snapshot.
-- Seven jobs: image and configuration identical to the previous snapshot.
-- IAM, dataset schemas, secrets, alert policies: identical. 0 secret versions, 0
-  user-managed keys across 10 service accounts.
+  previous snapshot. Jobs, IAM, dataset schemas, secrets and alert policies identical.
+  0 secret versions; 0 user-managed keys across 10 service accounts.
 - Repository variables unchanged (`SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
   `SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`).
-- No Wikimedia, Steam or IGDB call. No job triggered. Benchmarks ran only on this
-  laptop. The portfolio repository was not touched.
-- `BROAD_DISCOVERY_ENABLED` is still `False`; `CatalogueRepository`,
-  `advance_catalogue` and `CURRENT` untouched.
+- `BROAD_DISCOVERY_ENABLED` is still `False`. No collector was activated. No Wikimedia,
+  Steam, IGDB, YouTube or Reddit request was made. The portfolio repository was not touched.
 
-## C2-F observation (read-only, 2026-10-14 00:44 UTC; separate; not altered; not judged)
+## C2-F observation (read-only, 2026-10-14 01:51 UTC; separate; not altered; not judged)
 
 | | |
 |---|---|
-| Executions since the window opened | 53; all 53 succeeded; none running |
+| Executions since the window opened | 54; all 54 succeeded; none running |
 | 12 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
 | 13 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
-| 14 October so far | 1 dispatcher (00:00) |
-| Scheduler | last attempt 2026-10-14T00:00:10Z |
+| 14 October so far | 2 dispatcher (00:00, 01:00) |
 | Warehouse rows | `collection_runs` 120, `expected_targets` 56, `period_observations` 1,624 |
 
-The one failed task in the project's execution list (`ms-wikimedia-mr9kc`, 7 October)
-predates the soak window. Two days into a seven-day window. This is not a statement
-that C2-F has passed. Nothing was triggered, restarted, cancelled or changed.
+Two days into a seven-day window. This is not a statement that C2-F has passed. Nothing
+was triggered, restarted, paused, cancelled or changed.
 
-## Production integration still deferred
+## Unfinished source integrations
 
-Nothing here is adopted in production. Production's `advance_catalogue` calls the
-blocked engine, so an image built from this branch would pick the change up; none has
-been built and none may be until review and merge after C2-F.
+- **Creator supply (YouTube):** no adapter, no policy, no fixtures. Reported as
+  `not_integrated`.
+- **Community interest (Reddit):** the same.
+- **Steam players:** the adapter, store and features exist; no real history is held.
+- **Steam News:** real coverage exists for three apps on one day, locally only.
+- **Wikimedia:** six of fifteen games recorded; 14 of 234 entities have an identifier.
 
-## Product intelligence gaps (for the next decision, not started)
+## Concrete blockers for final intelligence
 
-Performance is no longer the obvious next step. The substantive gaps are: Wikimedia
-identifiers beyond the bootstrap set (14 of 234 entities mapped), source-policy
-clearance beyond private development, source coverage and agreement (135 entities
-without any eligible monitoring source), and creator opportunity scoring.
+1. No game has two real demand families at one moment, so nothing about agreement
+   between sources can be measured yet.
+2. No creator-supply or community-interest source, and no policy for either.
+3. No opportunity score is defined: no rule for combining families or weighing demand
+   against supply. Score v0 reads pageviews alone.
+4. Steam players and Steam News clear private development only; their derived-output
+   permission is `unknown`, so nothing from them can be published as things stand.
+5. No combination rule for games with several Steam apps.
+6. Metadata history is not kept (item 2 at the top).
+7. Wikimedia identifiers exist only for the original fifteen games.
 
 ## Commits
 
-`2494916` perf: reduce redundant quarantine fingerprint hashing; then this handoff.
-Pushed to `origin/product/local-ui` only. No PR, no merge to `main`, no deployment.
+`18b72bc` feat: integrate offline multi-source game evidence; then this handoff. Pushed
+to `origin/product/local-ui` only. No PR, no merge to `main`, no deployment.
 
 ## Exact next approval required
 
-ChatGPT review of U5.3, then explicit user authorisation for whatever comes next.
+Independent ChatGPT review of U6.0, then explicit user authorisation for whatever comes
+next. The YouTube, Reddit, final scoring, deployment and public-launch checkpoints have
+not been started.
 
-STOP. No further checkpoint has been started.
+STOP.
