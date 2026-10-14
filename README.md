@@ -346,6 +346,12 @@ kept as a related product, and which monitoring sources could be asked about eac
 entity. It calls no source, stores nothing and requires every source's policy to clear
 the stated stage. See [docs/catalogue-expansion.md](docs/catalogue-expansion.md).
 
+`uv run metaspike evidence --as-of <ISO time>` reads, offline, what the given local
+inputs held about each game at that moment: its identity, each source's coverage and
+freshness, movements against each source's own history, known events, and what is
+missing. It is a private reading, not an artifact, and is never published. See
+[docs/multi-source-evidence.md](docs/multi-source-evidence.md).
+
 ## Architecture
 
 ```

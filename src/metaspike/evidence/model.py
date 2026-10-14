@@ -1,0 +1,287 @@
+"""What MetaSpike holds about one game at one moment, source by source.
+
+This is a reading, not a judgement. It puts side by side what each source says about a
+canonical game as known at `as_of`, and says plainly where a source says nothing and
+why. It computes no score of its own and weighs nothing against anything else:
+
+    catalogue metadata   who the game is. Never evidence that demand is rising.
+    demand signals       each family read against its own history by the one feature
+                         engine. Pageviews and concurrent players are never added,
+                         averaged or compared in raw units.
+    event evidence       promoted events and their timing. An announcement that was
+                         not promoted is a candidate and is only ever counted.
+    creator supply       not integrated. Reported as that, never as zero.
+    community interest   not integrated. Reported as that, never as zero.
+
+Eight states are kept apart, because each one calls for something different:
+
+    available       the source observes the game and its latest observation is current
+    stale           it has observed the game, but not recently enough
+    missing         it could observe the game and, as known at `as_of`, never has
+    inapplicable    it cannot observe this game; nothing is missing
+    unknown         whether it can observe this game is not established
+    unresolved      observations exist, and no approved rule makes one value of them
+    not_collected   nothing of this source was given to the assessment
+    not_integrated  MetaSpike has no source of this kind yet
+
+A reported value of zero is `available` with a level of zero. It is none of the others.
+
+Everything here is internal. It is not an artifact, has no place in the published
+bundle, and nothing in the publishing path reads it.
+"""
+
+from enum import StrEnum
+from typing import Final, Literal
+
+from pydantic import AwareDatetime, Field
+
+from metaspike.domain.families import SourceFamily
+from metaspike.domain.games import GameId, LifecycleState
+from metaspike.domain.model import FrozenModel
+from metaspike.domain.scores import ConfidenceResult, ScoreResult
+from metaspike.domain.source_policy import DeploymentStage, SourcePurpose
+from metaspike.events.heat import EventIntelligence
+from metaspike.events.radar import RadarItem
+from metaspike.features.aggregate import DailyAggregate, HourlyAggregate
+from metaspike.features.semantics import EntityEvidenceV2
+
+EVIDENCE_REPORT_VERSION: Final = "game_evidence_v1"
+PRIVATE_DEVELOPMENT_ONLY: Final = "private_development_only"
+
+
+class EvidenceKind(StrEnum):
+    """What a source is evidence OF. Kinds are never blended into one another."""
+
+    CATALOGUE_METADATA = "catalogue_metadata"
+    DEMAND_SIGNAL = "demand_signal"
+    EVENT_EVIDENCE = "event_evidence"
+    CREATOR_SUPPLY = "creator_supply"
+    COMMUNITY_INTEREST = "community_interest"
+
+
+class EvidenceState(StrEnum):
+    AVAILABLE = "available"
+    STALE = "stale"
+    MISSING = "missing"
+    INAPPLICABLE = "inapplicable"
+    UNKNOWN = "unknown"
+    UNRESOLVED = "unresolved"
+    NOT_COLLECTED = "not_collected"
+    NOT_INTEGRATED = "not_integrated"
+
+
+class Origin(StrEnum):
+    """Where an input came from. Stated by whoever supplies it; never inferred."""
+
+    # A response of the real source, recorded earlier and kept as a fixture.
+    RECORDED_RESPONSE = "recorded_response"
+    # A local store filled by this project's own commands on this machine.
+    LOCAL_STORE = "local_store"
+    # Invented for a test or a demonstration. Not an observation of anything.
+    SYNTHETIC = "synthetic"
+    NONE = "none"
+
+
+class InputProvenance(FrozenModel):
+    origin: Origin
+    # Where the input was read from: a fixture directory, a store, a scenario name.
+    reference: str
+    note: str = ""
+
+    @property
+    def synthetic(self) -> bool:
+        return self.origin is Origin.SYNTHETIC
+
+
+NO_INPUT = InputProvenance(origin=Origin.NONE, reference="-")
+
+
+class NativeBinding(FrozenModel):
+    """How a source's own id for the game was tied to the canonical game at `as_of`."""
+
+    source: str
+    source_native_id: str
+    # "mapping_history": a resolver binding, with its version and the moment it began.
+    # "catalogue_identifier": an identifier the bootstrap entity carries.
+    basis: Literal["mapping_history", "catalogue_identifier"]
+    mapping_version: int | None = None
+    valid_from: AwareDatetime | None = None
+    binding_ref: str | None = None
+
+
+class PolicyView(FrozenModel):
+    """What the source's own policy says about this use. Read from it, never decided here."""
+
+    source: str
+    purpose: SourcePurpose
+    stage: DeploymentStage
+    cleared_stages: tuple[DeploymentStage, ...]
+    # Whether anything computed from the source may enter a published artifact.
+    publishable: bool
+    publication_refusal: str | None = None
+    # Why the source could not be part of a public-launch configuration for this use.
+    public_launch_refusal: str | None = None
+
+
+class SourceEvidence(FrozenModel):
+    """One source's standing for one game at `as_of`."""
+
+    source: str
+    kind: EvidenceKind
+    # The independent observation process the source belongs to, where it has one.
+    family: SourceFamily | None = None
+    state: EvidenceState
+    reason: str | None = None
+    bindings: tuple[NativeBinding, ...] = ()
+    # The newest moment the source's evidence speaks for, as known at `as_of`.
+    latest_observed_at: AwareDatetime | None = None
+    freshness: str | None = None
+    provenance: InputProvenance = NO_INPUT
+    policy: PolicyView | None = None
+
+    @property
+    def usable(self) -> bool:
+        """Current evidence of something real. Synthetic evidence is never usable."""
+        return self.state is EvidenceState.AVAILABLE and not self.provenance.synthetic
+
+    @property
+    def contributes(self) -> bool:
+        """Whether anything of this source is actually in the reading for this game."""
+        return self.state in (
+            EvidenceState.AVAILABLE,
+            EvidenceState.STALE,
+            EvidenceState.UNRESOLVED,
+        )
+
+    @property
+    def restricted(self) -> bool:
+        """In the reading, and from a source whose data may not be published."""
+        return self.contributes and self.policy is not None and not self.policy.publishable
+
+
+class BoundRecord(FrozenModel):
+    """A source record bound to the game at `as_of`, with the metadata it asserts."""
+
+    source: str
+    source_id: str
+    mapping_version: int
+    valid_from: AwareDatetime
+    product_type: str | None = None
+    # Each release date exactly as the source gave it, with its own precision.
+    release_dates: tuple[str, ...] = ()
+    parent: str | None = None
+    version_parent: str | None = None
+
+
+class UnresolvedRecord(FrozenModel):
+    """A record in quarantine that names this game as a candidate. It is not bound."""
+
+    source: str
+    source_id: str
+    reason: str
+
+
+class IdentityEvidence(FrozenModel):
+    canonical_game_id: GameId
+    slug: str
+    name: str
+    lifecycle_state: LifecycleState
+    # "frozen_bootstrap": one of the original entities, whose id never changes.
+    # "local_state": read from a persisted local catalogue state.
+    # "evaluation_only": made for this evaluation and stored nowhere.
+    id_persistence: Literal["frozen_bootstrap", "local_state", "evaluation_only"]
+    bound_records: tuple[BoundRecord, ...] = ()
+    relationships: tuple[str, ...] = ()
+    unresolved_records: tuple[UnresolvedRecord, ...] = ()
+
+
+class Movement(FrozenModel):
+    """One family's recent movement against its own history. Never a cross-source figure."""
+
+    family: SourceFamily
+    source: str
+    metric: str
+    synthetic: bool
+    # False when the source's policy does not let its values be shown: the text reading
+    # then gives only the features that are relative to the source's own history.
+    levels_showable: bool
+    # Each feature an opportunity score would be allowed to read, with its value or the
+    # reason there is none.
+    features: dict[str, str]
+    # Recorded but not fit to act on under the current rule version.
+    withheld: tuple[str, ...] = ()
+    maturity: str
+    coverage: float
+
+
+class SampleCompleteness(FrozenModel):
+    """The latest whole hour and whole day of a sampled source, by the baseline rules."""
+
+    source_native_id: str
+    last_hour: HourlyAggregate
+    last_day: DailyAggregate
+    zero_reported: bool
+    current_level: int | None = None
+    current_level_observed_at: AwareDatetime | None = None
+
+
+class CandidateCounts(FrozenModel):
+    """Announcements read for the game, in counts. No title or text leaves the store."""
+
+    total: int = Field(ge=0)
+    classified: int = Field(ge=0)
+    promoted: int = Field(ge=0)
+    not_promoted: int = Field(ge=0)
+    # Candidates whose type was established and whose timing was not.
+    timing_not_established: int = Field(ge=0)
+    refusals: dict[str, int]
+
+
+class Gap(FrozenModel):
+    """Something a creator-opportunity recommendation would need and does not have."""
+
+    code: str
+    text: str
+
+
+class GameEvidence(FrozenModel):
+    canonical_game_id: GameId
+    as_of: AwareDatetime
+    identity: IdentityEvidence
+    sources: tuple[SourceEvidence, ...]
+    # The demand families under signal_semantics_v2, exactly as the engine reads them.
+    demand: EntityEvidenceV2
+    movements: tuple[Movement, ...] = ()
+    sample_completeness: tuple[SampleCompleteness, ...] = ()
+    # metaspike_score_v0 on the game's pageviews as visible at `as_of`. Unchanged.
+    score_v0: ScoreResult
+    confidence_v0: ConfidenceResult | None = None
+    events: EventIntelligence
+    upcoming: tuple[RadarItem, ...] = ()
+    candidates: CandidateCounts
+    # Independent demand families that are available now and are real observations.
+    independent_demand_families: int = Field(ge=0)
+    usable_sources: tuple[str, ...] = ()
+    restricted_sources: tuple[str, ...] = ()
+    synthetic_sources: tuple[str, ...] = ()
+    gaps: tuple[Gap, ...] = ()
+
+    def source(self, name: str) -> SourceEvidence:
+        return next(item for item in self.sources if item.source == name)
+
+
+class EvidenceReport(FrozenModel):
+    """A local, private reading. It is not an artifact and is never published."""
+
+    report_version: Literal["game_evidence_v1"] = EVIDENCE_REPORT_VERSION
+    as_of: AwareDatetime
+    stage: DeploymentStage
+    distribution: Literal["private_development_only"] = PRIVATE_DEVELOPMENT_ONLY
+    # True when any input was invented. Such a report describes no real game's state.
+    contains_synthetic: bool
+    inputs: dict[str, InputProvenance]
+    policies: tuple[PolicyView, ...]
+    games: tuple[GameEvidence, ...]
+
+    def game(self, canonical_game_id: str) -> GameEvidence:
+        return next(g for g in self.games if g.canonical_game_id == canonical_game_id)

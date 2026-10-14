@@ -6,8 +6,11 @@ import json
 import logging
 import os
 import sys
+import tempfile
+import uuid
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -55,6 +58,14 @@ from metaspike.event_sources.steam_news import (
 from metaspike.event_sources.store import EventSourceStore
 from metaspike.event_sources.summary import summarise
 from metaspike.events.store import EventStore
+from metaspike.evidence.assemble import (
+    EvidenceInputs,
+    assess_evidence,
+    publication_refusal,
+)
+from metaspike.evidence.model import NO_INPUT, InputProvenance, Origin
+from metaspike.evidence.render import render
+from metaspike.evidence.synthetic import SCENARIO_NAME, build_synthetic_scenario
 from metaspike.jobs import commands as job_commands
 from metaspike.pipeline.collection import (
     CollectionReport,
@@ -108,7 +119,7 @@ from metaspike.sources.steam_players import (
 from metaspike.sources.steam_players import (
     SOURCE_ID as STEAM_PLAYERS_SOURCE,
 )
-from metaspike.sources.wikimedia import build_client
+from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, build_client
 from metaspike.storage.base import StoragePolicyError
 from metaspike.storage.local import LocalObservationStore
 from metaspike.storage.samples import LocalSampleStore
@@ -333,6 +344,74 @@ def _parser() -> argparse.ArgumentParser:
     status.add_argument("--hours", type=int, default=24, help="window to summarise")
     status.add_argument("--json", action="store_true", help="print the status as JSON")
     status.set_defaults(handler=_sample_status)
+
+    evidence = commands.add_parser(
+        "evidence",
+        help="OFFLINE: what is held about each game at a moment, source by source",
+        description=(
+            "Read what the given local inputs held about each game as known at --as-of: "
+            "its identity, each source's coverage and freshness, movements against each "
+            "source's own history, known events, and what is missing. Offline and "
+            "read-only: no source is called, no credential is read, nothing is stored. "
+            "An input that is not given is reported as not collected. The result is a "
+            "private reading, not an artifact, and is never published."
+        ),
+    )
+    evidence.add_argument(
+        "--as-of",
+        type=datetime.fromisoformat,
+        required=True,
+        metavar="ISO-TIME",
+        help="the moment to read at, with a UTC offset; nothing later is used",
+    )
+    evidence.add_argument(
+        "--game", action="append", default=None, metavar="SLUG", help="a game; repeatable"
+    )
+    evidence.add_argument(
+        "--all", action="store_true", help="every entity, not only the bootstrap games"
+    )
+    evidence.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    evidence.add_argument(
+        "--state",
+        type=Path,
+        default=None,
+        metavar="FILE",
+        help="a local catalogue state to read (never written); default: resolve the "
+        "recorded records in memory, dated at their latest fetch",
+    )
+    evidence.add_argument(
+        "--wikimedia-replay", type=Path, default=None, metavar="DIR", help="recorded pageviews"
+    )
+    evidence.add_argument(
+        "--recorded-through",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="the last day the pageview recording holds (required with --wikimedia-replay)",
+    )
+    evidence.add_argument("--sample-store", type=Path, default=None, metavar="DIR")
+    evidence.add_argument("--events-dir", type=Path, default=None, metavar="DIR")
+    evidence.add_argument("--event-sources-dir", type=Path, default=None, metavar="DIR")
+    evidence.add_argument(
+        "--synthetic-scenario",
+        action="store_true",
+        help="use INVENTED player samples and announcements, labelled synthetic "
+        "throughout, in place of --sample-store and the event stores",
+    )
+    evidence.add_argument(
+        "--stage",
+        type=DeploymentStage,
+        choices=list(DeploymentStage),
+        default=DeploymentStage.PRIVATE_DEVELOPMENT,
+        help="every input's source must clear this stage, or the reading is refused",
+    )
+    evidence.add_argument("--json", action="store_true", help="print the report as JSON")
+    evidence.add_argument(
+        "--out", type=Path, default=None, metavar="FILE", help="also write the JSON locally"
+    )
+    evidence.set_defaults(handler=_evidence)
 
     evaluate_cmd = commands.add_parser(
         "evaluate-resolver",
@@ -1314,6 +1393,226 @@ def _sample_status(args: argparse.Namespace) -> int:
             f"{row.duplicates:>5}{row.late:>6}  {last}"
         )
     return EXIT_OK
+
+
+EVIDENCE_POLICIES: Mapping[str, SourcePolicy] = {
+    **CATALOGUE_SOURCE_POLICIES,
+    **EVENT_SOURCE_POLICIES,
+    WIKIMEDIA_PAGEVIEWS_POLICY.source: WIKIMEDIA_PAGEVIEWS_POLICY,
+    STEAM_CURRENT_PLAYERS_POLICY.source: STEAM_CURRENT_PLAYERS_POLICY,
+}
+_EVALUATION_ID_BASE = 0xE71DE9CE_0000_4000_8000_000000000000
+
+
+def _evaluation_id_factory() -> Callable[[], uuid.UUID]:
+    """Ids for entities resolved in memory for one reading: the same on every run.
+
+    They are stored nowhere and stand for nothing outside the reading, which says so
+    for each such entity. The bootstrap entities keep their own frozen ids.
+    """
+    issued = [0]
+
+    def factory() -> uuid.UUID:
+        issued[0] += 1
+        return uuid.UUID(int=_EVALUATION_ID_BASE + issued[0], version=4)
+
+    return factory
+
+
+def _evidence_state(
+    args: argparse.Namespace, records: list[SourceRecord]
+) -> tuple[CatalogueState, bool]:
+    """The catalogue state to read identity from, and whether it came from disk."""
+    require_catalogue_sources(records, CATALOGUE_SOURCE_POLICIES, args.stage)
+    if args.state is not None:
+        state = _load_local_state(args.state)
+        require_catalogue_sources(
+            records, CATALOGUE_SOURCE_POLICIES, args.stage, retained=retained_sources(state)
+        )
+        require_complete(records, known_record_keys(state))
+        return state, True
+    if not records:
+        raise ValueError("no recorded source records were found in --recorded")
+    dated = max(record.fetched_at for record in records)
+    return generate_catalogue(records, as_of=dated, id_factory=_evaluation_id_factory()), False
+
+
+def _evidence(args: argparse.Namespace) -> int:
+    """A private, offline reading of what is held about each game at one moment."""
+    as_of: datetime = args.as_of
+    if as_of.tzinfo is None:
+        return _fail(EXIT_INVALID_CATALOGUE, "--as-of must carry a UTC offset")
+    given = [args.sample_store, args.events_dir, args.event_sources_dir]
+    if args.synthetic_scenario and any(path is not None for path in given):
+        return _fail(
+            EXIT_INVALID_CATALOGUE,
+            "--synthetic-scenario replaces --sample-store, --events-dir and "
+            "--event-sources-dir; synthetic and stored evidence are never mixed",
+        )
+    if args.out is not None and _inside(args.out, DEFAULT_ARTIFACTS_DIR):
+        return _fail(
+            EXIT_SOURCE_POLICY,
+            f"{args.out} is inside the published artifacts directory; a game evidence "
+            "report is private and is never written there",
+        )
+    if (args.wikimedia_replay is None) != (args.recorded_through is None):
+        return _fail(
+            EXIT_INVALID_CATALOGUE,
+            "--wikimedia-replay and --recorded-through are given together or not at all",
+        )
+    records = _recorded(args.recorded)
+    try:
+        state, persisted = _evidence_state(args, records)
+    except (IncompleteRecords, ValueError) as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state: {error}")
+    if as_of < state.generated_at:
+        return _fail(
+            EXIT_INVALID_CATALOGUE,
+            f"--as-of ({as_of.isoformat()}) is earlier than the catalogue state "
+            f"({state.generated_at.isoformat()}); the catalogue it describes did not exist then",
+        )
+    try:
+        games = _evidence_games(args, state)
+    except ValueError as error:
+        return _fail(EXIT_INVALID_CATALOGUE, str(error))
+
+    wikimedia = None
+    pageviews = NO_INPUT
+    if args.wikimedia_replay is not None:
+        # Served from files, as the backtest reads them: the window is the recording's,
+        # and what was not yet published at --as-of is cut away when it is read. The
+        # clock is --as-of itself, so the same inputs give the same reading.
+        with replay_client(args.wikimedia_replay) as client:
+            wikimedia = collect(
+                state.catalogue,
+                default_registry(client),
+                window_ending(args.recorded_through),
+                observed_at=as_of,
+                clock=lambda: as_of,
+            )
+        pageviews = InputProvenance(
+            origin=Origin.RECORDED_RESPONSE,
+            reference=str(args.wikimedia_replay),
+            note=f"recorded through {args.recorded_through.isoformat()}",
+        )
+
+    def stores(
+        samples_dir: Path | None,
+        events_dir: Path | None,
+        sources_dir: Path | None,
+        origin: Origin,
+        note: str,
+    ) -> EvidenceInputs:
+        return EvidenceInputs(
+            state=state,
+            records=records,
+            catalogue_provenance=InputProvenance(
+                origin=Origin.RECORDED_RESPONSE,
+                reference=", ".join(str(path) for path in args.recorded),
+                note=f"state read from {args.state}" if persisted else "state resolved in memory",
+            ),
+            state_persisted=persisted,
+            stage=args.stage,
+            policies=EVIDENCE_POLICIES,
+            wikimedia=wikimedia,
+            wikimedia_provenance=pageviews,
+            samples=None
+            if samples_dir is None
+            else LocalSampleStore(samples_dir, lambda _: STEAM_CURRENT_PLAYERS_POLICY),
+            samples_provenance=NO_INPUT
+            if samples_dir is None
+            else InputProvenance(origin=origin, reference=str(samples_dir), note=note),
+            events=None if events_dir is None else EventStore(events_dir),
+            event_sources=None if sources_dir is None else EventSourceStore(sources_dir),
+            events_provenance=NO_INPUT
+            if events_dir is None and sources_dir is None
+            else InputProvenance(
+                origin=origin,
+                reference=", ".join(str(p) for p in (events_dir, sources_dir) if p is not None),
+                note=note,
+            ),
+        )
+
+    scenario: tuple[str, ...] = ()
+    if args.synthetic_scenario:
+        # Checked before anything synthetic is written, as it is again when it is read.
+        for policy, purpose in (
+            (STEAM_CURRENT_PLAYERS_POLICY, SourcePurpose.DEMAND_SIGNALS),
+            (STEAM_NEWS_POLICY, SourcePurpose.EVENT_INTELLIGENCE),
+        ):
+            refusal = policy.registration_refusal(purpose, args.stage)
+            if refusal is not None:
+                raise SourcePolicyError(f"{policy.source}: {refusal}")
+        with tempfile.TemporaryDirectory(prefix="metaspike-synthetic-") as temporary:
+            root = Path(temporary)
+            built = build_synthetic_scenario(root, state, records, as_of)
+            scenario = built.description
+            inputs = stores(
+                root / "samples",
+                root / "events",
+                root / "event-sources",
+                Origin.SYNTHETIC,
+                "invented; discarded after this run",
+            )
+            inputs = _renamed(inputs, SCENARIO_NAME)
+            report = assess_evidence(inputs, as_of, games)
+    else:
+        inputs = stores(
+            args.sample_store,
+            args.events_dir,
+            args.event_sources_dir,
+            Origin.LOCAL_STORE,
+            "whatever this machine's own commands stored there",
+        )
+        report = assess_evidence(inputs, as_of, games)
+
+    payload = report.model_dump_json(indent=1)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload + "\n", encoding="utf-8")
+    if args.json:
+        print(payload)
+    else:
+        print(render(report, scenario), end="")
+        print(f"Not publishable: {publication_refusal(report)}.")
+        if args.out is not None:
+            print(f"Local JSON: {args.out}")
+    return EXIT_OK
+
+
+def _renamed(inputs: EvidenceInputs, name: str) -> EvidenceInputs:
+    """The same inputs with the synthetic ones named by their scenario, not a temp path."""
+    return replace(
+        inputs,
+        samples_provenance=inputs.samples_provenance.model_copy(update={"reference": name}),
+        events_provenance=inputs.events_provenance.model_copy(update={"reference": name}),
+    )
+
+
+def _inside(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _evidence_games(args: argparse.Namespace, state: CatalogueState) -> list[str] | None:
+    """The games asked for, as canonical ids: named slugs, everything, or the bootstrap set."""
+    if args.all and args.game:
+        raise ValueError("--all and --game cannot be given together")
+    if args.all:
+        return None
+    by_slug = {game.slug: game.canonical_game_id for game in state.catalogue.games}
+    if args.game:
+        unknown = [slug for slug in args.game if slug not in by_slug]
+        if unknown:
+            raise ValueError(f"no game with slug: {', '.join(unknown)}")
+        return [by_slug[slug] for slug in dict.fromkeys(args.game)]
+    scope = bootstrap_scope()
+    return [
+        game.canonical_game_id for game in state.catalogue.games if game.canonical_game_id in scope
+    ]
 
 
 def _probe_igdb(client: httpx.Client, pool: LimiterPool, registry: SourceRegistry) -> None:
