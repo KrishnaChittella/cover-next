@@ -54,6 +54,14 @@ score, comment count, flair text, and whether its link points at the reserved
 read:** usernames or author ids, post bodies, comments, awards, media, profiles,
 private communities, messages.
 
+## The collection guard (U6.3)
+
+The adapter takes either an offline `RedditReplay`, which answers from recorded files
+and holds no client or transport, or a network-capable client that it accepts only if
+`REDDIT_DATA_POLICY` clears collection at a stated stage. Approval is pending, so a
+network-capable client is refused before any request, at every stage. See
+[creator-opportunity-intelligence.md](creator-opportunity-intelligence.md).
+
 ## Queries and samples
 
 A query is explicit and bounded: the canonical game, the words, a **declared scope**

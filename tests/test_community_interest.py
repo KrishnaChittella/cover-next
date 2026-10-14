@@ -38,9 +38,10 @@ from metaspike.community_sources.reddit import (
     InvalidListing,
     RedditAdapter,
     RedditPost,
+    RedditReplay,
     RequestBudget,
+    collection_refusal,
     parse_listing,
-    replay_reddit_client,
 )
 from metaspike.community_sources.store import CommunityStore
 from metaspike.community_sources.synthetic import (
@@ -126,22 +127,19 @@ def query(
 
 
 class Replay:
-    """A replay directory behind a counter of what actually went out."""
+    """An offline replay directory, which records every request it was asked."""
 
     def __init__(self, directory: Path) -> None:
-        self.requests: list[httpx.Request] = []
-        inner = replay_reddit_client(directory)
+        self.replay = RedditReplay(directory)
 
-        def handler(request: httpx.Request) -> httpx.Response:
-            self.requests.append(request)
-            return inner.send(request)
-
-        self.client = httpx.Client(transport=httpx.MockTransport(handler))
+    @property
+    def requests(self) -> list[httpx.Request]:
+        return self.replay.requests
 
     def adapter(
         self, budget: RequestBudget, moment: datetime = AS_OF, run: str = "run", **extra: object
     ) -> RedditAdapter:
-        return RedditAdapter(self.client, budget, run_id=run, now=lambda: moment, **extra)  # type: ignore[arg-type]
+        return RedditAdapter(self.replay, budget, run_id=run, now=lambda: moment, **extra)  # type: ignore[arg-type]
 
 
 # --- the listing ----------------------------------------------------------------------------
@@ -805,7 +803,8 @@ def test_reddit_data_cannot_reach_a_published_artifact() -> None:
         for p in (REPO / "src/metaspike").rglob("*.py")
         if "community_sources" in p.read_text() and "community_sources" not in p.parts
     )
-    assert users == ["cli.py", "evidence/assemble.py", "evidence/model.py"]
+    # U6.3's opportunity rubric reads community readings.
+    assert users == ["cli.py", "evidence/assemble.py", "evidence/model.py", "opportunity/rules.py"]
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):
         for path in (REPO / "src/metaspike" / area).glob("*.py"):
             assert "reddit" not in path.read_text().lower(), path
@@ -851,3 +850,99 @@ def test_the_command_demonstrates_community_interest_offline(
     assert "--community-dir" in options
     for word in ("--trust", "--verified", "--live", "--reddit-token", "--client-secret"):
         assert word not in options
+
+
+# --- U6.3: no request reaches Reddit while access is pending -------------------------------
+
+
+def test_a_network_capable_client_cannot_send_reddit_requests_while_access_is_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[httpx.Request] = []
+
+    def anything(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(200, json=listing([child("real01")]))
+
+    def no_socket(*_: object, **__: object) -> None:
+        raise AssertionError("a Reddit request tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", no_socket)
+    # An ordinary client, and a client whose transport would answer anything: both are
+    # refused before a single request, at every stage, because approval is pending.
+    capable = [httpx.Client(), httpx.Client(transport=httpx.MockTransport(anything))]
+    for client in capable:
+        for stage in DeploymentStage:
+            with pytest.raises(SourcePolicyError, match="required approval has not been granted"):
+                RedditAdapter(
+                    client,
+                    RequestBudget(5),
+                    run_id="r",
+                    policy=REDDIT_DATA_POLICY,
+                    stage=stage,
+                )
+        # Without a policy and a stage it is not even considered.
+        with pytest.raises(SourcePolicyError, match="needs Reddit's source policy"):
+            RedditAdapter(client, RequestBudget(5), run_id="r")
+        # Another source's policy is not Reddit's.
+        with pytest.raises(SourcePolicyError, match="not reddit_data"):
+            RedditAdapter(
+                client,
+                RequestBudget(5),
+                run_id="r",
+                policy=cli.EVIDENCE_POLICIES["wikimedia_pageviews"],
+                stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+            )
+    assert sent == []
+    assert collection_refusal(REDDIT_DATA_POLICY, DeploymentStage.PRIVATE_DEVELOPMENT) == (
+        "policy does not permit collection (required approval has not been granted)"
+    )
+    # Calling the label "synthetic" changes nothing: the check is on the policy, and the
+    # collector cannot be reached with a network client at all.
+    synthetic_label = InputProvenance(origin=Origin.SYNTHETIC, reference="real data, honestly")
+    assert synthetic_label.synthetic  # a label the adapter never looks at
+    # A policy that cleared collection would let a network client be built. The check is
+    # the policy, not the client.
+    approved = REDDIT_DATA_POLICY.model_copy(update={"approval_status": ApprovalStatus.APPROVED})
+    built = RedditAdapter(
+        httpx.Client(transport=httpx.MockTransport(anything)),
+        RequestBudget(1),
+        run_id="r",
+        policy=approved,
+        stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+    )
+    assert (
+        not built.offline
+        and collection_refusal(approved, DeploymentStage.PRIVATE_DEVELOPMENT) is None
+    )
+    # And it would refuse again, before sending, at a stage the approved policy does not clear.
+    later = RedditAdapter(
+        httpx.Client(transport=httpx.MockTransport(anything)),
+        RequestBudget(1),
+        run_id="r",
+        policy=approved,
+        stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+    )
+    later._stage = DeploymentStage.PUBLIC_LAUNCH  # as if the stage changed underneath it
+    with pytest.raises(SourcePolicyError):
+        later.search(query(), 0, None)
+    assert sent == []
+    # The approved copy above exists only in this test; the real policy is unchanged.
+    assert REDDIT_DATA_POLICY.approval_status is ApprovalStatus.PENDING
+
+    # The offline replay still works, deterministically, with no network at all.
+    _listing(
+        tmp_path, "a", "/r/playrust/search", "Rust", [_Post("p1", "playrust", "Rust", AS_OF - HOUR)]
+    )
+    first, second = CommunityStore(tmp_path / "one"), CommunityStore(tmp_path / "two")
+    for store in (first, second):
+        collect_community_interest(Replay(tmp_path).adapter(RequestBudget(1)), [query()], store)
+    assert [f.model_dump_json() for f in first.listings()] == [
+        f.model_dump_json() for f in second.listings()
+    ]
+    assert Replay(tmp_path).adapter(RequestBudget(1)).offline
+    # The replay holds no client or transport: it cannot reach anything.
+    assert not any(
+        isinstance(v, httpx.Client | httpx.BaseTransport)
+        for v in vars(RedditReplay(tmp_path)).values()
+    )

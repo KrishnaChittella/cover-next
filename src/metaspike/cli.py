@@ -46,6 +46,7 @@ from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
+from metaspike.domain.timeseries import Granularity
 from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1
 from metaspike.event_sources.ingest import IngestReport, ingest
 from metaspike.event_sources.registry import (
@@ -71,14 +72,22 @@ from metaspike.evidence.assemble import (
 from metaspike.evidence.model import NO_INPUT, InputProvenance, Origin
 from metaspike.evidence.provenance import local_store_provenance, recording_provenance
 from metaspike.evidence.render import render
-from metaspike.evidence.synthetic import SCENARIO_NAME, build_synthetic_scenario
+from metaspike.evidence.synthetic import (
+    PAGEVIEW_PATTERNS,
+    SCENARIO_NAME,
+    build_synthetic_scenario,
+    write_synthetic_pageviews,
+)
 from metaspike.jobs import commands as job_commands
+from metaspike.opportunity.render import render_shortlist
+from metaspike.opportunity.rules import shortlist as opportunity_shortlist
 from metaspike.pipeline.collection import (
     CollectionReport,
     collect,
     latest_complete_day,
     window_ending,
 )
+from metaspike.pipeline.normalize import latest_due_period
 from metaspike.pipeline.run import (
     CollectionFailedError,
     RunResult,
@@ -426,6 +435,12 @@ def _parser() -> argparse.ArgumentParser:
         choices=list(DeploymentStage),
         default=DeploymentStage.PRIVATE_DEVELOPMENT,
         help="every input's source must clear this stage, or the reading is refused",
+    )
+    evidence.add_argument(
+        "--opportunities",
+        action="store_true",
+        help="read the evidence through creator_opportunity_rules_v1 and print a "
+        "private, explained shortlist instead of the evidence report",
     )
     evidence.add_argument("--json", action="store_true", help="print the report as JSON")
     evidence.add_argument(
@@ -1589,9 +1604,43 @@ def _evidence(args: argparse.Namespace) -> int:
             named = {
                 game.slug: (game.canonical_game_id, game.name) for game in state.catalogue.games
             }
+            built_pages: tuple[str, ...] = ()
+            if args.wikimedia_replay is None:
+                # No recording asked for: invented pageviews, labelled as invented.
+                due = latest_due_period(
+                    Granularity.DAILY,
+                    as_of,
+                    WIKIMEDIA_PAGEVIEWS_POLICY.operations.expected_publication_lag,
+                ).date()
+                articles = {
+                    identifier.value: PAGEVIEW_PATTERNS[game.slug]
+                    for game in state.catalogue.games
+                    if game.slug in PAGEVIEW_PATTERNS
+                    for identifier in game.source_identifiers
+                    if identifier.source == WIKIMEDIA_PAGEVIEWS_POLICY.source
+                }
+                built_pages = tuple(write_synthetic_pageviews(root / "pageviews", articles, due))
+                with replay_client(root / "pageviews") as client:
+                    wikimedia = collect(
+                        state.catalogue,
+                        default_registry(client),
+                        window_ending(due),
+                        observed_at=as_of,
+                        clock=lambda: as_of,
+                    )
+                pageviews = InputProvenance(
+                    origin=Origin.SYNTHETIC,
+                    reference=SCENARIO_NAME,
+                    note="invented; discarded after this run",
+                )
             creators = build_synthetic_creator_supply(root, named, as_of)
             communities = build_synthetic_community(root, named, as_of)
-            scenario = (*built.description, *creators.description, *communities.description)
+            scenario = (
+                *built_pages,
+                *built.description,
+                *creators.description,
+                *communities.description,
+            )
             inputs = stores(
                 root / "samples",
                 root / "events",
@@ -1612,6 +1661,18 @@ def _evidence(args: argparse.Namespace) -> int:
         )
         report = assess_evidence(inputs, as_of, games)
 
+    if args.opportunities:
+        found = opportunity_shortlist(report)
+        listed = found.model_dump_json(indent=1)
+        if args.out is not None:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(listed + "\n", encoding="utf-8")
+        if args.json:
+            print(listed)
+        else:
+            print(render_shortlist(found, scenario), end="")
+            print(f"Not publishable: {publication_refusal(report)}.")
+        return EXIT_OK
     payload = report.model_dump_json(indent=1)
     if args.out is not None:
         args.out.parent.mkdir(parents=True, exist_ok=True)

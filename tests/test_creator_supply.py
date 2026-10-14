@@ -1287,6 +1287,7 @@ def test_youtube_data_cannot_reach_a_published_artifact() -> None:
         "community_sources/reading.py",
         "evidence/assemble.py",
         "evidence/model.py",
+        "opportunity/rules.py",  # U6.3 reads creator-supply readings
     ]
     # No job, schedule or warehouse table collects it.
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):

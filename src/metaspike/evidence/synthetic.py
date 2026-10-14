@@ -23,7 +23,7 @@ game, because a sample belongs to the entity its id was bound to when it was obs
 import json
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from metaspike.catalogue.eligibility import (
@@ -58,6 +58,52 @@ _NOTE = (
     "SYNTHETIC. Written by MetaSpike's synthetic evidence scenario. Not a recording of "
     "any Steam response; every title, id and URL here is invented."
 )
+
+
+# How each game's invented pageviews end: a sharp rise, a sharp fall, or nothing.
+PAGEVIEW_PATTERNS: dict[str, str] = {
+    "dota-2": "rising",
+    "rust": "rising",
+    "counter-strike-2": "falling",
+    "no-mans-sky": "flat",
+    "elden-ring": "flat",
+}
+
+
+def write_synthetic_pageviews(
+    directory: Path, articles: dict[str, str], through: date
+) -> list[str]:
+    """Invented daily pageviews in the shape the Wikimedia replay reads. SYNTHETIC.
+
+    `articles` maps an article title to a pattern in `PAGEVIEW_PATTERNS`. Ninety days
+    ending on `through`, steady with a weekly rhythm, then the pattern over the last
+    three days. Nothing here is a recording of Wikimedia.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for article, pattern in sorted(articles.items()):
+        items = []
+        for offset in range(90):
+            day = through - timedelta(days=89 - offset)
+            base = 1000 + 60 * (day.weekday() % 3)
+            if offset >= 87 and pattern == "rising":
+                base *= 4
+            elif offset >= 87 and pattern == "falling":
+                base //= 5
+            items.append(
+                {
+                    "project": "en.wikipedia",
+                    "article": article,
+                    "granularity": "daily",
+                    "timestamp": f"{day:%Y%m%d}00",
+                    "access": "all-access",
+                    "agent": "user",
+                    "views": base,
+                }
+            )
+        (directory / f"{article}.json").write_text(json.dumps({"items": items}), encoding="utf-8")
+        lines.append(f"{article}: synthetic pageviews ({pattern})")
+    return lines
 
 
 @dataclass(frozen=True)

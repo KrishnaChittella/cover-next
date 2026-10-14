@@ -31,7 +31,12 @@ def collect_community_interest(
     *,
     max_pages: int = 1,
 ) -> CommunityCollection:
-    """Run each query once. Policy is the caller's: see `require_community_input`."""
+    """Run each query once.
+
+    The adapter decides whether anything may be sent: an offline replay always, a
+    network-capable client only when Reddit's policy clears collection, which it does
+    not while access is pending. That check happens before any request.
+    """
     if not 1 <= max_pages <= MAX_PAGES_PER_QUERY:
         raise ValueError(f"max_pages must be between 1 and {MAX_PAGES_PER_QUERY}")
     ids = [query.query_id for query in queries]

@@ -360,6 +360,9 @@ MetaSpike has never called YouTube; see
 `--synthetic-scenario` or `--community-dir` it also carries a community-interest sample
 from Reddit-shaped posts, with themes and candidate angles; MetaSpike has never called
 Reddit; see [docs/reddit-community-interest.md](docs/reddit-community-interest.md).
+`--opportunities` reads the same evidence through `creator_opportunity_rules_v1` and
+prints a private, explained shortlist; on today's real data it justifies nothing. See
+[docs/creator-opportunity-intelligence.md](docs/creator-opportunity-intelligence.md).
 
 ## Architecture
 

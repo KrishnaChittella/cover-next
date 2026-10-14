@@ -58,9 +58,11 @@ from metaspike.domain.source_policy import (
     Requirement,
     SourceOperations,
     SourcePolicy,
+    SourcePurpose,
     StageClearance,
 )
 from metaspike.sources.credentials import Secret
+from metaspike.sources.registry import SourcePolicyError
 
 SOURCE_ID: Final = "reddit_data"
 API_HOST: Final = "oauth.reddit.com"
@@ -388,19 +390,83 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+class RedditReplay:
+    """Recorded-shaped answers from a directory, and nothing else. OFFLINE ONLY.
+
+    It holds no HTTP client and no transport, so it cannot reach a network: a request
+    is answered from the file whose `request` names the same path, `q` and `after`, or
+    with a transport error when there is none. A file's name plays no part, and nothing
+    here says whether the files are real: that is the evidence layer's question.
+    """
+
+    def __init__(self, recordings: Path) -> None:
+        self._answers: dict[tuple[str, str, str], tuple[int, dict[str, str], object]] = {}
+        self.requests: list[httpx.Request] = []
+        for path in sorted(recordings.glob("*.json")):
+            recorded = json.loads(path.read_text(encoding="utf-8"))
+            request = recorded["request"]
+            key = (request["path"], request["q"], request.get("after", ""))
+            if key in self._answers:
+                raise ValueError(f"{path.name}: a second recording answers the same request")
+            self._answers[key] = (recorded["status"], recorded.get("headers", {}), recorded["body"])
+
+    def answer(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        if request.url.host != API_HOST:
+            raise httpx.ConnectError("replay: unexpected host", request=request)
+        params = request.url.params
+        key = (request.url.path, params.get("q", ""), params.get("after", ""))
+        if key not in self._answers:
+            raise httpx.ConnectError("replay: no recording for this request", request=request)
+        status, headers, body = self._answers[key]
+        return httpx.Response(status, json=body, headers=headers, request=request)
+
+
+def collection_refusal(policy: SourcePolicy, stage: DeploymentStage) -> str | None:
+    """Why requests may not be sent to Reddit at `stage`, or None if they may."""
+    if policy.source != SOURCE_ID:
+        return f"the policy given is for '{policy.source}', not {SOURCE_ID}"
+    return policy.registration_refusal(SourcePurpose.COMMUNITY_INTEREST, stage)
+
+
 class RedditAdapter:
-    """Listing searches over a client it is handed. One attempt each. Replay only today."""
+    """Listing searches. One attempt each.
+
+    Two ways to answer, and only two:
+
+        RedditReplay    offline; answers from recorded files; always allowed
+        httpx.Client    can reach the network; allowed ONLY if Reddit's source policy
+                        clears collection at the stated stage. Approval is pending, so
+                        today it never does, and the adapter refuses to be built.
+
+    The check is made when the adapter is built and again before every request, so no
+    request can leave while the policy refuses. Nothing about the data, its labels or
+    its files can lift it: only the policy can.
+    """
 
     def __init__(
         self,
-        client: httpx.Client,
+        source: "httpx.Client | RedditReplay",
         budget: RequestBudget,
         *,
         run_id: str,
         now: Callable[[], datetime] = _utc_now,
         token: Secret | None = None,
+        policy: SourcePolicy | None = None,
+        stage: DeploymentStage | None = None,
     ) -> None:
-        self._client = client
+        if not isinstance(source, RedditReplay):
+            if policy is None or stage is None:
+                raise SourcePolicyError(
+                    f"{SOURCE_ID}: a network-capable client needs Reddit's source policy and "
+                    "a stated stage, and neither was given"
+                )
+            refusal = collection_refusal(policy, stage)
+            if refusal is not None:
+                raise SourcePolicyError(f"{SOURCE_ID}: {refusal}")
+        self._source = source
+        self._policy = policy
+        self._stage = stage
         self._budget = budget
         self._run_id = run_id
         self._now = now
@@ -413,6 +479,24 @@ class RedditAdapter:
     @property
     def budget(self) -> RequestBudget:
         return self._budget
+
+    @property
+    def offline(self) -> bool:
+        return isinstance(self._source, RedditReplay)
+
+    def _send(
+        self, url: str, parameters: dict[str, str | int], headers: dict[str, str]
+    ) -> httpx.Response:
+        if isinstance(self._source, RedditReplay):
+            request = httpx.Request("GET", url, params=parameters, headers=headers)
+            return self._source.answer(request)
+        # Checked again here: nothing reaches the client unless the policy clears it.
+        if self._policy is None or self._stage is None:
+            raise SourcePolicyError(f"{SOURCE_ID}: no policy for a network request")
+        refusal = collection_refusal(self._policy, self._stage)
+        if refusal is not None:
+            raise SourcePolicyError(f"{SOURCE_ID}: {refusal}")
+        return self._source.get(url, params=parameters, headers=headers)
 
     def search(self, query: CommunityQuery, page_index: int, after: str | None) -> ListingFetch:
         retrieved_at = self._now()
@@ -435,7 +519,7 @@ class RedditAdapter:
         if self._token is not None:
             headers["Authorization"] = f"Bearer {self._token.reveal()}"
         try:
-            response = self._client.get(url, params=parameters, headers=headers)
+            response = self._send(url, parameters, headers)
         except httpx.HTTPError:
             return ListingFetch(
                 **base, status=FetchStatus.FAILED, error_code=SourceErrorCode.NETWORK_ERROR
@@ -479,32 +563,3 @@ class RedditAdapter:
             rejected=parsed.rejected,
             next_after=parsed.after,
         )
-
-
-def replay_reddit_client(recordings: Path) -> httpx.Client:
-    """Serve recorded-shaped answers. No request leaves the machine.
-
-    Each file holds `{"request": {"path", "q", "after"?}, "status", "headers"?, "body"}`
-    and answers the request with the same path, `q` and `after`. A file's name plays no
-    part. An unrecorded request gets a transport error: never an invented empty listing.
-    """
-    answers: dict[tuple[str, str, str], tuple[int, dict[str, str], object]] = {}
-    for path in sorted(recordings.glob("*.json")):
-        recorded = json.loads(path.read_text(encoding="utf-8"))
-        request = recorded["request"]
-        key = (request["path"], request["q"], request.get("after", ""))
-        if key in answers:
-            raise ValueError(f"{path.name}: a second recording answers the same request")
-        answers[key] = (recorded["status"], recorded.get("headers", {}), recorded["body"])
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        if request.url.host != API_HOST:
-            raise httpx.ConnectError("replay: unexpected host", request=request)
-        params = request.url.params
-        key = (request.url.path, params.get("q", ""), params.get("after", ""))
-        if key not in answers:
-            raise httpx.ConnectError("replay: no recording for this request", request=request)
-        status, headers, body = answers[key]
-        return httpx.Response(status, json=body, headers=headers)
-
-    return httpx.Client(transport=httpx.MockTransport(handler))

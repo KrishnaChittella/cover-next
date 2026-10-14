@@ -29,8 +29,8 @@ from metaspike.community_sources.reddit import (
     CommunityQuery,
     CommunityScope,
     RedditAdapter,
+    RedditReplay,
     RequestBudget,
-    replay_reddit_client,
 )
 from metaspike.community_sources.store import CommunityStore
 
@@ -253,9 +253,10 @@ def build_synthetic_community(
     def collect(
         run: str, directory: Path, moment: datetime, queries: list[CommunityQuery], pages: int
     ) -> None:
-        with replay_reddit_client(directory) as client:
-            adapter = RedditAdapter(client, RequestBudget(10), run_id=run, now=lambda: moment)
-            collect_community_interest(adapter, queries, store, max_pages=pages)
+        adapter = RedditAdapter(
+            RedditReplay(directory), RequestBudget(10), run_id=run, now=lambda: moment
+        )
+        collect_community_interest(adapter, queries, store, max_pages=pages)
 
     collect(
         "synthetic-run-1",
