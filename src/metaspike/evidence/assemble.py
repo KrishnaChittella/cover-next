@@ -66,10 +66,17 @@ from metaspike.evidence.model import (
     InputProvenance,
     Movement,
     NativeBinding,
+    Origin,
     PolicyView,
     SampleCompleteness,
     SourceEvidence,
     UnresolvedRecord,
+)
+from metaspike.evidence.provenance import (
+    detected_synthetic,
+    has_synthetic_run,
+    is_reserved_reference,
+    require_honest,
 )
 from metaspike.features.access import READABLE_FEATURES, Consumer, usable_features
 from metaspike.features.aggregate import current_level, daily_aggregates, hourly_aggregates
@@ -90,7 +97,9 @@ from metaspike.pipeline.signal_features import (
     STEAM_SOURCE,
     WIKIMEDIA_SOURCE,
     last_complete_hour,
+    steam_config,
     steam_family_v2,
+    steam_slot_window,
     wikimedia_family_v2,
 )
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
@@ -140,6 +149,10 @@ NEVER_SAMPLED_REASON = "eligible, and no sample of it had been stored by this mo
 NO_SAMPLE_STORE_REASON = "no sample store was given to this assessment"
 NO_PAGEVIEWS_REASON = "no pageview input was given to this assessment"
 NO_EVENT_STORE_REASON = "no event store was given to this assessment"
+CONTENT_NOT_HELD_REASON = (
+    "bound to the game at this moment, but no version of the record fetched by then is "
+    "held; what it said is not known, and nothing is taken from a later version"
+)
 NOT_INTEGRATED_REASON = "MetaSpike has no source of this kind yet; this is not a zero"
 
 
@@ -313,6 +326,7 @@ class _Assessment:
                     source_id=binding.key.source_id,
                     mapping_version=binding.mapping_version,
                     valid_from=binding.valid_from,
+                    content_known=record is not None,
                     product_type=record.product_type.value if record else None,
                     release_dates=tuple(
                         dict.fromkeys(
@@ -360,8 +374,21 @@ class _Assessment:
             for key in (SourceRecordKey(source=source, source_id=r.source_id) for r in bound)
             if key in self.by_key
         ]
-        if bound:
+        held = [record for record in bound if record.content_known]
+        reason: str | None
+        if bound and len(held) == len(bound):
             state, reason = EvidenceState.AVAILABLE, None
+        elif held:
+            # Something is known, and the reading says how much is not.
+            state = EvidenceState.AVAILABLE
+            reason = (
+                f"{len(bound) - len(held)} of {len(bound)} bound record(s) have no content "
+                "held as of this moment"
+            )
+        elif bound:
+            # A binding says which record stands for the game. It does not say what the
+            # record said: that is known only from a version fetched by this moment.
+            state, reason = EvidenceState.MISSING, CONTENT_NOT_HELD_REASON
         elif waiting:
             state = EvidenceState.UNRESOLVED
             reason = (
@@ -469,6 +496,52 @@ class _Assessment:
         }
         return MappingHistory(bindings=tuple(b for b in bindings if b.key in apps))
 
+    def samples_provenance(self, canonical_game_id: str) -> InputProvenance:
+        """The sample input's provenance for this game, corrected by what is stored.
+
+        A sample the synthetic scenario wrote carries its run id. If any sample that
+        could be read for this game does, the game's player evidence is synthetic,
+        whatever the input was called when it was handed over.
+        """
+        declared = self.inputs.samples_provenance
+        store = self.inputs.samples
+        if store is None or declared.synthetic:
+            return declared
+        window = steam_slot_window(steam_config(), self.as_of)
+        reading = TimeWindow(start=window.start, end=Granularity.FIFTEEN_MINUTES.floor(self.as_of))
+        for target in self.targets.get(canonical_game_id, ()):
+            attempts = store.attempts(STEAM_SLOTS, target.source_native_id, reading, self.as_of)
+            if has_synthetic_run(attempt.collection_run_id for attempt in attempts):
+                return detected_synthetic(
+                    declared, "its samples carry the synthetic scenario's run id"
+                )
+        return declared
+
+    def events_provenance(self, canonical_game_id: str) -> InputProvenance:
+        """The event input's provenance for this game, corrected by what is stored.
+
+        An announcement written for a test points at the reserved `.invalid` domain.
+        """
+        declared = self.inputs.events_provenance
+        if declared.synthetic or declared.origin is Origin.NONE:
+            return declared
+        references = [
+            candidate.reference
+            for candidate in self.candidates
+            if candidate.canonical_game_id == canonical_game_id
+        ]
+        references += [
+            reference
+            for record in self.event_records
+            if record.canonical_game_id == canonical_game_id
+            for reference in record.references
+        ]
+        if any(is_reserved_reference(reference) for reference in references):
+            return detected_synthetic(
+                declared, "its announcements point at the reserved .invalid domain"
+            )
+        return declared
+
     def completeness(self, canonical_game_id: str) -> tuple[SampleCompleteness, ...]:
         """The last whole hour and whole day of each app, for slots bound to the game then."""
         store = self.inputs.samples
@@ -547,6 +620,7 @@ class _Assessment:
                         source=item.signal.source,
                         metric=item.signal.metric,
                         synthetic=provenance.synthetic,
+                        standing=provenance.standing,
                         levels_showable=self.view(item.signal.source).publishable,
                         features={
                             name: _feature(value)
@@ -567,6 +641,7 @@ class _Assessment:
         game: CanonicalGame,
         eligibility: SteamEligibility,
         bindings: tuple[NativeBinding, ...],
+        provenance: InputProvenance,
     ) -> SourceEvidence:
         source = STEAM_NEWS_SOURCE
         latest: datetime | None = None
@@ -600,7 +675,7 @@ class _Assessment:
             reason=reason,
             bindings=bindings,
             latest_observed_at=latest,
-            provenance=self.inputs.events_provenance if state in _READ_FROM_INPUT else NO_INPUT,
+            provenance=provenance if state in _READ_FROM_INPUT else NO_INPUT,
             policy=self.view(source),
         )
 
@@ -645,6 +720,8 @@ class _Assessment:
                 ),
             )
         )
+        sampled = self.samples_provenance(game_id)
+        announced = self.events_provenance(game_id)
         readers, pageviews, readers_state, readers_reason = self.pageviews_reading(game)
         players, players_state, players_reason = self.players_reading(eligibility)
         demand = entity_evidence_v2(game_id, as_of, (readers, players))
@@ -669,28 +746,34 @@ class _Assessment:
                 STEAM_SOURCE,
                 players,
                 apps,
-                inputs.samples_provenance,
+                sampled,
                 players_state,
                 players_reason,
             ),
-            self.event_source(game, eligibility, apps),
+            self.event_source(game, eligibility, apps, announced),
             _not_integrated(
                 CREATOR_SUPPLY, EvidenceKind.CREATOR_SUPPLY, SourceFamily.CREATOR_SUPPLY
             ),
             _not_integrated(COMMUNITY_INTEREST, EvidenceKind.COMMUNITY_INTEREST, None),
         )
-        independent = sum(
-            1 for item in sources if item.kind is EvidenceKind.DEMAND_SIGNAL and item.usable
+        demand_sources = [item for item in sources if item.kind is EvidenceKind.DEMAND_SIGNAL]
+        # Confirmed means current AND verified. The engine's own breadth, in `demand`,
+        # counts whatever is current; this is the count a reader may rely on.
+        verified = tuple(item.family for item in demand_sources if item.usable and item.family)
+        unconfirmed = tuple(
+            item.family
+            for item in demand_sources
+            if item.state is EvidenceState.AVAILABLE and not item.usable and item.family
         )
+        independent = len(verified)
+        news = sources[4]
         return GameEvidence(
             canonical_game_id=game_id,
             as_of=as_of,
             identity=identity,
             sources=sources,
             demand=demand,
-            movements=self.movements(
-                ((readers, inputs.wikimedia_provenance), (players, inputs.samples_provenance))
-            ),
+            movements=self.movements(((readers, inputs.wikimedia_provenance), (players, sampled))),
             sample_completeness=self.completeness(game_id),
             score_v0=scored.score,
             confidence_v0=scored.confidence,
@@ -702,9 +785,15 @@ class _Assessment:
             ),
             candidates=self.candidate_counts(game_id),
             independent_demand_families=independent,
+            verified_demand_families=verified,
+            unconfirmed_demand_families=unconfirmed,
+            events_verified=(
+                events.availability is EventAvailability.AVAILABLE and news.provenance.verified
+            ),
             usable_sources=tuple(item.source for item in sources if item.usable),
             restricted_sources=tuple(item.source for item in sources if item.restricted),
             synthetic_sources=tuple(item.source for item in sources if item.provenance.synthetic),
+            unverified_sources=tuple(item.source for item in sources if item.provenance.unverified),
             gaps=_gaps(sources, identity, events, independent),
         )
 
@@ -724,8 +813,11 @@ def _valid_from(state: CatalogueState, target: SamplingTarget, as_of: datetime) 
 
 
 def _standing(item: SourceEvidence) -> str:
-    synthetic = " but SYNTHETIC, so it counts for nothing" if item.provenance.synthetic else ""
-    return item.state.value + synthetic
+    if item.provenance.synthetic:
+        return f"{item.state.value} but SYNTHETIC, so it counts for nothing"
+    if item.provenance.unverified:
+        return f"{item.state.value} but of UNVERIFIED origin, so it is not counted"
+    return item.state.value
 
 
 def _not_integrated(source: str, kind: EvidenceKind, family: SourceFamily | None) -> SourceEvidence:
@@ -770,7 +862,7 @@ def _gaps(
         gaps.append(
             Gap(
                 code="no_current_demand_evidence",
-                text="No demand family has a current, real observation of this game: "
+                text="No demand family has a current, verified observation of this game: "
                 + "; ".join(f"{item.source} is {_standing(item)}" for item in demand)
                 + ".",
             )
@@ -815,6 +907,29 @@ def _gaps(
                 ),
             )
         )
+    news = next(item for item in sources if item.kind is EvidenceKind.EVENT_EVIDENCE)
+    if events.availability is EventAvailability.AVAILABLE and not news.provenance.verified:
+        gaps.append(
+            Gap(
+                code="events_not_verified",
+                text=(
+                    "The event intelligence above was computed from announcements that are "
+                    f"{news.provenance.standing.value}. It is a diagnostic of the pipeline, "
+                    "not a verified real-world event."
+                ),
+            )
+        )
+    unverified = [item.source for item in sources if item.provenance.unverified]
+    if unverified:
+        gaps.append(
+            Gap(
+                code="unverified_evidence",
+                text=(
+                    "Read from an input whose origin is not established, so not counted "
+                    "as an observation of this game: " + ", ".join(unverified) + "."
+                ),
+            )
+        )
     synthetic = [item.source for item in sources if item.provenance.synthetic]
     if synthetic:
         gaps.append(
@@ -837,6 +952,13 @@ def assess_evidence(
     if as_of.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
     require_sources(inputs)
+    for claimed in (
+        inputs.catalogue_provenance,
+        inputs.wikimedia_provenance,
+        inputs.samples_provenance,
+        inputs.events_provenance,
+    ):
+        require_honest(claimed)
     if as_of < inputs.state.generated_at:
         raise ValueError(
             f"as_of ({as_of.isoformat()}) is earlier than the catalogue state "
@@ -852,16 +974,19 @@ def assess_evidence(
         STEAM_SOURCE: inputs.samples_provenance,
         STEAM_NEWS_SOURCE: inputs.events_provenance,
     }
+    games = tuple(assessment.game(catalogue.get(game_id)) for game_id in wanted)
     return EvidenceReport(
         as_of=as_of,
         stage=inputs.stage,
-        contains_synthetic=any(item.synthetic for item in provenance.values()),
+        contains_synthetic=any(item.synthetic for item in provenance.values())
+        or any(game.synthetic_sources for game in games),
+        contains_unverified=any(item.unverified for item in provenance.values()),
         inputs=provenance,
         policies=tuple(
             policy_view(_policy(inputs, source), purpose, inputs.stage)
             for source, purpose in PURPOSES.items()
         ),
-        games=tuple(assessment.game(catalogue.get(game_id)) for game_id in wanted),
+        games=games,
     )
 
 
@@ -879,4 +1004,6 @@ def publication_refusal(report: EvidenceReport) -> str:
         )
     if report.contains_synthetic:
         reasons.append("it holds synthetic evidence")
+    if report.contains_unverified:
+        reasons.append("it holds evidence whose origin is not established")
     return "a game evidence report is never published: " + "; ".join(reasons)

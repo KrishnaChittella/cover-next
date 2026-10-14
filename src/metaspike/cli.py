@@ -10,7 +10,6 @@ import tempfile
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import perf_counter
@@ -64,6 +63,7 @@ from metaspike.evidence.assemble import (
     publication_refusal,
 )
 from metaspike.evidence.model import NO_INPUT, InputProvenance, Origin
+from metaspike.evidence.provenance import local_store_provenance, recording_provenance
 from metaspike.evidence.render import render
 from metaspike.evidence.synthetic import SCENARIO_NAME, build_synthetic_scenario
 from metaspike.jobs import commands as job_commands
@@ -1490,27 +1490,33 @@ def _evidence(args: argparse.Namespace) -> int:
                 observed_at=as_of,
                 clock=lambda: as_of,
             )
-        pageviews = InputProvenance(
-            origin=Origin.RECORDED_RESPONSE,
-            reference=str(args.wikimedia_replay),
-            note=f"recorded through {args.recorded_through.isoformat()}",
+        # Verified only if the directory's content matches a pinned recording.
+        pageviews = recording_provenance(
+            [args.wikimedia_replay], f"recorded through {args.recorded_through.isoformat()}"
         )
 
     def stores(
         samples_dir: Path | None,
         events_dir: Path | None,
         sources_dir: Path | None,
-        origin: Origin,
-        note: str,
+        synthetic: bool,
     ) -> EvidenceInputs:
+        def origin_of(reference: str) -> InputProvenance:
+            if synthetic:
+                return InputProvenance(
+                    origin=Origin.SYNTHETIC,
+                    reference=SCENARIO_NAME,
+                    note="invented; discarded after this run",
+                )
+            return local_store_provenance(reference)
+
         return EvidenceInputs(
             state=state,
             records=records,
-            catalogue_provenance=InputProvenance(
-                origin=Origin.RECORDED_RESPONSE,
-                reference=", ".join(str(path) for path in args.recorded),
-                note=f"state read from {args.state}" if persisted else "state resolved in memory",
-            ),
+            # A local state file is a local store: its bindings are read as found.
+            catalogue_provenance=local_store_provenance(str(args.state))
+            if persisted
+            else recording_provenance(args.recorded, "state resolved in memory"),
             state_persisted=persisted,
             stage=args.stage,
             policies=EVIDENCE_POLICIES,
@@ -1519,18 +1525,12 @@ def _evidence(args: argparse.Namespace) -> int:
             samples=None
             if samples_dir is None
             else LocalSampleStore(samples_dir, lambda _: STEAM_CURRENT_PLAYERS_POLICY),
-            samples_provenance=NO_INPUT
-            if samples_dir is None
-            else InputProvenance(origin=origin, reference=str(samples_dir), note=note),
+            samples_provenance=NO_INPUT if samples_dir is None else origin_of(str(samples_dir)),
             events=None if events_dir is None else EventStore(events_dir),
             event_sources=None if sources_dir is None else EventSourceStore(sources_dir),
             events_provenance=NO_INPUT
             if events_dir is None and sources_dir is None
-            else InputProvenance(
-                origin=origin,
-                reference=", ".join(str(p) for p in (events_dir, sources_dir) if p is not None),
-                note=note,
-            ),
+            else origin_of(", ".join(str(p) for p in (events_dir, sources_dir) if p is not None)),
         )
 
     scenario: tuple[str, ...] = ()
@@ -1551,18 +1551,15 @@ def _evidence(args: argparse.Namespace) -> int:
                 root / "samples",
                 root / "events",
                 root / "event-sources",
-                Origin.SYNTHETIC,
-                "invented; discarded after this run",
+                synthetic=True,
             )
-            inputs = _renamed(inputs, SCENARIO_NAME)
             report = assess_evidence(inputs, as_of, games)
     else:
         inputs = stores(
             args.sample_store,
             args.events_dir,
             args.event_sources_dir,
-            Origin.LOCAL_STORE,
-            "whatever this machine's own commands stored there",
+            synthetic=False,
         )
         report = assess_evidence(inputs, as_of, games)
 
@@ -1578,15 +1575,6 @@ def _evidence(args: argparse.Namespace) -> int:
         if args.out is not None:
             print(f"Local JSON: {args.out}")
     return EXIT_OK
-
-
-def _renamed(inputs: EvidenceInputs, name: str) -> EvidenceInputs:
-    """The same inputs with the synthetic ones named by their scenario, not a temp path."""
-    return replace(
-        inputs,
-        samples_provenance=inputs.samples_provenance.model_copy(update={"reference": name}),
-        events_provenance=inputs.events_provenance.model_copy(update={"reference": name}),
-    )
 
 
 def _inside(path: Path, directory: Path) -> bool:

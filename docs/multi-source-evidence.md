@@ -28,6 +28,7 @@ local event store, source store ────────────────
 |---|---|
 | `model.py` | The typed reading: `EvidenceReport`, `GameEvidence`, `SourceEvidence`, and the eight states. |
 | `assemble.py` | `assess_evidence`: the policy gate, then one pass that calls the existing components. |
+| `provenance.py` | Whether an input's origin can be checked: verified, unverified or synthetic. |
 | `render.py` | The text a developer reads. Counts, states, dates; no source text. |
 | `synthetic.py` | An invented scenario for exercising the path, labelled as invented throughout. |
 
@@ -96,6 +97,55 @@ Eight, kept apart because each calls for something different:
 | `not_collected` | Nothing of this source was given to the reading. |
 | `not_integrated` | MetaSpike has no source of this kind. Never a zero. |
 
+## Origin: verified, unverified, synthetic (U6.0.1)
+
+Whether there is data, and whether that data is a real observation, are different
+questions. A source's **state** answers the first. An input's **standing** answers the
+second, and being readable answers neither.
+
+| Standing | What it means | How it is established |
+|---|---|---|
+| `verified` | A recording of the real source. | Its content matches a digest pinned in `provenance.py`. Three recordings are pinned: the six pageview responses and the two catalogue fixture directories. The check is on bytes: a directory's name or location proves nothing, a copy under another name is still verified, and a copy with one byte changed is not. |
+| `synthetic` | Invented. | Declared by the command's own scenario, **or detected in what is stored**: a sample the scenario wrote carries its run id (`synthetic-scenario`), and an announcement written for a test points at the reserved `.invalid` domain, which no real post has. |
+| `unverified` | Origin not established. | Everything else: any local store, and any recording that matches no pin. |
+
+There is no option that declares an input real, and an input that claims to be verified
+without a pinned digest is refused before anything is read.
+
+What unverified and synthetic evidence may and may not do:
+
+- It **stays visible**. States, levels, features, dates, event heat and candidate counts
+  are exactly what the engine gives for that data; nothing is discarded or altered.
+- It is **never `usable`**, never one of `verified_demand_families`, and never counted
+  in `independent_demand_families`. Current data that is not verified is listed
+  separately, as `unconfirmed_demand_families`.
+- Events read from it are marked: `events_verified` is false, the text says the heat is
+  a diagnostic and not a verified real-world event, and a gap says so.
+- Every source, movement and input carries its standing in the JSON, and the text marks
+  each one `[SYNTHETIC]` or `[UNVERIFIED ORIGIN]`.
+- The reading is private either way, and a public stage is refused by policy as before.
+
+**The engine's own breadth is not the confirmed count.** `demand.evidence_breadth` is
+`signal_semantics_v2`'s output, kept exactly as the frozen engine produces it. The
+engine counts a family as observed when its data is current, whatever its origin, so a
+synthetic or unverified family appears there. That count must not be read as confirmed
+evidence. The count to rely on is `independent_demand_families`.
+
+**The regression this closes.** The scenario's own stores, handed over as
+`--sample-store`, `--events-dir` and `--event-sources-dir` without
+`--synthetic-scenario`, used to be labelled `local_store` and counted as real. They are
+now read as unverified, and then recognised as synthetic from their own content. Either
+way they add no confirmed demand family, and the numbers they produce are identical on
+both paths (tested).
+
+**Known limits.** Detection finds only what the scenario and the hand-written test
+fixtures leave behind; it is a safety net, not a proof of authenticity. Its absence
+proves nothing, which is why the default is unverified. And there is not yet any way
+for locally collected samples or announcements to be verified, **including genuine
+ones**: the supervised Steam News probe of 11 October now reads as unverified.
+Verifying local collection needs an origin stamped at collection time, which is a change
+to the collection contract and its own review.
+
 ## Time
 
 A reading at `as_of` uses only what was known then:
@@ -107,9 +157,15 @@ A reading at `as_of` uses only what was known then:
   by `as_of`.
 - **Pageviews**: a day is visible only once the source's publication lag has passed
   (one day, from the policy). The cut is the backtest's and is tested equal to it.
-- **Metadata**: a source record fetched after `as_of` is not used. Only a record's
-  latest version is held, so an earlier version cannot be shown in its place: what
-  leaned on it reads as `unknown`. *Known limit: metadata history is not kept.*
+- **Metadata**: a binding and the record's content are separate facts (U6.0.1). A
+  binding valid at `as_of` is shown as identity evidence. The record's content is shown
+  only if a version fetched by `as_of` is held. Only a record's latest version is kept,
+  so when that version was fetched later the record is listed as bound with
+  `content_known: false`, the source's metadata is `missing` (not `available`) with the
+  reason stated, and nothing is taken from the later version: not a date, not an
+  asserted Steam app. What leaned on it reads as `unknown`. From the moment the held
+  version was fetched it is `available`. No history is reconstructed and no fetch is
+  backdated. *Known limit: metadata history is not kept.*
 - **Quarantine**: entries first seen after `as_of` are not listed.
 - A moment before the catalogue state was generated is refused.
 
@@ -118,8 +174,36 @@ last bucket and the moment it is read, and knows nothing of publication lag; rea
 the wall clock, a source that publishes a day late would be stale every day. The
 reading hands the engine the end of the latest period the source was *due* to have
 published, so pageviews are stale exactly when a due day is missing, which is the rule
-as written and the one score v0 applies. No engine rule changed. **This choice is
-flagged for review.**
+as written and the one score v0 applies. No engine rule changed.
+
+**Verified in U6.0.1, and kept.** Checked on the recorded Minecraft series at ten
+moments, against three things it has to agree with:
+
+| Moment (UTC) | Newest day visible | Due days missing (score v0's `staleness_days`) | Reading |
+|---|---|---|---|
+| 4 Oct 00:00 | 2 Oct (just became due) | 0 | available |
+| 4 Oct 23:59:59 | 2 Oct (the 3rd not yet due) | 0 | available |
+| 5 Oct 00:00 | 3 Oct (newly published) | 0 | available |
+| 5 Oct 06:30, 12:00, 23:59:59 | 3 Oct | 0 | available, identical at each time of day |
+| 6 Oct 00:00 | 3 Oct (the 4th due, not held) | 1 | stale |
+| 6 Oct 18:00 | 3 Oct | 1 | stale |
+| 9 Oct 15:00 | 3 Oct | 4 | stale |
+| 20 Oct 12:00 | 3 Oct | 15 | stale |
+
+- **Score v0**: the reading is `available` exactly when `staleness_days` is 0, and v0's
+  confidence freshness factor is 1.0 exactly then, falling with each missing day to 0.
+- **Publication lag**: a day is never visible before the lag has passed, and is counted
+  missing from the moment it is due.
+- **`RecordedHistory.inputs_at`**: wherever the backtest can stand at the moment, the
+  series read is equal to its own.
+- **A genuinely missing day**: with 3 October removed from the recording, the reading is
+  available on the 4th (the 2nd is the newest due day) and stale on the 5th.
+- **Why not the wall clock**: at 5 October 12:00, with every due day held and
+  `staleness_days` 0, the engine handed the wall clock returns `applicable_but_stale`
+  and withholds every feature as `stale`. Handed the due boundary it reads the same
+  buckets and reports them.
+
+It does not change freshness semantics and does not hide missing data.
 
 ## The command
 
@@ -151,8 +235,9 @@ every run and are marked `evaluation_only`: they are stored nowhere.
 **Real, recorded, in the repository:** 402 catalogue rows (IGDB and Steam's app list)
 and daily pageviews for six games through 3 October 2026.
 
-**Real, local to this machine, not in the repository:** the fifteen announcements of
-the one supervised Steam News probe of 11 October 2026 (three apps).
+**Local to this machine, not in the repository, and read as unverified:** the fifteen
+announcements of the one supervised Steam News probe of 11 October 2026 (three apps).
+They are genuine, and nothing in the store can show it.
 
 **Not held at all:** any history of Steam player samples. One recorded response exists
 as an adapter fixture; no sample store has ever been filled.
@@ -167,13 +252,13 @@ Read on the recorded inputs at 2026-10-05 12:00 UTC, for the fifteen original ga
 | Steam players: eligible, not collected | 8 |
 | Steam players: inapplicable | 5 |
 | Steam players: unknown | 2 |
-| **Games with two demand families observing them** | **0** |
+| **Games with two verified demand families observing them** | **0** |
 | Event coverage | none (nothing had been asked by then) |
 
 Read at 2026-10-12 00:00 UTC with this machine's local event stores: the six
 pageview series are stale (the recording ended eight due days earlier), and three
 games have current Steam News coverage with fifteen announcements read, none promoted,
-and an event heat of zero.
+and an event heat of zero, marked as of unverified origin.
 
 **So there is no real multi-source finding to report.** No game in the repository has
 two real demand signals at the same moment. That is the honest state of the data, and
@@ -198,9 +283,10 @@ promotion gate (an upcoming dated season, a hotfix, a post that stays a candidat
 "coming soon" whose timing is not established). Identity is not invented.
 
 Every synthetic input is labelled: a banner on the report, `[SYNTHETIC]` on each source
-and movement it reaches, `origin: synthetic` in the JSON. A synthetic source is never
+and movement it reaches, `standing: synthetic` in the JSON. A synthetic source is never
 `usable` and never counts as a demand family observing a game, however current it
-looks. The command refuses to mix the scenario with stored evidence. **Nothing in a
+looks. The command refuses to mix the scenario with stored evidence, and the scenario's
+stores are recognised as synthetic even when handed over as ordinary local stores. **Nothing in a
 scenario report is a finding about any game.**
 
 Synthetic-only coverage in the tests: everything about player samples (association,
@@ -275,6 +361,8 @@ resource was used and nothing was benchmarked anywhere else.
 - **Real player history.** None is recorded; sampling is a private-development command.
 - **Wikimedia identifiers** beyond the fifteen original games (14 of 234 entities).
 - **Metadata history**: only the latest version of a source record is held.
+- **Verifiable local collection**: no locally collected sample or announcement can be
+  verified yet; that needs an origin recorded at collection time.
 - **Any public data contract** for multi-source evidence. It needs its own review.
 
 ## After C2-F

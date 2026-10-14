@@ -13,6 +13,7 @@ player samples it says about synthetic ones.
 """
 
 import json
+import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import replace
@@ -31,12 +32,19 @@ from metaspike.domain.signals import EntitySignals
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy
 from metaspike.domain.source_records import ExternalId, SourceRecord
 from metaspike.domain.timeseries import Granularity, TimeWindow
+from metaspike.event_sources.ingest import ingest
+from metaspike.event_sources.registry import build_steam_news, replay_news_client
+from metaspike.event_sources.resolve import steam_app_bindings, steam_news_resolver
+from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY
+from metaspike.event_sources.store import EventSourceStore
 from metaspike.events.heat import Availability as EventAvailability
 from metaspike.events.heat import UnavailableReason
 from metaspike.events.model import TimePrecision
+from metaspike.events.store import EventStore
 from metaspike.evidence import synthetic
 from metaspike.evidence.assemble import (
     COMMUNITY_INTEREST,
+    CONTENT_NOT_HELD_REASON,
     CREATOR_SUPPLY,
     EvidenceInputs,
     _Assessment,
@@ -52,15 +60,29 @@ from metaspike.evidence.model import (
     GameEvidence,
     InputProvenance,
     Origin,
+    Standing,
+)
+from metaspike.evidence.provenance import (
+    PINNED_RECORDINGS,
+    local_store_provenance,
+    recording_digest,
+    recording_provenance,
 )
 from metaspike.evidence.render import render
 from metaspike.evidence.synthetic import SyntheticScenario, build_synthetic_scenario
+from metaspike.features.attention import compute_attention_features
+from metaspike.features.semantics import Availability
 from metaspike.pipeline.assess import assess_entity
 from metaspike.pipeline.collection import CollectionReport, collect, window_ending
 from metaspike.pipeline.history import read_entity_history
-from metaspike.pipeline.signal_features import STEAM_SLOTS, steam_family_v2
+from metaspike.pipeline.signal_features import (
+    STEAM_SLOTS,
+    steam_family_v2,
+    wikimedia_family_v2,
+)
 from metaspike.resolution.recorded import load_recorded_catalogue
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
+from metaspike.sources.limiter import LimiterPool
 from metaspike.sources.registry import SourcePolicyError, default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.steam_players import STEAM_CURRENT_PLAYERS_POLICY
@@ -82,7 +104,9 @@ GOLDEN = json.loads((FIXTURES / "score_v0_replay_golden.json").read_text())
 WIKIMEDIA = "wikimedia_pageviews"
 PLAYERS = "steam_current_players"
 NEWS = "steam_news"
-RECORDED = InputProvenance(origin=Origin.RECORDED_RESPONSE, reference="tests/fixtures")
+# Verified: the content of these directories matches the digests pinned in the code.
+RECORDED = recording_provenance([FIXTURES / "catalogue", FIXTURES / "bootstrap_catalogue"])
+RECORDED_PAGEVIEWS = recording_provenance([FIXTURES / "wikimedia"])
 SYNTHETIC = InputProvenance(origin=Origin.SYNTHETIC, reference=synthetic.SCENARIO_NAME)
 
 
@@ -124,7 +148,7 @@ class World:
             stage=DeploymentStage.PRIVATE_DEVELOPMENT,
             policies=cli.EVIDENCE_POLICIES,
             wikimedia=self.pageviews,
-            wikimedia_provenance=RECORDED,
+            wikimedia_provenance=RECORDED_PAGEVIEWS,
         )
         return replace(base, **changes)  # type: ignore[arg-type]
 
@@ -1032,7 +1056,7 @@ def test_the_command_is_offline_deterministic_and_says_what_it_read(
         "steam_current_players   not given" in first
         and "steam_news              not given" in first
     )
-    assert "wikimedia_pageviews     recorded_response" in first
+    assert "wikimedia_pageviews     verified recorded_response" in first
     assert "public launch: derived metrics are not explicitly allowed (unknown)" in first
     assert "creator supply        -                   not_integrated" in first
     assert "SYNTHETIC" not in first
@@ -1113,6 +1137,8 @@ def test_the_synthetic_command_run_matches_the_library_and_leaves_nothing_behind
         "origin": "synthetic",
         "reference": "synthetic-overlap-v1",
         "note": "invented; discarded after this run",
+        "digests": [],
+        "standing": "synthetic",
     }
     assert "/tmp" not in printed and "metaspike-synthetic-" not in printed
     by_slug = {game["identity"]["slug"]: game for game in document["games"]}
@@ -1184,3 +1210,556 @@ def test_a_game_s_own_binding_history_reads_the_same_as_the_whole_mapping(
             assert steam_family_v2(inputs.samples, narrow, eligibility, moment) == steam_family_v2(
                 inputs.samples, inputs.state.mapping, eligibility, moment
             ), (slug, moment)
+
+
+# --- U6.0.1: where an input came from -----------------------------------------------------
+
+
+def local(scenario: SyntheticScenario) -> dict[str, object]:
+    """The scenario's own stores, handed over as ordinary local stores."""
+    return {
+        "samples": scenario.samples,
+        "samples_provenance": local_store_provenance("a-local-sample-store"),
+        "events": scenario.events,
+        "event_sources": scenario.event_sources,
+        "events_provenance": local_store_provenance("a-local-event-store"),
+    }
+
+
+def test_a_verified_input_is_one_whose_content_matches_a_pinned_recording(
+    world: World, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The trust boundary is content, not a name, a location or a flag."""
+    for name in ("wikimedia", "catalogue", "bootstrap_catalogue"):
+        assert recording_digest(FIXTURES / name) in PINNED_RECORDINGS, name
+    assert len(PINNED_RECORDINGS) == 3
+    assert RECORDED.origin is Origin.RECORDED_RESPONSE and RECORDED.verified
+    assert RECORDED.standing is Standing.VERIFIED and len(RECORDED.digests) == 2
+    assert local_store_provenance("x").standing is Standing.UNVERIFIED
+    assert SYNTHETIC.standing is Standing.SYNTHETIC and NO_INPUT.standing is Standing.NONE
+
+    # The same recording under another name is still verified: only content is checked.
+    renamed = tmp_path / "anything-at-all"
+    shutil.copytree(FIXTURES / "wikimedia", renamed)
+    assert recording_provenance([renamed]).verified
+    # One changed byte, and it is not.
+    article = renamed / "Minecraft.json"
+    recording = json.loads(article.read_text())
+    assert recording["items"][-1]["views"] == 6013
+    recording["items"][-1]["views"] = 6014
+    article.write_text(json.dumps(recording))
+    altered = recording_provenance([renamed])
+    assert altered.origin is Origin.UNVERIFIED_FILES and altered.unverified
+    assert altered.digests == () and "match no pinned recording" in altered.note
+    # A set of directories is verified only if every one of them is.
+    mixed = recording_provenance([FIXTURES / "catalogue", renamed])
+    assert mixed.unverified and "1 of 2" in mixed.note
+    assert recording_provenance([tmp_path / "absent"]).unverified
+
+    # Altered pageviews are still read, exactly as given, and never count as real.
+    bootstrap = generate_catalogue()
+    with replay_client(renamed) as client:
+        report = collect(
+            bootstrap.catalogue,
+            default_registry(client),
+            window_ending(RECORDED_END),
+            observed_at=REAL_AS_OF,
+            clock=lambda: REAL_AS_OF,
+        )
+    reading = assess_evidence(
+        world.inputs(state=bootstrap, records=[], wikimedia=report, wikimedia_provenance=altered),
+        REAL_AS_OF,
+    ).game(world.ids["minecraft"])
+    pageviews = reading.source(WIKIMEDIA)
+    assert pageviews.state is EvidenceState.AVAILABLE and not pageviews.usable
+    assert reading.independent_demand_families == 0 and reading.usable_sources == ()
+    assert reading.unconfirmed_demand_families == (SourceFamily.WIKIMEDIA_READERSHIP,)
+    assert reading.unverified_sources == (WIKIMEDIA,)
+    (signal,) = reading.demand.family(SourceFamily.WIKIMEDIA_READERSHIP).signals
+    assert signal.signal.current_level.value == 6014.0  # the data is shown as it is
+
+    # Nothing can be declared verified: the claim needs a pinned digest behind it.
+    for claim in (
+        InputProvenance(origin=Origin.RECORDED_RESPONSE, reference="trust me"),
+        InputProvenance(origin=Origin.RECORDED_RESPONSE, reference="x", digests=("0" * 64,)),
+    ):
+        with pytest.raises(ValueError, match="verified only with the digest of a pinned"):
+            assess_evidence(world.inputs(wikimedia_provenance=claim), REAL_AS_OF, world.scope[:1])
+        with pytest.raises(ValueError, match="verified only with the digest of a pinned"):
+            assess_evidence(world.inputs(samples_provenance=claim), REAL_AS_OF, world.scope[:1])
+    with pytest.raises(ValueError, match="standing follows from its origin"):
+        InputProvenance(origin=Origin.LOCAL_STORE, reference="x", standing=Standing.VERIFIED)
+    with pytest.raises(ValueError, match="only a verified recording carries digests"):
+        InputProvenance(origin=Origin.LOCAL_STORE, reference="x", digests=("0" * 64,))
+    # And the command has no option that says so either.
+    with pytest.raises(SystemExit):
+        cli.main(["evidence", "--help"])
+    options = capsys.readouterr().out
+    assert "--synthetic-scenario" in options
+    for word in ("--verified", "--real", "--trusted", "--genuine", "--origin"):
+        assert word not in options, word
+
+    # The command applies the same check to what it is pointed at.
+    arguments = ["--as-of", REAL_AS_OF.isoformat(), "--game", "minecraft", "--json"]
+    recorded_through = ["--recorded-through", RECORDED_END.isoformat()]
+    code, printed, _ = run(
+        capsys, *arguments, "--wikimedia-replay", str(renamed), *recorded_through
+    )
+    document = json.loads(printed)
+    assert code == cli.EXIT_OK and document["contains_unverified"] is True
+    assert document["inputs"][WIKIMEDIA]["standing"] == "unverified"
+    assert document["inputs"]["catalogue"]["standing"] == "verified"
+    assert document["games"][0]["independent_demand_families"] == 0
+    code, printed, _ = run(
+        capsys, *arguments, "--wikimedia-replay", str(FIXTURES / "wikimedia"), *recorded_through
+    )
+    document = json.loads(printed)
+    assert document["contains_unverified"] is False
+    assert document["inputs"][WIKIMEDIA]["standing"] == "verified"
+    assert document["games"][0]["independent_demand_families"] == 1
+
+
+def test_synthetic_stores_read_as_local_stores_are_never_confirmed_evidence(
+    world: World,
+    scenario: SyntheticScenario,
+    invented: EvidenceReport,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The regression: the scenario's own stores, passed in without saying what they are."""
+    reimported = assess_evidence(world.inputs(**local(scenario)), SYNTHETIC_AS_OF, world.scope)
+    plain = assess_evidence(world.inputs(), SYNTHETIC_AS_OF, world.scope)
+    assert reimported.inputs[PLAYERS].standing is Standing.UNVERIFIED
+    assert reimported.inputs[NEWS].standing is Standing.UNVERIFIED
+    assert reimported.contains_unverified and reimported.contains_synthetic
+    assert reimported.distribution == invented.distribution == "private_development_only"
+
+    for declared in invented.games:
+        game = reimported.game(declared.canonical_game_id)
+        slug = game.identity.slug
+        without = plain.game(declared.canonical_game_id)
+        # D, E. Neither path gains a confirmed demand family from these stores.
+        assert game.independent_demand_families == declared.independent_demand_families, slug
+        assert game.independent_demand_families == without.independent_demand_families, slug
+        assert game.verified_demand_families == without.verified_demand_families, slug
+        assert game.usable_sources == declared.usable_sources == without.usable_sources, slug
+        for item in (game.source(PLAYERS), game.source(NEWS)):
+            assert not item.usable and not item.provenance.verified, (slug, item.source)
+        assert not game.events_verified and not declared.events_verified
+        # F. What the data says is unchanged: states, numbers, dates, events.
+        for name in (PLAYERS, NEWS, WIKIMEDIA, "igdb", "steam_catalogue"):
+            ours, theirs = game.source(name), declared.source(name)
+            assert (ours.state, ours.reason, ours.bindings) == (
+                theirs.state,
+                theirs.reason,
+                theirs.bindings,
+            ), (slug, name)
+            assert ours.latest_observed_at == theirs.latest_observed_at
+            assert ours.freshness == theirs.freshness
+        assert game.demand == declared.demand, slug
+        assert game.sample_completeness == declared.sample_completeness, slug
+        assert game.events == declared.events and game.upcoming == declared.upcoming, slug
+        assert game.candidates == declared.candidates, slug
+        assert (game.score_v0, game.confidence_v0) == (declared.score_v0, declared.confidence_v0)
+        assert [m.features for m in game.movements] == [m.features for m in declared.movements]
+
+    # What was stored gives the synthetic samples and announcements away.
+    dota = reimported.game(world.ids["dota-2"])
+    players, news = dota.source(PLAYERS), dota.source(NEWS)
+    assert players.state is EvidenceState.AVAILABLE
+    assert players.provenance.standing is Standing.SYNTHETIC
+    assert players.provenance.note == (
+        "detected in the store: its samples carry the synthetic scenario's run id"
+    )
+    assert news.provenance.standing is Standing.SYNTHETIC
+    assert "reserved .invalid domain" in news.provenance.note
+    assert dota.synthetic_sources == (PLAYERS, NEWS) and dota.unverified_sources == ()
+    assert dota.independent_demand_families == 0
+    assert dota.unconfirmed_demand_families == (SourceFamily.STEAM_PLAYERS,)
+    # The frozen engine counts the family as observed. The evidence layer does not.
+    assert dota.demand.evidence_breadth.observed == (SourceFamily.STEAM_PLAYERS,)
+    assert dota.demand.evidence_breadth.observed_count == 1
+    assert dota.verified_demand_families == ()
+    codes = {gap.code for gap in dota.gaps}
+    assert {"synthetic_evidence", "events_not_verified", "no_current_demand_evidence"} <= codes
+    # Where the store gives no sign either way, the origin is simply not established.
+    tarkov = reimported.game(world.ids["escape-from-tarkov"])
+    assert tarkov.source(PLAYERS).state is EvidenceState.MISSING
+    assert tarkov.source(PLAYERS).provenance.standing is Standing.UNVERIFIED
+    rust = reimported.game(world.ids["rust"])
+    assert rust.source(NEWS).state is EvidenceState.AVAILABLE  # looked at; no post at all
+    assert rust.source(NEWS).provenance.standing is Standing.UNVERIFIED
+    assert rust.unverified_sources == (NEWS,) and not rust.events_verified
+    assert "unverified_evidence" in {gap.code for gap in rust.gaps}
+
+    # G. Both the text and the JSON keep the three apart.
+    text = render(reimported)
+    assert "This report reads inputs of UNVERIFIED ORIGIN." in text
+    assert "*** THIS REPORT CONTAINS SYNTHETIC EVIDENCE. ***" in text
+    assert "steam_current_players   UNVERIFIED ORIGIN (local_store)" in text
+    assert "catalogue               verified recorded_response" in text
+    assert "[SYNTHETIC, private only]" in text and "[UNVERIFIED ORIGIN" in text
+    assert "with current VERIFIED observations: 0" in text
+    assert "current but NOT verified, so not counted: steam_players" in text
+    assert "Events below come from SYNTHETIC announcements: a diagnostic, NOT verified" in text
+    assert "Events below come from UNVERIFIED announcements: a diagnostic, NOT verified" in text
+    assert "REAL observations" not in text
+    document = json.loads(reimported.model_dump_json())
+    standings = {name: item["standing"] for name, item in document["inputs"].items()}
+    assert standings == {
+        "catalogue": "verified",
+        WIKIMEDIA: "verified",
+        PLAYERS: "unverified",
+        NEWS: "unverified",
+    }
+    stored = next(g for g in document["games"] if g["identity"]["slug"] == "dota-2")
+    by_source = {item["source"]: item["provenance"]["standing"] for item in stored["sources"]}
+    assert by_source[PLAYERS] == by_source[NEWS] == "synthetic"
+    assert by_source["igdb"] == "verified" and by_source[CREATOR_SUPPLY] == "none"
+    assert stored["events_verified"] is False and stored["verified_demand_families"] == []
+    # H. And the refusal to publish names both reasons.
+    refusal = publication_refusal(reimported)
+    assert "synthetic evidence" in refusal and "origin is not established" in refusal
+
+    # B, C. The same through the command, with and without the scenario option.
+    root = Path(scenario.samples._root).parent
+    common = (
+        "--as-of",
+        SYNTHETIC_AS_OF.isoformat(),
+        "--wikimedia-replay",
+        str(FIXTURES / "wikimedia"),
+        "--recorded-through",
+        RECORDED_END.isoformat(),
+        "--game",
+        "dota-2",
+        "--game",
+        "no-mans-sky",
+        "--json",
+    )
+    code, as_scenario, _ = run(capsys, *common, "--synthetic-scenario")
+    assert code == cli.EXIT_OK
+    code, as_stores, _ = run(
+        capsys,
+        *common,
+        "--sample-store",
+        str(root / "samples"),
+        "--events-dir",
+        str(root / "events"),
+        "--event-sources-dir",
+        str(root / "event-sources"),
+    )
+    assert code == cli.EXIT_OK
+    first, second = json.loads(as_scenario), json.loads(as_stores)
+    assert first["inputs"][PLAYERS]["standing"] == "synthetic"
+    assert second["inputs"][PLAYERS]["standing"] == "unverified"
+    assert second["inputs"][PLAYERS]["origin"] == "local_store"
+    for one, other in zip(first["games"], second["games"], strict=True):
+        assert one["independent_demand_families"] == other["independent_demand_families"] == 0
+        assert one["verified_demand_families"] == other["verified_demand_families"] == []
+        assert one["demand"] == other["demand"] and one["events"] == other["events"]
+        assert one["sample_completeness"] == other["sample_completeness"]
+        assert other["usable_sources"] == one["usable_sources"]
+        assert PLAYERS in other["synthetic_sources"]  # detected, without being told
+    assert second["distribution"] == "private_development_only"
+
+
+def test_local_data_of_unestablished_origin_is_shown_and_not_counted(
+    world: World, tmp_path: Path
+) -> None:
+    """Samples and announcements with nothing synthetic about them, in a local store.
+
+    They are invented here like everything else in this file. What matters is that the
+    store gives no sign of it, exactly as a store of genuine samples would give no proof.
+    """
+    moment = datetime(2026, 10, 9, 12, tzinfo=UTC)
+    store = LocalSampleStore(tmp_path / "samples", lambda _: STEAM_CURRENT_PLAYERS_POLICY)
+    targets = {
+        target.source_native_id: target
+        for target in sampling_targets(world.state, steam_eligibility(world.state, world.records))
+    }
+    slot = datetime(2026, 10, 6, tzinfo=UTC)
+    while slot < moment:
+        plausible = synthetic._attempt(targets["570"], slot, 640_000).model_copy(
+            update={
+                "collection_run_id": "run_3f9c1e",
+                "attempt_id": f"att_{slot:%Y%m%d%H%M}",
+            }
+        )
+        store.append(plausible)
+        slot += Granularity.FIFTEEN_MINUTES.step
+    news = tmp_path / "news"
+    news.mkdir()
+    post = synthetic._post(88001, "Hotfix 7.40b", moment - timedelta(hours=20), "570", tags=True)
+    post["url"] = "https://store.steampowered.com/news/app/570/view/88001"
+    body = {"appnews": {"appid": 570, "newsitems": [post], "count": 1}}
+    (news / "news_570.json").write_text(json.dumps({"status": 200, "body": body}))
+    events, sources = EventStore(tmp_path / "events"), EventSourceStore(tmp_path / "sources")
+    looked_at = moment - timedelta(hours=1)
+    with replay_news_client(news) as client:
+        ingest(
+            build_steam_news(client, LimiterPool(), max_requests=1, now=lambda: looked_at),
+            STEAM_NEWS_POLICY,
+            ["570"],
+            steam_news_resolver(steam_app_bindings(world.state, world.records, moment)),
+            sources,
+            events,
+        )
+    inputs = world.inputs(
+        samples=store,
+        samples_provenance=local_store_provenance(str(tmp_path / "samples")),
+        events=events,
+        event_sources=sources,
+        events_provenance=local_store_provenance(str(tmp_path / "events")),
+    )
+    dota = world.ids["dota-2"]
+    report = assess_evidence(inputs, moment, [dota])
+    game = report.game(dota)
+    assert not report.contains_synthetic and report.contains_unverified
+
+    # 1. The data is there, current, and shown with its own numbers and dates.
+    players = game.source(PLAYERS)
+    assert players.state is EvidenceState.AVAILABLE and players.freshness == "fresh"
+    assert players.latest_observed_at == moment - timedelta(minutes=15) + timedelta(seconds=20)
+    (signal,) = game.demand.family(SourceFamily.STEAM_PLAYERS).signals
+    assert signal.signal.current_level.value == 640_000.0
+    assert [m.family for m in game.movements] == [SourceFamily.STEAM_PLAYERS]
+    # 2, 4. It is not verified, and it is not synthetic: its origin is not established.
+    assert players.provenance.standing is Standing.UNVERIFIED
+    assert players.provenance.origin is Origin.LOCAL_STORE
+    assert not players.provenance.synthetic and not players.usable
+    assert game.movements[0].standing is Standing.UNVERIFIED and not game.movements[0].synthetic
+    assert game.synthetic_sources == () and game.unverified_sources == (PLAYERS, NEWS)
+    # So it is no confirmed demand family, whatever the engine's breadth says.
+    assert game.independent_demand_families == 0 and game.verified_demand_families == ()
+    assert game.unconfirmed_demand_families == (SourceFamily.STEAM_PLAYERS,)
+    assert game.demand.evidence_breadth.observed == (SourceFamily.STEAM_PLAYERS,)
+    assert PLAYERS not in game.usable_sources and NEWS not in game.usable_sources
+    texts = {gap.code: gap.text for gap in game.gaps}
+    assert "no_current_demand_evidence" in texts
+    assert (
+        "available but of UNVERIFIED origin, so it is not counted"
+        in (texts["no_current_demand_evidence"])
+    )
+    assert texts["unverified_evidence"].endswith("steam_current_players, steam_news.")
+
+    # Events: the pipeline runs on them, and they are not called verified events.
+    assert game.events.availability is EventAvailability.AVAILABLE
+    assert game.events.event_heat is not None and game.events.event_heat > 0
+    assert game.candidates.promoted == 1 and not game.events_verified
+    assert game.source(NEWS).provenance.standing is Standing.UNVERIFIED
+    assert "computed from announcements that are unverified" in texts["events_not_verified"]
+    text = render(report)
+    assert "SYNTHETIC" not in text
+    assert "This report reads inputs of UNVERIFIED ORIGIN." in text
+    assert "steam_players (concurrent_players" in text and "[UNVERIFIED ORIGIN]" in text
+    assert "Events below come from UNVERIFIED announcements: a diagnostic, NOT verified" in text
+    assert "UNVERIFIED ORIGIN, not counted: steam_current_players, steam_news" in text
+    # A restricted source's own values are still never printed.
+    assert "640000" not in text and "640,000" not in text
+    # Still private, and refused for any public stage.
+    assert report.distribution == "private_development_only"
+    assert "origin is not established" in publication_refusal(report)
+    with pytest.raises(SourcePolicyError):
+        assess_evidence(replace(inputs, stage=DeploymentStage.PUBLIC_LAUNCH), moment, [dota])
+
+
+# --- U6.0.1: a binding is not the record's content ---------------------------------------
+
+
+def test_metadata_is_available_only_once_its_content_was_held(world: World) -> None:
+    """A binding valid at T whose only held record was fetched after T."""
+    key = SourceRecordKey(source="igdb", source_id="15536")
+    refetched_at = datetime(2026, 10, 10, tzinfo=UTC)
+    records = [
+        record.model_copy(update={"fetched_at": refetched_at}) if record.key == key else record
+        for record in world.records
+    ]
+    inputs = world.inputs(records=records)
+    tarkov = world.ids["escape-from-tarkov"]
+
+    def read(given: EvidenceInputs, moment: datetime) -> GameEvidence:
+        return assess_evidence(given, moment, [tarkov]).game(tarkov)
+
+    before = read(inputs, refetched_at - timedelta(seconds=1))
+    # The binding was known then, and is shown as identity evidence.
+    row = next(r for r in before.identity.bound_records if r.source == "igdb")
+    assert (row.source_id, row.valid_from) == ("15536", CATALOGUE_AT)
+    assert not row.content_known
+    assert row.product_type is None and row.release_dates == () and row.parent is None
+    igdb = before.source("igdb")
+    assert [b.source_native_id for b in igdb.bindings] == ["15536"]
+    assert igdb.bindings[0].valid_from == CATALOGUE_AT
+    # What the record said was not held then, so the metadata is not available.
+    assert igdb.state is EvidenceState.MISSING and igdb.reason == CONTENT_NOT_HELD_REASON
+    assert igdb.latest_observed_at is None and not igdb.usable and not igdb.contributes
+    assert "igdb" not in before.usable_sources and "igdb" not in before.restricted_sources
+    # Nothing is borrowed from the later version: not a date, and not the app it asserts.
+    assert before.source(PLAYERS).state is EvidenceState.UNKNOWN
+    assert "2025-11-15" not in before.model_dump_json()
+    text = render(assess_evidence(inputs, refetched_at - timedelta(seconds=1), [tarkov]))
+    assert "igdb:15536      bound (mapping" in text
+    assert "its content was NOT held at this moment" in text
+    assert "igdb                  catalogue_metadata missing" in text
+    # Steam's own row for the game was fetched in time and is unaffected.
+    steam = before.source("steam_catalogue")
+    assert steam.state is EvidenceState.AVAILABLE and steam.latest_observed_at == CATALOGUE_AT
+    assert next(
+        r for r in before.identity.bound_records if r.source == "steam_catalogue"
+    ).content_known
+
+    # From the moment the record was fetched, it is available with what it says.
+    for moment in (refetched_at, refetched_at + timedelta(days=3)):
+        after = read(inputs, moment)
+        igdb = after.source("igdb")
+        assert igdb.state is EvidenceState.AVAILABLE and igdb.reason is None and igdb.usable
+        assert igdb.latest_observed_at == refetched_at
+        row = next(r for r in after.identity.bound_records if r.source == "igdb")
+        assert row.content_known and row.release_dates == ("2025-11-15 (day)",)
+        assert row.product_type == "main_game"
+        assert after.source(PLAYERS).state is EvidenceState.NOT_COLLECTED  # eligible again
+    # Identity itself never moved: same canonical game, same binding, same mapping.
+    original = read(world.inputs(), refetched_at - timedelta(seconds=1))
+    assert before.canonical_game_id == original.canonical_game_id == tarkov
+    assert before.source("igdb").bindings == original.source("igdb").bindings
+    assert original.source("igdb").state is EvidenceState.AVAILABLE
+    assert inputs.state is world.state  # the mapping history was not touched
+    # The recorded fixtures, as they are, were all held when their bindings began.
+    whole = assess_evidence(world.inputs(), CATALOGUE_AT, world.scope)
+    assert all(
+        record.content_known for game in whole.games for record in game.identity.bound_records
+    )
+    assert not [
+        game.identity.slug
+        for game in whole.games
+        for item in game.sources
+        if item.kind is EvidenceKind.CATALOGUE_METADATA and item.state is EvidenceState.MISSING
+    ]
+
+
+# --- U6.0.1: pageview freshness, checked against what it must agree with -----------------
+
+
+def test_pageviews_are_stale_exactly_when_a_due_day_is_missing(
+    world: World, tmp_path: Path
+) -> None:
+    """Freshness is read at the source's due boundary. Checked against score v0's own
+    staleness, the publication lag, and the backtest's view of the same moment."""
+    lag = WIKIMEDIA_PAGEVIEWS_POLICY.operations.expected_publication_lag
+    assert lag == timedelta(days=1)
+    bootstrap = generate_catalogue()  # exists from 4 October, so that day can be read
+    minecraft = world.ids["minecraft"]
+
+    def reading(report: CollectionReport, moment: datetime) -> tuple[GameEvidence, int]:
+        inputs = world.inputs(state=bootstrap, records=[], wikimedia=report)
+        game = assess_evidence(inputs, moment, [minecraft]).game(minecraft)
+        recorded = report.signals_for(minecraft).get(V0_INPUT_SIGNAL)
+        assert recorded is not None
+        visible = pageviews_at(recorded, moment, lag).series
+        assert visible is not None
+        # Score v0's own statement of how many due days are missing.
+        stale_days = compute_attention_features(visible).staleness_days
+        assert stale_days is not None
+        return game, stale_days
+
+    whole = recorded_pageviews(bootstrap)
+    history = RecordedHistory(whole, {WIKIMEDIA: lag})
+    day = timedelta(days=1)
+    third = datetime(2026, 10, 3, tzinfo=UTC)
+    cases = [
+        # moment, newest day visible, due days missing
+        (datetime(2026, 10, 4, 0, 0, tzinfo=UTC), third - day, 0),  # the 2nd just became due
+        (datetime(2026, 10, 4, 23, 59, 59, tzinfo=UTC), third - day, 0),  # the 3rd not yet due
+        (datetime(2026, 10, 5, 0, 0, tzinfo=UTC), third, 0),  # the 3rd newly published
+        (datetime(2026, 10, 5, 6, 30, tzinfo=UTC), third, 0),
+        (datetime(2026, 10, 5, 12, 0, tzinfo=UTC), third, 0),
+        (datetime(2026, 10, 5, 23, 59, 59, tzinfo=UTC), third, 0),  # the 4th not yet due
+        (datetime(2026, 10, 6, 0, 0, tzinfo=UTC), third, 1),  # the 4th due, and not held
+        (datetime(2026, 10, 6, 18, 0, tzinfo=UTC), third, 1),
+        (datetime(2026, 10, 9, 15, 0, tzinfo=UTC), third, 4),  # the 4th to the 7th
+        (datetime(2026, 10, 20, 12, 0, tzinfo=UTC), third, 15),
+    ]
+    freshness_by_missing: dict[int, set[float]] = {}
+    for moment, newest, missing in cases:
+        game, stale_days = reading(whole, moment)
+        pageviews = game.source(WIKIMEDIA)
+        assert stale_days == missing, moment
+        expected = EvidenceState.AVAILABLE if missing == 0 else EvidenceState.STALE
+        assert pageviews.state is expected, moment
+        assert pageviews.freshness == ("fresh" if missing == 0 else "stale"), moment
+        # The newest moment it speaks for is the end of the newest day visible.
+        assert pageviews.latest_observed_at == newest + day, moment
+        assert game.independent_demand_families == (1 if missing == 0 else 0), moment
+        # Score v0 agrees in its own terms: its freshness factor is whole exactly while
+        # nothing due is missing, and falls with each missing day.
+        assert game.confidence_v0 is not None
+        assert (game.confidence_v0.factors.freshness == 1.0) == (missing == 0), moment
+        freshness_by_missing.setdefault(missing, set()).add(game.confidence_v0.factors.freshness)
+        if history.can_reconstruct(moment):
+            # Where the backtest can stand at this moment, it sees the same series.
+            assert missing == 0
+            recorded = whole.signals_for(minecraft).get(V0_INPUT_SIGNAL)
+            assert recorded is not None
+            assert pageviews_at(recorded, moment, lag) == history.inputs_at(
+                moment
+            ).report.signals_for(minecraft).get(V0_INPUT_SIGNAL)
+        else:
+            assert missing > 0
+    assert all(len(values) == 1 for values in freshness_by_missing.values())
+    factors = [next(iter(freshness_by_missing[missing])) for missing in (0, 1, 4, 15)]
+    assert factors == sorted(factors, reverse=True) and factors[0] == 1.0 and factors[-1] == 0.0
+    # Within one day the reading does not change with the time of day.
+    same_day = [reading(whole, moment)[0] for moment, _, _ in cases[2:6]]
+    assert len({game.source(WIKIMEDIA).latest_observed_at for game in same_day}) == 1
+    assert len({game.score_v0.value for game in same_day}) == 1
+    assert (
+        len(
+            {
+                game.demand.family(SourceFamily.WIKIMEDIA_READERSHIP).availability
+                for game in same_day
+            }
+        )
+        == 1
+    )
+
+    # A due day genuinely missing from the recording: the 3rd removed, read when it is due.
+    short = tmp_path / "without-the-third"
+    shutil.copytree(FIXTURES / "wikimedia", short)
+    article = json.loads((short / "Minecraft.json").read_text())
+    assert article["items"][-1]["timestamp"] == "2026100300"
+    article["items"] = article["items"][:-1]
+    (short / "Minecraft.json").write_text(json.dumps(article))
+    with replay_client(short) as client:
+        gapped = collect(
+            bootstrap.catalogue,
+            default_registry(client),
+            window_ending(RECORDED_END),
+            observed_at=REAL_AS_OF,
+            clock=lambda: REAL_AS_OF,
+        )
+    for moment, missing in (
+        (datetime(2026, 10, 4, 12, tzinfo=UTC), 0),  # the 2nd is the newest due day: held
+        (datetime(2026, 10, 5, 12, tzinfo=UTC), 1),  # the 3rd is due, and is not there
+    ):
+        game, stale_days = reading(gapped, moment)
+        assert stale_days == missing
+        assert game.source(WIKIMEDIA).state is (
+            EvidenceState.AVAILABLE if missing == 0 else EvidenceState.STALE
+        )
+        assert game.source(WIKIMEDIA).latest_observed_at == third
+
+    # Why the engine is not simply handed the wall clock: with every due day held, it
+    # would call a source that publishes a day late stale on every day of its life.
+    recorded = whole.signals_for(minecraft).get(V0_INPUT_SIGNAL)
+    assert recorded is not None
+    visible = pageviews_at(recorded, REAL_AS_OF, lag).series
+    assert visible is not None and compute_attention_features(visible).staleness_days == 0
+    at_wall_clock = wikimedia_family_v2(visible, REAL_AS_OF)
+    assert at_wall_clock.availability is Availability.APPLICABLE_BUT_STALE
+    at_due_boundary = wikimedia_family_v2(visible, visible.latest_due + day)
+    assert at_due_boundary.availability is Availability.APPLICABLE_AND_AVAILABLE
+    # Handed the wall clock it also withholds every feature as stale, though nothing
+    # is missing. Handed the due boundary it reads the same buckets and reports them.
+    (one,), (other,) = at_wall_clock.signals, at_due_boundary.signals
+    assert one.signal.valid_through == other.signal.valid_through == visible.latest_due + day
+    assert (one.signal.bucket_level.value, one.signal.bucket_level.reason) == (None, "stale")
+    assert one.signal.log_lift.reason == "stale"
+    assert other.signal.bucket_level.value == 6013.0 and other.signal.log_lift.value is not None

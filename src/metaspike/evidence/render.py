@@ -13,6 +13,7 @@ from metaspike.evidence.model import (
     InputProvenance,
     Origin,
     SourceEvidence,
+    Standing,
 )
 
 _RULE = "=" * 78
@@ -21,7 +22,11 @@ _RULE = "=" * 78
 def _origin(provenance: InputProvenance) -> str:
     if provenance.origin is Origin.NONE:
         return "not given"
-    label = "SYNTHETIC" if provenance.synthetic else provenance.origin.value
+    label = {
+        Standing.SYNTHETIC: "SYNTHETIC",
+        Standing.UNVERIFIED: f"UNVERIFIED ORIGIN ({provenance.origin.value})",
+        Standing.VERIFIED: f"verified {provenance.origin.value}",
+    }[provenance.standing]
     return f"{label}  {provenance.reference}" + (
         f"  ({provenance.note})" if provenance.note else ""
     )
@@ -35,6 +40,8 @@ def _source_line(item: SourceEvidence) -> str:
     marks = []
     if item.provenance.synthetic:
         marks.append("SYNTHETIC")
+    if item.provenance.unverified:
+        marks.append("UNVERIFIED ORIGIN")
     if item.restricted:
         marks.append("private only")
     ids = ", ".join(binding.source_native_id for binding in item.bindings) or "-"
@@ -60,6 +67,13 @@ def _game(game: GameEvidence) -> list[str]:
     ]
     lines.append("  Identity as bound at this moment (source ids, never titles):")
     for record in identity.bound_records:
+        if not record.content_known:
+            lines.append(
+                f"    {record.source}:{record.source_id:<10} bound (mapping "
+                f"v{record.mapping_version}, from {record.valid_from:%Y-%m-%d %H:%M}Z); its "
+                "content was NOT held at this moment"
+            )
+            continue
         dates = "; ".join(record.release_dates) or "no release date"
         lines.append(
             f"    {record.source}:{record.source_id:<10} {record.product_type or '?':<14}"
@@ -81,10 +95,18 @@ def _game(game: GameEvidence) -> list[str]:
     breadth = game.demand.evidence_breadth
     lines.append(
         f"    families that could observe this game: {breadth.applicable_count}; "
-        f"with current REAL observations: {game.independent_demand_families}"
+        f"with current VERIFIED observations: {game.independent_demand_families}"
     )
+    if game.unconfirmed_demand_families:
+        lines.append(
+            "    current but NOT verified, so not counted: "
+            + ", ".join(family.value for family in game.unconfirmed_demand_families)
+        )
     for movement in game.movements:
-        tag = "  [SYNTHETIC]" if movement.synthetic else ""
+        tag = {
+            Standing.SYNTHETIC: "  [SYNTHETIC]",
+            Standing.UNVERIFIED: "  [UNVERIFIED ORIGIN]",
+        }.get(movement.standing, "")
         relative = ("log_lift", "robust_z", "velocity", "acceleration")
         # A restricted source's own values are not printed, as `sample` never prints them.
         shown = (
@@ -140,6 +162,12 @@ def _game(game: GameEvidence) -> list[str]:
 
     events = game.events
     if events.availability is EventAvailability.AVAILABLE:
+        standing = game.source("steam_news").provenance.standing
+        if not game.events_verified:
+            lines.append(
+                f"  Events below come from {standing.value.upper()} announcements: a "
+                "diagnostic, NOT verified real-world events."
+            )
         lines.append(
             f"  Events: coverage current (last look {events.coverage_checked_at:%Y-%m-%d %H:%MZ}); "
             f"event heat {events.event_heat:.3f}; {len(events.contributions)} relevant event(s)"
@@ -163,6 +191,8 @@ def _game(game: GameEvidence) -> list[str]:
     lines.append(f"  Usable now: {', '.join(game.usable_sources) or 'nothing'}")
     if game.restricted_sources:
         lines.append(f"  Private development only: {', '.join(game.restricted_sources)}")
+    if game.unverified_sources:
+        lines.append(f"  UNVERIFIED ORIGIN, not counted: {', '.join(game.unverified_sources)}")
     if game.synthetic_sources:
         lines.append(f"  SYNTHETIC, not observations: {', '.join(game.synthetic_sources)}")
     lines.append("  Still missing before a creator-opportunity recommendation could be justified:")
@@ -185,6 +215,12 @@ def render(report: EvidenceReport, scenario: tuple[str, ...] = ()) -> str:
             "  an observation of any game and supports no conclusion about one.",
         ]
         lines.extend(f"    {line}" for line in scenario)
+    if report.contains_unverified:
+        lines += [
+            "",
+            "  This report reads inputs of UNVERIFIED ORIGIN. They are shown for inspection",
+            "  and are never counted as confirmed observations of a game.",
+        ]
     lines.append("\n  Inputs:")
     lines.extend(f"    {name:<24}{_origin(item)}" for name, item in report.inputs.items())
     lines.append("\n  Source policies (as the repository states them):")

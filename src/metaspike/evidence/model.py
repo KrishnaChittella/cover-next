@@ -31,9 +31,9 @@ bundle, and nothing in the publishing path reads it.
 """
 
 from enum import StrEnum
-from typing import Final, Literal
+from typing import Any, Final, Literal, Self
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, model_validator
 
 from metaspike.domain.families import SourceFamily
 from metaspike.domain.games import GameId, LifecycleState
@@ -71,15 +71,35 @@ class EvidenceState(StrEnum):
 
 
 class Origin(StrEnum):
-    """Where an input came from. Stated by whoever supplies it; never inferred."""
+    """Where an input came from, as far as it can be checked. See `provenance.py`."""
 
-    # A response of the real source, recorded earlier and kept as a fixture.
+    # A recording whose content matches a digest pinned in the repository. VERIFIED.
     RECORDED_RESPONSE = "recorded_response"
-    # A local store filled by this project's own commands on this machine.
+    # Files given as a recording that match no pinned digest. Origin not established.
+    UNVERIFIED_FILES = "unverified_files"
+    # A local store, read as found. Origin not established.
     LOCAL_STORE = "local_store"
-    # Invented for a test or a demonstration. Not an observation of anything.
+    # Invented for a test or a demonstration: declared, or detected from its content.
     SYNTHETIC = "synthetic"
     NONE = "none"
+
+
+class Standing(StrEnum):
+    """Whether an input is a real observation. A different question from availability."""
+
+    VERIFIED = "verified"
+    UNVERIFIED = "unverified"
+    SYNTHETIC = "synthetic"
+    NONE = "none"
+
+
+_STANDING = {
+    Origin.RECORDED_RESPONSE: Standing.VERIFIED,
+    Origin.UNVERIFIED_FILES: Standing.UNVERIFIED,
+    Origin.LOCAL_STORE: Standing.UNVERIFIED,
+    Origin.SYNTHETIC: Standing.SYNTHETIC,
+    Origin.NONE: Standing.NONE,
+}
 
 
 class InputProvenance(FrozenModel):
@@ -87,10 +107,39 @@ class InputProvenance(FrozenModel):
     # Where the input was read from: a fixture directory, a store, a scenario name.
     reference: str
     note: str = ""
+    # For a verified recording: the pinned content digests it matched.
+    digests: tuple[str, ...] = ()
+
+    # Follows from `origin` and is written out beside it, so a reader of the JSON
+    # never has to know which origins are verified.
+    standing: Standing = Standing.NONE
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fill_standing(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "standing" not in data and "origin" in data:
+            return {**data, "standing": _STANDING[Origin(data["origin"])]}
+        return data
+
+    @model_validator(mode="after")
+    def _standing_follows_origin(self) -> Self:
+        if self.standing is not _STANDING[self.origin]:
+            raise ValueError("an input's standing follows from its origin and nothing else")
+        if self.digests and self.origin is not Origin.RECORDED_RESPONSE:
+            raise ValueError("only a verified recording carries digests")
+        return self
 
     @property
     def synthetic(self) -> bool:
         return self.origin is Origin.SYNTHETIC
+
+    @property
+    def verified(self) -> bool:
+        return self.origin is Origin.RECORDED_RESPONSE
+
+    @property
+    def unverified(self) -> bool:
+        return self.standing is Standing.UNVERIFIED
 
 
 NO_INPUT = InputProvenance(origin=Origin.NONE, reference="-")
@@ -141,8 +190,12 @@ class SourceEvidence(FrozenModel):
 
     @property
     def usable(self) -> bool:
-        """Current evidence of something real. Synthetic evidence is never usable."""
-        return self.state is EvidenceState.AVAILABLE and not self.provenance.synthetic
+        """Current, and verified to be an observation of something real.
+
+        Availability is not enough. Synthetic evidence is never usable, and neither is
+        evidence whose origin is not established, however current it looks.
+        """
+        return self.state is EvidenceState.AVAILABLE and self.provenance.verified
 
     @property
     def contributes(self) -> bool:
@@ -166,6 +219,9 @@ class BoundRecord(FrozenModel):
     source_id: str
     mapping_version: int
     valid_from: AwareDatetime
+    # False when the only version of the record that is held was fetched after the
+    # moment read at. The binding was known then; what the record says was not.
+    content_known: bool
     product_type: str | None = None
     # Each release date exactly as the source gave it, with its own precision.
     release_dates: tuple[str, ...] = ()
@@ -202,6 +258,7 @@ class Movement(FrozenModel):
     source: str
     metric: str
     synthetic: bool
+    standing: Standing
     # False when the source's policy does not let its values be shown: the text reading
     # then gives only the features that are relative to the source's own history.
     levels_showable: bool
@@ -253,17 +310,28 @@ class GameEvidence(FrozenModel):
     demand: EntityEvidenceV2
     movements: tuple[Movement, ...] = ()
     sample_completeness: tuple[SampleCompleteness, ...] = ()
+    # The engine counts a family as observed when its data is current, WHATEVER its
+    # origin: `demand.evidence_breadth` includes synthetic and unverified families. It
+    # is kept as the engine gives it and must not be read as confirmed evidence. The
+    # confirmed count is `independent_demand_families`, below.
     # metaspike_score_v0 on the game's pageviews as visible at `as_of`. Unchanged.
     score_v0: ScoreResult
     confidence_v0: ConfidenceResult | None = None
     events: EventIntelligence
     upcoming: tuple[RadarItem, ...] = ()
     candidates: CandidateCounts
-    # Independent demand families that are available now and are real observations.
+    # Independent demand families that are available now AND verified real observations.
     independent_demand_families: int = Field(ge=0)
+    verified_demand_families: tuple[SourceFamily, ...] = ()
+    # Families with current data that is NOT verified. Never part of the count above.
+    unconfirmed_demand_families: tuple[SourceFamily, ...] = ()
+    # Whether the events read for this game come only from verified inputs. False for
+    # synthetic or unverified announcements: the heat below is then a diagnostic.
+    events_verified: bool = False
     usable_sources: tuple[str, ...] = ()
     restricted_sources: tuple[str, ...] = ()
     synthetic_sources: tuple[str, ...] = ()
+    unverified_sources: tuple[str, ...] = ()
     gaps: tuple[Gap, ...] = ()
 
     def source(self, name: str) -> SourceEvidence:
@@ -279,6 +347,8 @@ class EvidenceReport(FrozenModel):
     distribution: Literal["private_development_only"] = PRIVATE_DEVELOPMENT_ONLY
     # True when any input was invented. Such a report describes no real game's state.
     contains_synthetic: bool
+    # True when any input's origin is not established.
+    contains_unverified: bool
     inputs: dict[str, InputProvenance]
     policies: tuple[PolicyView, ...]
     games: tuple[GameEvidence, ...]
