@@ -1,176 +1,172 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.3: OFFLINE CREATOR-OPPORTUNITY INTELLIGENCE — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.4: OFFLINE CREATOR-OPPORTUNITY UI INTEGRATION — CHATGPT REVIEW REQUIRED
 
 Branch `product/local-ui` only. Offline. No live source call, no credential, no cloud
-access, no deployment, no pull request, no merge. **No later checkpoint has been
-started**: no public publishing, production integration or launch work.
+access, no deployment, no pull request, no merge, nothing published. **No later
+checkpoint has been started.**
 
-1. **Approved starting SHA:** `0e3e7c3cbadb14f79bde97dc58532e4db5e15762` (U6.2 handoff).
+1. **Starting baseline:** `6d20279741739365e9eed9059e468916c3d256d8` (U6.3 handoff).
    Verified at the start: on `product/local-ui`, at that commit, tree clean.
-2. **Implementation SHA:** `4c9866bad917fcd59a4996f084ea8dd0dd0ced05` — `feat: add offline creator opportunity intelligence`.
-
-**In one line:** a transparent rubric now reads every source's evidence for a game and
-says whether anything verified says "now", with an explained order. On today's real
-data it justifies nothing, and says so.
+2. **Implementation SHA:** `cfaacaadd1003a80f667f7b09ee34a3b05df0590` — `feat: display offline creator opportunities in dev UI`.
 
 ## Things to review first
 
-1. **No real recommendation is possible today.** Six recorded pageview series are the
-   only verified demand evidence. None moves past the threshold (largest |robust z|
-   1.86). Every real readiness is `insufficient_evidence`.
-2. **One threshold was reused, and it is unvalidated.** "Moving" means robust z ≥ 3.5
-   with a lift in the same direction: score v0's own outlier threshold, borrowed. The
-   7-day window for timely discussion is a choice. Both are labelled UNVALIDATED.
-3. **A "simulated readiness" sits beside every real one.** It runs the same rubric
-   counting synthetic and unverified evidence as if real, so the rubric can be seen
-   working. It is labelled throughout and never a recommendation. Reviewers should
-   judge whether showing it at all is wise.
-4. **A candidate needs a complete coverage sample, which can be a sample with no
-   videos.** It is stated each time not to be low competition. Requiring at least one
-   observed video instead is a defensible alternative.
-5. **The Reddit adapter's API changed** (below): it no longer accepts an arbitrary client.
+1. **The default view says nothing is established, because nothing is.** With the
+   recorded-only report the page leads with "No real creator opportunity is established by
+   the currently verified evidence." That is the real state, not a placeholder.
+2. **The build originally traced the whole project.** Turbopack warned that the loader's
+   dynamic file read "causes the whole project to be traced and included in the output",
+   which could have carried private reports into a deployment. The read and its path are
+   now marked untraced; the rebuilt `.next` holds the loader's code but no report data
+   and no traced private file (checked by search).
+3. **`apps/dev-ui/AGENTS.md` was committed, and I did not write it.** `next dev` generated
+   it when I ran the live check; the file says it is re-added by `next dev` and that
+   committing it keeps the tree clean. It contains only Next.js guidance for agents.
+4. **The synthetic view shows simulated readiness.** It is in its own table, every badge
+   prefixed `SIMULATED:`, under "SYNTHETIC DEMONSTRATION — NOT A REAL RECOMMENDATION".
 
-## 3. Exact files changed
+## 3. Exact changed files
 
 | File | Change |
 |---|---|
-| `src/metaspike/opportunity/rules.py` | New. The rubric, the assessment contract, the shortlist and its ordering. |
-| `src/metaspike/opportunity/render.py`, `__init__.py` | New. Text output. |
-| `src/metaspike/community_sources/reddit.py` | `RedditReplay` replaces `replay_reddit_client`; `collection_refusal`; the adapter's policy guard. |
-| `src/metaspike/community_sources/collect.py`, `synthetic.py` | Docstring; the scenario uses `RedditReplay`. |
-| `src/metaspike/evidence/synthetic.py` | `write_synthetic_pageviews` and `PAGEVIEW_PATTERNS` for the demonstration. |
-| `src/metaspike/cli.py` | `evidence --opportunities`; synthetic pageviews when the scenario has no recording. |
-| `tests/test_opportunity.py` | New, 13 tests. |
-| `tests/test_community_interest.py` | The replay helper uses `RedditReplay`; one new guard test. |
-| `tests/test_creator_supply.py`, `tests/test_evidence.py` | Import lists now include the opportunity package that reads them. |
-| `docs/creator-opportunity-intelligence.md` | New. |
-| `docs/reddit-community-interest.md`, `README.md` | The guard; pointers. |
+| `apps/dev-ui/src/app/opportunities/page.tsx`, `[slug]/page.tsx` | New. Server components, `force-dynamic`. |
+| `apps/dev-ui/src/components/opportunities.tsx` | New. Shortlist, detail, banners, refusal states. Rendering only. |
+| `apps/dev-ui/src/private/opportunities/loader.ts` | New. Server-only reader: enablement, fixed files, directory checks. |
+| `apps/dev-ui/src/private/opportunities/validate.ts`, `types.ts` | New. Version check, schema validation, consistency checks; types. |
+| `apps/dev-ui/src/private/opportunities/report.schema.json` | New. Generated from `OpportunityShortlist`. |
+| `apps/dev-ui/scripts/opportunities.mjs`, `package.json` | New script; `opportunities:recorded`, `:synthetic`, `:schema`, `:schema:check`. |
+| `apps/dev-ui/src/components/site-header.tsx` | An "Opportunities" link. |
+| `apps/dev-ui/src/components/opportunities.test.tsx`, `src/private/opportunities/loader.test.ts` | New tests. |
+| `apps/dev-ui/src/components/events.test.tsx` | The navigation list now includes Opportunities. |
+| `apps/dev-ui/src/test/fixtures/opportunities/{recorded,synthetic}.json` | Small test fixtures, generated by the CLI (3 and 4 games). |
+| `apps/dev-ui/README.md`, `docs/creator-opportunity-intelligence.md` | How to generate, enable, load, read. |
+| `apps/dev-ui/AGENTS.md` | Generated by `next dev` (item 3). |
+| `tests/test_opportunity.py` | One test: the UI's schema equals the engine's model. |
 
-Nothing under `infra/`, `.github/`, `apps/`, `schemas/`, `tests/fixtures/` or `publishing/`.
+Nothing under `src/metaspike/` changed; the engine, its rules and its order are as approved.
+Nothing under `infra/`, `.github/`, `schemas/`, `apps/dev-ui/public/` or `publishing/`.
 
-## 4. Offline Reddit collector guard
+## 4. Routes and components
 
-**Root cause:** in U6.2 the evidence reader checked Reddit's pending approval; the
-collector and adapter did not. Shown against the U6.2 adapter: built with an ordinary
-`httpx.Client`, it sent the request (`requests sent: 1 status: ok`).
+`/opportunities` (verified by default; `?view=synthetic` for the demonstration) and
+`/opportunities/[slug]`. The shortlist shows game, readiness, why now, angle availability,
+creator-coverage state and "above the next because". The detail answers why now, what
+changed, what event matters, what angle is supported, what coverage was observed, what is
+discussed, what is unknown, how current the evidence is (source, state, latest
+observation, origin) and why it might be wrong. Source names and provenance are shown as
+the engine gave them.
 
-**Fix:** `RedditAdapter` takes either `RedditReplay` (answers from recorded files; holds
-no HTTP client or transport, so it cannot reach a network) or a network-capable client
-that it accepts only if `REDDIT_DATA_POLICY` clears collection at a stated stage. The
-check runs when the adapter is built and again before each request. Approval is
-pending, so a network-capable client is refused at every stage before any request; no
-policy, or another source's policy, is refused too. Labels and file names play no part.
-The policy was not changed. Synthetic replay still works and is deterministic.
-**Regression:** `test_a_network_capable_client_cannot_send_reddit_requests_while_access_is_pending`
-— zero requests reach a counting transport; a policy copy with approval granted (test
-only) would build, which shows the check is the policy; the real policy is still pending.
+## 5. Private report loading
 
-## 5. Opportunity decision contract (`creator_opportunity_rules_v1`)
+Server components rendered per request. `loader.ts` reads `verified.json` or
+`synthetic.json` from `<repo>/.metaspike/private/opportunities/` (git-ignored, outside any
+served directory), or from an absolute `METASPIKE_OPPORTUNITY_DIR` set in the server
+environment. Only the exact word `synthetic` selects the synthetic file; anything else,
+including traversal strings, reads the verified file. Then: rules version must be
+`creator_opportunity_rules_v1`; the report must validate against the generated schema
+(which allows no extra fields); its distribution must be private; both orders must list
+every game once, in position order; verified entries must match each game's readiness.
+Absent, invalid or unsupported reports are refused with nothing shown from them.
 
-`OpportunityAssessment`: game, `as_of`, rules version; `readiness` and the `facts` behind
-it (verified only); `simulated_readiness` and `simulated_facts`; per-source notes
-(state, standing, latest observation, freshness); movements (direction, lift, z, standing);
-events (type, date, precision, phase, standing; no titles); angles; `angle_status`;
-creator-coverage and community statements; `why_now` (verified only); `unconfirmed`
-(labelled); caveats; missing; uncertainty. Evidence and judgement are separate fields.
-No score field exists; score v0 is not used.
+## 6. Blocking accidental exposure
 
-## 6. Readiness and ranking
+- Off unless `METASPIKE_PRIVATE_OPPORTUNITIES=1`; always off when `NODE_ENV=production`
+  (`next build`, `next start`). Checked live: `next start` with the flag set shows "never
+  read in a production build or server" and no report data.
+- `force-dynamic`: never prerendered; the build lists both routes as dynamic.
+- A directory inside `public/` or `artifacts/` is refused; the read is untraced.
+- No client component imports the reader, validator, types or views (tested).
+- No report in `public/` (tested); a direct fetch of the report path returned 404 live.
+- Reports are written outside the repository's tracked files; only two small generated
+  fixtures are committed, for tests.
 
-Readiness: candidate = up AND confirmed timely angle AND complete coverage sample AND no
-disagreement; watchlist = up OR timely event; insufficient otherwise. Order:
-readiness → families up → no disagreement → timely event → timely angle → coverage
-known → sources answering → canonical id. Every entry says why it is above the next; ties
-broken by id say "indistinguishable on the evidence; ordered by canonical id only, which
-means nothing". No raw units mixed; no margins invented.
+## 7. Verified versus simulated
 
-## 7. Why now and angles
+Default view: verified readiness only, and the "No real creator opportunity…" statement
+when nothing is established. A report with synthetic inputs opened in the verified view
+gets a warning and still shows verified readiness only. Synthetic view: the banner, the
+verified table unchanged, and a separate simulated table. Simulated readiness is never
+shown as a game's verified status (tested). Ties broken only by id show "=" and
+"Indistinguishable on the evidence — ordered by id only, which means nothing". No
+percentage, probability or margin is displayed. The rubric's thresholds are stated as
+unvalidated on every page.
 
-Why now: verified movements up (with lift and z), upcoming or active verified events
-(type, date, precision), recent verified discussion. Angles: community candidate angles
-(U6.2) and timely events, each with references, timeliness, confirmation and its
-unverified assumptions (that it would be watched; that existing videos do not cover it).
-No title is written and nothing is copied from posts or announcements; with none, "angle
-not yet established".
-
-## 8. Source and provenance handling
-
-Only verified evidence counts. Synthetic and unverified evidence appears under "not
-counted", tagged. Unverified events never explain now (tested with the scenario's stores
-read as local stores). Missing or empty creator supply is never called low competition;
-a missing community input is stated unknown.
-
-## 9. Recorded versus synthetic
-
-Recorded-only run (`--as-of 2026-10-05T12:00:00+00:00`, the pageview recording): all 15
-games `insufficient_evidence`; six verified `flat` movements; "No real recommendation
-can be justified". Synthetic run: real order all insufficient; simulated order Dota 2
-candidate, Rust watchlist, the rest insufficient.
-
-## 10. Historical correctness
-
-Assessments read only the evidence reading at `as_of`. Tested: two days earlier the same
-stores give no event, no player climb, no searches, and a lower simulated readiness;
-posts and videos retrieved after the moment never appear; a later rebinding leaves an
-earlier shortlist unchanged; repeated runs are identical; input order does not matter.
-
-## 11. Demonstration output (abridged, actual)
+## 8. Working commands
 
 ```
-  No real recommendation can be justified: no game has verified evidence that says 'now'.
-  SIMULATED order (synthetic counted as if real; NOT a recommendation):
-     1. dota-2      EVIDENCE-SUPPORTED CANDIDATE   ahead of next: readier on the rubric
-     2. rust        PROVISIONAL / WATCHLIST        ahead of next: readier on the rubric
-  2. Rust
-    - [SYNTHETIC] wikimedia_readership is up against its own history (log lift 1.39, robust z 27.7)
-    - [SYNTHETIC] 3 posts discuss version 2.3 (update or patch breakdown)
-  Caveats: steam_players is DOWN ...; demand families disagree ...
+cd apps/dev-ui
+npm run opportunities:recorded
+npm run opportunities:synthetic
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
 ```
 
-Commands are in `docs/creator-opportunity-intelligence.md`.
+## 9. Live evidence (dev server on 127.0.0.1, reports generated as above)
 
-## 12. Test and quality-gate results (2026-10-14, on the committed tree)
+| Request | Showed |
+|---|---|
+| `/opportunities` | "No real creator opportunity is established…" |
+| `/opportunities?view=synthetic` | the same, plus "SYNTHETIC DEMONSTRATION", plus "SIMULATED: Evidence-supported candidate" (Dota 2) |
+| `/opportunities/rust?view=synthetic` | the banner, "Angle not yet established" on verified evidence, "Why might this be wrong?" |
+| `/opportunities/minecraft` | "Angle not yet established", all sections |
+| `/opportunities?view=../../etc/passwd` | the verified report |
+| a direct URL to the report file | 404 |
+| `next start` with the flag | "never read in a production build or server", no data |
 
-- `uv run ruff format --check` — 255 files already formatted
+## 10. Backend results (2026-10-14)
+
+- `uv run ruff format --check` — 256 files already formatted (after reformatting the new test)
 - `uv run ruff check` — All checks passed
 - `uv run mypy` — no issues in 238 source files
-- `uv run pytest` — **1,592 passed, 8 deselected in 420.00s** (1,578 before, plus 14)
+- `uv run pytest` — **1,593 passed, 8 deselected in 427.07s** (1,592 before, plus 1)
 - `uv run metaspike export-schemas --check` — Schemas are up to date
 - `uv run metaspike evaluate-resolver` — exit 0; golden set v3, 200 cases, 0 false auto merges
-- `tests/test_opportunity.py` 13 passed; `tests/test_community_interest.py` 14;
-  `tests/test_creator_supply.py` 25; `tests/test_evidence.py` 32;
-  `tests/test_historical_validation.py` 70
+- `tests/test_opportunity.py` 14 passed; `test_community_interest.py` 14;
+  `test_creator_supply.py` 25; `test_evidence.py` 32
 
-First full run: three earlier tests that list which modules import the evidence,
-YouTube and Reddit packages failed because the new package imports them; the lists were
-updated and everything re-run. Two assertions of mine were too broad and were narrowed.
-Not run: `live` tests; the four `slow` catalogue proofs (no catalogue code changed).
-Frontend not touched.
+The full pytest run preceded a formatting-only reflow of one line in the new test; that
+file was re-run afterwards: 14 passed.
 
-## 13. Frozen-rule parity
+## 11. Frontend results (2026-10-14, exit codes captured directly)
 
-No change to `resolver_v2`, `baseline_rules_v1`, `signal_semantics_v2`,
-`metaspike_score_v0`, `event_heat_rules_v1`, `event_classification_rules_v1`,
-`validation_protocol_v1`, `outcome_rules_v1`, golden labels, U5.2/U5.3, the U6.0–U6.2
-evidence contracts, any source policy, or the artifact contract (1.5.0).
+| Gate | Result |
+|---|---|
+| `npm run contract:check` | exit 0 (7 public schemas unchanged) |
+| `npm run typecheck` | exit 0 |
+| `npm run lint` | exit 0 |
+| `npm test` | exit 0 — **13 files, 194 tests passed** (179 before U6.4) |
+| `npm run build` | exit 0, no warnings; `/opportunities` and `/opportunities/[slug]` dynamic |
+| `npm run opportunities:schema:check` | exit 0 |
 
-## 14. Limitations and remaining blockers
+One existing test changed: the navigation list now includes "Opportunities". One assertion
+of mine was too broad (it flagged the page's own denial "never low competition") and was
+narrowed to affirmative claims.
 
-1. No verified source beyond pageviews; no real game can pass `insufficient` except by a
-   verified pageview movement, and none moves today.
-2. No threshold is validated; calibration against outcomes is the next real requirement.
-3. The rubric is binary per question and does not grade strength.
-4. YouTube and Reddit terms and approvals block any real creator or community evidence.
-5. Case A (verified single-source attention) is shown only in a test, on a copy of real
-   evidence with one movement replaced in memory, because no real series moves enough.
+## 12. Frozen contract parity
 
-## 15. Git-only C2-F isolation
+Public artifact contract 1.5.0 and its seven schemas unchanged (`contract:check`,
+`export-schemas --check`). `creator_opportunity_rules_v1` and its order unchanged: no
+Python source changed. `resolver_v2`, `baseline_rules_v1`, `signal_semantics_v2`,
+`metaspike_score_v0`, the event, validation and outcome rules, every source policy and
+production source registration unchanged.
+
+## 13. Known limitations
+
+1. The page can only show what the engine establishes, which today is nothing verified.
+2. Filtering and sorting were not added: any re-sorting would compete with the engine's
+   explained order.
+3. The creator-coverage column words are read from the engine's statement text; a change
+   to those sentences would need the mapping updated (tests would catch it).
+4. The synthetic view shows the rubric on invented data only; it proves nothing predictive.
+5. Historical calibration of the rubric, verified creator and community sources, and a
+   reviewed public contract are all still required before anything public.
+
+## 14. Git-only C2-F isolation
 
 C2-F isolation: Git-only verification. No GCP access, no production action.
 
-## 16. No later checkpoint
+## 15. No later checkpoint
 
-Nothing beyond U6.3 has been started.
+Nothing beyond U6.4 has been started.
 
 STOP.
