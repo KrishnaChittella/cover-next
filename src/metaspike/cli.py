@@ -36,6 +36,9 @@ from metaspike.catalogue.evaluation import (
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.catalogue.persistence import BROAD_DISCOVERY_ENABLED
 from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
+from metaspike.creator_sources.store import CreatorSupplyStore
+from metaspike.creator_sources.synthetic import build_synthetic_creator_supply
+from metaspike.creator_sources.youtube import YOUTUBE_DATA_POLICY
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
@@ -394,6 +397,13 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument("--sample-store", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--events-dir", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--event-sources-dir", type=Path, default=None, metavar="DIR")
+    evidence.add_argument(
+        "--creator-supply-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="a local creator-supply store (read as found: its origin is unverified)",
+    )
     evidence.add_argument(
         "--synthetic-scenario",
         action="store_true",
@@ -1398,6 +1408,7 @@ def _sample_status(args: argparse.Namespace) -> int:
 EVIDENCE_POLICIES: Mapping[str, SourcePolicy] = {
     **CATALOGUE_SOURCE_POLICIES,
     **EVENT_SOURCE_POLICIES,
+    YOUTUBE_DATA_POLICY.source: YOUTUBE_DATA_POLICY,
     WIKIMEDIA_PAGEVIEWS_POLICY.source: WIKIMEDIA_PAGEVIEWS_POLICY,
     STEAM_CURRENT_PLAYERS_POLICY.source: STEAM_CURRENT_PLAYERS_POLICY,
 }
@@ -1442,12 +1453,18 @@ def _evidence(args: argparse.Namespace) -> int:
     as_of: datetime = args.as_of
     if as_of.tzinfo is None:
         return _fail(EXIT_INVALID_CATALOGUE, "--as-of must carry a UTC offset")
-    given = [args.sample_store, args.events_dir, args.event_sources_dir]
+    given = [
+        args.sample_store,
+        args.events_dir,
+        args.event_sources_dir,
+        args.creator_supply_dir,
+    ]
     if args.synthetic_scenario and any(path is not None for path in given):
         return _fail(
             EXIT_INVALID_CATALOGUE,
-            "--synthetic-scenario replaces --sample-store, --events-dir and "
-            "--event-sources-dir; synthetic and stored evidence are never mixed",
+            "--synthetic-scenario replaces --sample-store, --events-dir, "
+            "--event-sources-dir and --creator-supply-dir; synthetic and stored evidence "
+            "are never mixed",
         )
     if args.out is not None and _inside(args.out, DEFAULT_ARTIFACTS_DIR):
         return _fail(
@@ -1499,6 +1516,7 @@ def _evidence(args: argparse.Namespace) -> int:
         samples_dir: Path | None,
         events_dir: Path | None,
         sources_dir: Path | None,
+        creators_dir: Path | None,
         synthetic: bool,
     ) -> EvidenceInputs:
         def origin_of(reference: str) -> InputProvenance:
@@ -1531,6 +1549,10 @@ def _evidence(args: argparse.Namespace) -> int:
             events_provenance=NO_INPUT
             if events_dir is None and sources_dir is None
             else origin_of(", ".join(str(p) for p in (events_dir, sources_dir) if p is not None)),
+            creator_supply=None if creators_dir is None else CreatorSupplyStore(creators_dir),
+            creator_supply_provenance=NO_INPUT
+            if creators_dir is None
+            else origin_of(str(creators_dir)),
         )
 
     scenario: tuple[str, ...] = ()
@@ -1539,6 +1561,7 @@ def _evidence(args: argparse.Namespace) -> int:
         for policy, purpose in (
             (STEAM_CURRENT_PLAYERS_POLICY, SourcePurpose.DEMAND_SIGNALS),
             (STEAM_NEWS_POLICY, SourcePurpose.EVENT_INTELLIGENCE),
+            (YOUTUBE_DATA_POLICY, SourcePurpose.CREATOR_SUPPLY),
         ):
             refusal = policy.registration_refusal(purpose, args.stage)
             if refusal is not None:
@@ -1546,11 +1569,16 @@ def _evidence(args: argparse.Namespace) -> int:
         with tempfile.TemporaryDirectory(prefix="metaspike-synthetic-") as temporary:
             root = Path(temporary)
             built = build_synthetic_scenario(root, state, records, as_of)
-            scenario = built.description
+            named = {
+                game.slug: (game.canonical_game_id, game.name) for game in state.catalogue.games
+            }
+            creators = build_synthetic_creator_supply(root, named, as_of)
+            scenario = (*built.description, *creators.description)
             inputs = stores(
                 root / "samples",
                 root / "events",
                 root / "event-sources",
+                creators.store.root,
                 synthetic=True,
             )
             report = assess_evidence(inputs, as_of, games)
@@ -1559,6 +1587,7 @@ def _evidence(args: argparse.Namespace) -> int:
             args.sample_store,
             args.events_dir,
             args.event_sources_dir,
+            args.creator_supply_dir,
             synthetic=False,
         )
         report = assess_evidence(inputs, as_of, games)

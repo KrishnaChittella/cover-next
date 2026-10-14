@@ -59,7 +59,7 @@ No frozen rule, score, schema or source policy was changed, and none needed to b
 | `catalogue_metadata` | IGDB, Steam's app list | Who the game is. Never that demand is rising. |
 | `demand_signal` | Wikimedia pageviews, Steam concurrent players | Attention, each family against its own history. |
 | `event_evidence` | Steam News | Promoted events and their timing. |
-| `creator_supply` | none | Not integrated. |
+| `creator_supply` | YouTube Data (U6.1, offline only) | A bounded sample of videos, when given; otherwise not integrated. See [youtube-creator-supply.md](youtube-creator-supply.md). |
 | `community_interest` | none | Not integrated. |
 
 Pageviews are not player counts and neither is a view count. No raw number of one
@@ -84,7 +84,7 @@ and the reading lists it as `quarantined, NOT bound` and takes nothing from it.
 
 ## States
 
-Eight, kept apart because each calls for something different:
+Nine, kept apart because each calls for something different:
 
 | State | Meaning |
 |---|---|
@@ -95,7 +95,8 @@ Eight, kept apart because each calls for something different:
 | `unknown` | Whether it can observe this game is not established. |
 | `unresolved` | Observations or records exist, and no approved rule makes one value of them (several Steam apps; a quarantined record). |
 | `not_collected` | Nothing of this source was given to the reading. |
-| `not_integrated` | MetaSpike has no source of this kind. Never a zero. |
+| `not_integrated` | MetaSpike has no source of this kind, or none was given. Never a zero. |
+| `incomplete` | Asked, and the answer is not whole: a page limit, a quota, a failure (U6.1). |
 
 ## Origin: verified, unverified, synthetic (U6.0.1)
 
@@ -354,9 +355,9 @@ resource was used and nothing was benchmarked anywhere else.
 
 - **Opportunity scoring.** No rule exists for combining families, for agreement between
   them, or for weighing demand against supply. The reading is its input, not a draft of it.
-- **Creator supply (YouTube)** and **community interest (Reddit)**: no adapter, no
-  policy, no fixtures. The model has a kind and a state for each, so adding a source
-  fills a row and changes no existing contract.
+- **Creator supply (YouTube)**: an offline parser, association rule and reading exist
+  since U6.1, on synthetic data only. Nothing has been collected.
+- **Community interest (Reddit)**: no adapter, no policy, no fixtures.
 - **A combination rule** for games with several Steam apps.
 - **Real player history.** None is recorded; sampling is a private-development command.
 - **Wikimedia identifiers** beyond the fifteen original games (14 of 234 entities).

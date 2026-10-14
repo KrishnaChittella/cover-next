@@ -352,6 +352,12 @@ freshness, movements against each source's own history, known events, and what i
 missing. It is a private reading, not an artifact, and is never published. See
 [docs/multi-source-evidence.md](docs/multi-source-evidence.md).
 
+With `--synthetic-scenario` or `--creator-supply-dir` the reading also carries a
+creator-supply sample: YouTube-shaped responses parsed offline, each video associated
+with a game or not, and the sample described without ever being called the market.
+MetaSpike has never called YouTube; see
+[docs/youtube-creator-supply.md](docs/youtube-creator-supply.md).
+
 ## Architecture
 
 ```

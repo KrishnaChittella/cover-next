@@ -15,7 +15,8 @@ apart, because they have different answers:
     synthetic    Declared by the command's own scenario, or detected from what is
                  stored: a sample written by the scenario carries its run id, and an
                  announcement written for a test points at the reserved `.invalid`
-                 domain, which no real source uses.
+                 domain, which no real source uses, and a synthetic YouTube-shaped
+                 response carries an etag that begins with `SYNTHETIC`.
     unverified   Everything else. A local store is read as it is found. Nothing in it
                  establishes who wrote it, so nothing here vouches for it.
 
@@ -40,6 +41,9 @@ from metaspike.evidence.model import InputProvenance, Origin
 
 # Written by the synthetic scenario on every sample it invents.
 SYNTHETIC_RUN_ID: Final = "synthetic-scenario"
+# Every response the synthetic creator-supply scenario writes has an etag starting so.
+# A real etag is an opaque token of the source's; it never reads like this.
+SYNTHETIC_ETAG_PREFIX: Final = "SYNTHETIC"
 # RFC 2606 reserves this top-level domain: it can never resolve, so no real post has it.
 _RESERVED_SUFFIX: Final = ".invalid"
 
@@ -129,6 +133,10 @@ def detected_synthetic(provenance: InputProvenance, why: str) -> InputProvenance
 
 def has_synthetic_run(run_ids: Iterable[str]) -> bool:
     return any(run_id == SYNTHETIC_RUN_ID for run_id in run_ids)
+
+
+def has_synthetic_etag(etags: Iterable[str | None]) -> bool:
+    return any(etag is not None and etag.startswith(SYNTHETIC_ETAG_PREFIX) for etag in etags)
 
 
 def is_reserved_reference(reference: str | None) -> bool:

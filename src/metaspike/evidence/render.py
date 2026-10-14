@@ -51,7 +51,8 @@ def _source_line(item: SourceEvidence) -> str:
     )
     if marks:
         line += f"   [{', '.join(marks)}]"
-    if item.reason and item.state is not EvidenceState.AVAILABLE:
+    described_below = item.kind is EvidenceKind.CREATOR_SUPPLY and item.policy is not None
+    if item.reason and item.state is not EvidenceState.AVAILABLE and not described_below:
         line += f"\n{'':24}{item.reason}"
     return line
 
@@ -188,6 +189,47 @@ def _game(game: GameEvidence) -> list[str]:
             f"{counts.timing_not_established}); refusals {counts.refusals}"
         )
 
+    supply = game.creator_supply
+    if supply is not None:
+        row = game.source("youtube_data")
+        mark = {
+            Standing.SYNTHETIC: "  [SYNTHETIC]",
+            Standing.UNVERIFIED: "  [UNVERIFIED ORIGIN]",
+        }.get(row.provenance.standing, "")
+        lines.append(
+            f"  Creator supply: a SAMPLE, not the market ({supply.state.value}){mark}. "
+            "Total competition: UNKNOWN."
+        )
+        lines.append(f"    {supply.summary}")
+        for asked in supply.queries:
+            detail = (
+                ""
+                if asked.error_code is None
+                else f" ({asked.error_code.value}"
+                + (f": {asked.api_error_reason}" if asked.api_error_reason else "")
+                + ")"
+            )
+            lines.append(
+                f"    query sample {asked.query_id[:12]}: {asked.completeness.value}{detail}, "
+                f"{asked.pages_fetched} page(s), {asked.videos_returned} result(s), "
+                f"retrieved {asked.retrieved_at:%Y-%m-%d %H:%MZ}"
+            )
+        if supply.candidate_videos:
+            lines.append(
+                f"    sampled videos {supply.candidate_videos} (returned twice: "
+                f"{supply.duplicate_results}); supported {supply.supported_videos} from "
+                f"{supply.supported_channels} channel(s), most from one channel "
+                f"{supply.most_videos_from_one_channel}; published in the last 24 h "
+                f"{supply.supported_published_last_24h}, last 7 d "
+                f"{supply.supported_published_last_7d}; view count held for "
+                f"{supply.supported_with_view_count}, absent for "
+                f"{supply.supported_without_view_count}"
+            )
+        for video in supply.videos:
+            lines.append(
+                f"      {video.video_id}  {video.association.value:<10}"
+                f"{', '.join(video.reasons)}  published {video.published_at:%Y-%m-%d %H:%MZ}"
+            )
     lines.append(f"  Usable now: {', '.join(game.usable_sources) or 'nothing'}")
     if game.restricted_sources:
         lines.append(f"  Private development only: {', '.join(game.restricted_sources)}")
@@ -233,7 +275,8 @@ def render(report: EvidenceReport, scenario: tuple[str, ...] = ()) -> str:
         if policy.public_launch_refusal:
             lines.append(f"{'':26}public launch: {policy.public_launch_refusal}")
     absent = f"{EvidenceState.NOT_INTEGRATED.value}: no source, no policy"
-    lines.append(f"    {'creator supply':<22}{'-':<20}{absent}")
+    if not any(policy.purpose.value == "creator_supply" for policy in report.policies):
+        lines.append(f"    {'creator supply':<22}{'-':<20}{absent}")
     lines.append(f"    {'community interest':<22}{'-':<20}{absent}")
     for game in report.games:
         lines.extend(_game(game))

@@ -64,6 +64,9 @@ class SourcePurpose(StrEnum):
     # Announcements read as evidence of events. Nothing here is a demand metric, and
     # what is derived is an event (a type and a time), never a number of the source's.
     EVENT_INTELLIGENCE = "event_intelligence"
+    # Who has already published about a game: sampled videos and channels. What is
+    # derived is a description of a bounded sample, never a figure of the source's own.
+    CREATOR_SUPPLY = "creator_supply"
 
 
 class StageClearance(FrozenModel):
@@ -270,6 +273,26 @@ class SourcePolicy(FrozenModel):
                 if not self.redistribution_allowed.permits:
                     return (
                         f"showing the source's announcements is not explicitly allowed "
+                        f"({self.redistribution_allowed.value}), so the source may not be "
+                        f"part of a {stage.value} configuration"
+                    )
+        if purpose is SourcePurpose.CREATOR_SUPPLY:
+            # Counting a sample is a derived output. Privately the question may stay
+            # unanswered; a prohibition is a prohibition at every stage.
+            if self.derived_metrics_allowed is Permission.PROHIBITED:
+                return "policy does not permit collection (derived figures are prohibited)"
+            if self.historical_storage_allowed in (Permission.UNKNOWN, Permission.PROHIBITED):
+                return "policy does not permit storing the source's results"
+            if stage in PUBLIC_STAGES:
+                if not self.derived_output_permitted:
+                    return (
+                        f"derived creator-supply figures are not explicitly allowed "
+                        f"({self.derived_metrics_allowed.value}), so the source may not be "
+                        f"part of a {stage.value} configuration"
+                    )
+                if not self.redistribution_allowed.permits:
+                    return (
+                        f"showing the source's video data is not explicitly allowed "
                         f"({self.redistribution_allowed.value}), so the source may not be "
                         f"part of a {stage.value} configuration"
                     )

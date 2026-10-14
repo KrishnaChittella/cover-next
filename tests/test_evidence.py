@@ -1069,7 +1069,7 @@ def test_the_command_is_offline_deterministic_and_says_what_it_read(
     assert code == cli.EXIT_OK
     document = json.loads(printed)
     assert json.loads(out.read_text()) == document
-    assert document["report_version"] == "game_evidence_v1"
+    assert document["report_version"] == "game_evidence_v2"
     assert document["distribution"] == "private_development_only"
     assert document["as_of"] == "2026-10-05T12:00:00Z" and not document["contains_synthetic"]
     (game,) = document["games"]

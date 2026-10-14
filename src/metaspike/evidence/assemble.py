@@ -34,6 +34,10 @@ from metaspike.catalogue.eligibility import (
 from metaspike.catalogue.evaluation import require_catalogue_sources, retained_sources
 from metaspike.catalogue.generate import CatalogueState
 from metaspike.catalogue.legacy_ids import LEGACY_ID_TO_CANONICAL
+from metaspike.creator_sources.association import GameNames
+from metaspike.creator_sources.reading import CreatorSupplyReading, SupplyState, read_creator_supply
+from metaspike.creator_sources.store import CreatorSupplyStore
+from metaspike.creator_sources.youtube import SOURCE_ID as YOUTUBE_SOURCE
 from metaspike.domain.families import SourceFamily
 from metaspike.domain.games import CanonicalGame
 from metaspike.domain.identity import MappingHistory, SourceRecordKey
@@ -74,6 +78,7 @@ from metaspike.evidence.model import (
 )
 from metaspike.evidence.provenance import (
     detected_synthetic,
+    has_synthetic_etag,
     has_synthetic_run,
     is_reserved_reference,
     require_honest,
@@ -141,8 +146,21 @@ _READ_FROM_INPUT = frozenset(
         EvidenceState.STALE,
         EvidenceState.MISSING,
         EvidenceState.UNRESOLVED,
+        EvidenceState.INCOMPLETE,
     }
 )
+
+# A creator-supply source is in the reading only when its input is given.
+CREATOR_PURPOSES: Mapping[str, SourcePurpose] = {YOUTUBE_SOURCE: SourcePurpose.CREATOR_SUPPLY}
+
+_SUPPLY_STATE = {
+    SupplyState.NOT_QUERIED: EvidenceState.MISSING,
+    SupplyState.EXPIRED: EvidenceState.STALE,
+    SupplyState.INCOMPLETE: EvidenceState.INCOMPLETE,
+    SupplyState.NO_RESULTS: EvidenceState.AVAILABLE,
+    SupplyState.AMBIGUOUS: EvidenceState.UNRESOLVED,
+    SupplyState.OBSERVED: EvidenceState.AVAILABLE,
+}
 
 NO_RECORDING_REASON = "the pageview input holds no response for this game's article"
 NEVER_SAMPLED_REASON = "eligible, and no sample of it had been stored by this moment"
@@ -175,6 +193,8 @@ class EvidenceInputs:
     events: EventStore | None = None
     event_sources: EventSourceStore | None = None
     events_provenance: InputProvenance = NO_INPUT
+    creator_supply: CreatorSupplyStore | None = None
+    creator_supply_provenance: InputProvenance = NO_INPUT
 
 
 def _policy(inputs: EvidenceInputs, source: str) -> SourcePolicy:
@@ -186,8 +206,12 @@ def _policy(inputs: EvidenceInputs, source: str) -> SourcePolicy:
     return policy
 
 
+def _purpose(source: str) -> SourcePurpose:
+    return PURPOSES[source] if source in PURPOSES else CREATOR_PURPOSES[source]
+
+
 def _require(inputs: EvidenceInputs, source: str) -> None:
-    refusal = _policy(inputs, source).registration_refusal(PURPOSES[source], inputs.stage)
+    refusal = _policy(inputs, source).registration_refusal(_purpose(source), inputs.stage)
     if refusal is not None:
         raise SourcePolicyError(f"{source}: {refusal}")
 
@@ -201,6 +225,8 @@ def require_sources(inputs: EvidenceInputs) -> None:
         _require(inputs, WIKIMEDIA_SOURCE)
     if inputs.samples is not None:
         _require(inputs, STEAM_SOURCE)
+    if inputs.creator_supply is not None:
+        _require(inputs, YOUTUBE_SOURCE)
     seen: set[str] = set()
     if inputs.events is not None:
         seen |= {check.source for check in inputs.events.checks()}
@@ -293,6 +319,12 @@ class _Assessment:
                 for outcome in run.outcomes:
                     if outcome.key == V0_INPUT_SIGNAL:
                         self.pageviews[outcome.canonical_game_id] = outcome
+        # Every catalogue game's names, for telling which game a video title names.
+        self.catalogue_names = [
+            GameNames.of(game.canonical_game_id, game.name, game.aliases)
+            for game in state.catalogue.games
+        ]
+        self.names = {entry.canonical_game_id: entry for entry in self.catalogue_names}
         self.event_records: tuple[EventRecord, ...] = ()
         self.event_checks: tuple[CoverageCheck, ...] = ()
         if inputs.events is not None:
@@ -307,7 +339,7 @@ class _Assessment:
         )
 
     def view(self, source: str) -> PolicyView:
-        return policy_view(_policy(self.inputs, source), PURPOSES[source], self.inputs.stage)
+        return policy_view(_policy(self.inputs, source), _purpose(source), self.inputs.stage)
 
     # --- identity -------------------------------------------------------------------------
 
@@ -679,6 +711,52 @@ class _Assessment:
             policy=self.view(source),
         )
 
+    # --- creator supply -------------------------------------------------------------------
+
+    def creator_supply(
+        self, game: CanonicalGame
+    ) -> tuple[SourceEvidence, CreatorSupplyReading | None]:
+        """The creator-supply row and its reading, or the unchanged absent row."""
+        store = self.inputs.creator_supply
+        if store is None:
+            absent = _not_integrated(
+                CREATOR_SUPPLY, EvidenceKind.CREATOR_SUPPLY, SourceFamily.CREATOR_SUPPLY
+            )
+            return absent, None
+        game_id = game.canonical_game_id
+        related = [
+            product.title
+            for product in self.inputs.state.related_products
+            if game_id in product.entity_ids and product.record in self.by_key
+        ]
+        reading = read_creator_supply(
+            store, self.names[game_id], self.catalogue_names, related, self.as_of
+        )
+        declared = self.inputs.creator_supply_provenance
+        etags = [
+            fetch.etag
+            for fetch in store.searches(self.as_of)
+            if fetch.query.canonical_game_id == game_id
+        ]
+        provenance = (
+            detected_synthetic(declared, "its responses carry a SYNTHETIC etag")
+            if has_synthetic_etag(etags)
+            else declared
+        )
+        state = _SUPPLY_STATE[reading.state]
+        row = SourceEvidence(
+            source=YOUTUBE_SOURCE,
+            kind=EvidenceKind.CREATOR_SUPPLY,
+            family=SourceFamily.CREATOR_SUPPLY,
+            state=state,
+            # Even a whole sample with supported videos is only ever a lower bound.
+            reason=reading.summary,
+            latest_observed_at=reading.latest_retrieved_at,
+            provenance=provenance if state in _READ_FROM_INPUT else NO_INPUT,
+            policy=self.view(YOUTUBE_SOURCE),
+        )
+        return row, reading
+
     def candidate_counts(self, canonical_game_id: str) -> CandidateCounts:
         own = [c for c in self.candidates if c.canonical_game_id == canonical_game_id]
         promoted = sum(c.observation_id is not None for c in own)
@@ -720,6 +798,7 @@ class _Assessment:
                 ),
             )
         )
+        creators, supply = self.creator_supply(game)
         sampled = self.samples_provenance(game_id)
         announced = self.events_provenance(game_id)
         readers, pageviews, readers_state, readers_reason = self.pageviews_reading(game)
@@ -751,9 +830,7 @@ class _Assessment:
                 players_reason,
             ),
             self.event_source(game, eligibility, apps, announced),
-            _not_integrated(
-                CREATOR_SUPPLY, EvidenceKind.CREATOR_SUPPLY, SourceFamily.CREATOR_SUPPLY
-            ),
+            creators,
             _not_integrated(COMMUNITY_INTEREST, EvidenceKind.COMMUNITY_INTEREST, None),
         )
         demand_sources = [item for item in sources if item.kind is EvidenceKind.DEMAND_SIGNAL]
@@ -784,6 +861,7 @@ class _Assessment:
                 else ()
             ),
             candidates=self.candidate_counts(game_id),
+            creator_supply=supply,
             independent_demand_families=independent,
             verified_demand_families=verified,
             unconfirmed_demand_families=unconfirmed,
@@ -794,7 +872,7 @@ class _Assessment:
             restricted_sources=tuple(item.source for item in sources if item.restricted),
             synthetic_sources=tuple(item.source for item in sources if item.provenance.synthetic),
             unverified_sources=tuple(item.source for item in sources if item.provenance.unverified),
-            gaps=_gaps(sources, identity, events, independent),
+            gaps=_gaps(sources, identity, events, independent, supply),
         )
 
 
@@ -835,6 +913,7 @@ def _gaps(
     identity: IdentityEvidence,
     events: EventIntelligence,
     independent: int,
+    supply: CreatorSupplyReading | None = None,
 ) -> tuple[Gap, ...]:
     """What a creator-opportunity recommendation would still need. Stated, never scored."""
     gaps = [
@@ -843,6 +922,23 @@ def _gaps(
             text=(
                 "No creator-supply source exists, so how many videos already cover this "
                 "game is unknown. Unknown is not low competition."
+            ),
+        )
+        if supply is None
+        else Gap(
+            code="creator_supply_not_sampled",
+            text=(
+                f"No current creator-supply sample is held for this game ({supply.state.value}), "
+                "so how many videos already cover it is unknown. Unknown is not low competition."
+            ),
+        )
+        if supply.state in (SupplyState.NOT_QUERIED, SupplyState.EXPIRED)
+        else Gap(
+            code="creator_supply_is_a_sample",
+            text=(
+                f"Creator supply is a bounded sample ({supply.state.value}), not the "
+                "market: total creator competition is unknown, and nothing calibrated says "
+                "whether what was sampled is much or little."
             ),
         ),
         Gap(
@@ -957,6 +1053,7 @@ def assess_evidence(
         inputs.wikimedia_provenance,
         inputs.samples_provenance,
         inputs.events_provenance,
+        inputs.creator_supply_provenance,
     ):
         require_honest(claimed)
     if as_of < inputs.state.generated_at:
@@ -974,6 +1071,10 @@ def assess_evidence(
         STEAM_SOURCE: inputs.samples_provenance,
         STEAM_NEWS_SOURCE: inputs.events_provenance,
     }
+    purposes = dict(PURPOSES)
+    if inputs.creator_supply is not None:
+        provenance[YOUTUBE_SOURCE] = inputs.creator_supply_provenance
+        purposes.update(CREATOR_PURPOSES)
     games = tuple(assessment.game(catalogue.get(game_id)) for game_id in wanted)
     return EvidenceReport(
         as_of=as_of,
@@ -984,7 +1085,7 @@ def assess_evidence(
         inputs=provenance,
         policies=tuple(
             policy_view(_policy(inputs, source), purpose, inputs.stage)
-            for source, purpose in PURPOSES.items()
+            for source, purpose in purposes.items()
         ),
         games=games,
     )

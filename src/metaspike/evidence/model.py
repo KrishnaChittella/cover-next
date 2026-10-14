@@ -10,10 +10,11 @@ why. It computes no score of its own and weighs nothing against anything else:
                          averaged or compared in raw units.
     event evidence       promoted events and their timing. An announcement that was
                          not promoted is a candidate and is only ever counted.
-    creator supply       not integrated. Reported as that, never as zero.
+    creator supply       a bounded sample of videos, when one is given; otherwise not
+                         integrated. A sample is never the market and never a zero.
     community interest   not integrated. Reported as that, never as zero.
 
-Eight states are kept apart, because each one calls for something different:
+Nine states are kept apart, because each one calls for something different:
 
     available       the source observes the game and its latest observation is current
     stale           it has observed the game, but not recently enough
@@ -22,7 +23,8 @@ Eight states are kept apart, because each one calls for something different:
     unknown         whether it can observe this game is not established
     unresolved      observations exist, and no approved rule makes one value of them
     not_collected   nothing of this source was given to the assessment
-    not_integrated  MetaSpike has no source of this kind yet
+    not_integrated  MetaSpike has no source of this kind yet, or none was given
+    incomplete      asked, and the answer is not whole: a page limit, a quota, a failure
 
 A reported value of zero is `available` with a level of zero. It is none of the others.
 
@@ -35,6 +37,7 @@ from typing import Any, Final, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from metaspike.creator_sources.reading import CreatorSupplyReading
 from metaspike.domain.families import SourceFamily
 from metaspike.domain.games import GameId, LifecycleState
 from metaspike.domain.model import FrozenModel
@@ -45,7 +48,7 @@ from metaspike.events.radar import RadarItem
 from metaspike.features.aggregate import DailyAggregate, HourlyAggregate
 from metaspike.features.semantics import EntityEvidenceV2
 
-EVIDENCE_REPORT_VERSION: Final = "game_evidence_v1"
+EVIDENCE_REPORT_VERSION: Final = "game_evidence_v2"
 PRIVATE_DEVELOPMENT_ONLY: Final = "private_development_only"
 
 
@@ -68,6 +71,8 @@ class EvidenceState(StrEnum):
     UNRESOLVED = "unresolved"
     NOT_COLLECTED = "not_collected"
     NOT_INTEGRATED = "not_integrated"
+    # Asked, and the answer is not whole: a page limit, a quota, a failure.
+    INCOMPLETE = "incomplete"
 
 
 class Origin(StrEnum):
@@ -204,6 +209,7 @@ class SourceEvidence(FrozenModel):
             EvidenceState.AVAILABLE,
             EvidenceState.STALE,
             EvidenceState.UNRESOLVED,
+            EvidenceState.INCOMPLETE,
         )
 
     @property
@@ -320,6 +326,9 @@ class GameEvidence(FrozenModel):
     events: EventIntelligence
     upcoming: tuple[RadarItem, ...] = ()
     candidates: CandidateCounts
+    # The creator-supply sample, when a creator-supply input was given. None otherwise.
+    # A description of a bounded sample; never a count of the market, and never a score.
+    creator_supply: CreatorSupplyReading | None = None
     # Independent demand families that are available now AND verified real observations.
     independent_demand_families: int = Field(ge=0)
     verified_demand_families: tuple[SourceFamily, ...] = ()
@@ -341,7 +350,8 @@ class GameEvidence(FrozenModel):
 class EvidenceReport(FrozenModel):
     """A local, private reading. It is not an artifact and is never published."""
 
-    report_version: Literal["game_evidence_v1"] = EVIDENCE_REPORT_VERSION
+    # v2 (U6.1): creator supply; the `incomplete` state; and the U6.0.1 provenance fields.
+    report_version: Literal["game_evidence_v2"] = EVIDENCE_REPORT_VERSION
     as_of: AwareDatetime
     stage: DeploymentStage
     distribution: Literal["private_development_only"] = PRIVATE_DEVELOPMENT_ONLY
