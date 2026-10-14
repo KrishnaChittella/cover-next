@@ -1,267 +1,275 @@
 # Handoff: latest checkpoint (product branch)
 
-This file is the short-lived handoff from Claude Code to ChatGPT. **This copy lives only
-on the branch `product/local-ui`.** The handoff on `main` is the C2-F soak's and was not
-touched. It supports communication only and replaces no code, test or document.
+## PRODUCT BUILD U5.3: QUARANTINE FINGERPRINT SCALING — CHATGPT REVIEW REQUIRED
 
-Production baseline: **PHASE 4 PART C2-F: SEVEN-DAY SOAK RUNNING** (observed read-only
-at 01:20 UTC on 2026-10-13; see the last section. Not altered. Not judged.)
+Branch `product/local-ui` only. Offline. No production action, no live source call, no
+deployment, no pull request, no merge to `main`. This file is the product-branch
+handoff; `main`'s handoff was not touched. No further checkpoint has been started.
 
-Parallel checkpoint: **PRODUCT BUILD U5.2: OFFLINE CATALOGUE SCALING OPTIMIZATION — CHATGPT REVIEW REQUIRED**
+- **Approved baseline (rollback point):** `55531e03183bff90ec85140528c3a3d7d694803c`
+  (U5.2 handoff; U5.2 implementation `4eface9`).
+- **Implementation commit:** `2494916` — `perf: reduce redundant quarantine
+  fingerprint hashing`.
+- **Production `main`:** `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, unchanged.
+- At the start the checkout was on `product/local-ui` at `55531e0`, level with
+  `origin/product/local-ui`, tree clean; the previous handoff was U5.2.
 
-Previous checkpoint U5.1.2 was approved. Baseline commit `c89ea4b`.
+**Result in one line:** each record's content hash is now computed once per run instead
+of once per fingerprint that reads it; every fingerprint, decision and catalogue state
+is identical to the original; resolving time roughly halved at 10,000 records and
+above.
 
-Offline and on the product branch only. No source was called. Both targets were
-optimised with exact equivalence shown; this is not a BLOCKED handoff. Production
-adoption remains after C2-F and is not proposed here.
+## Files changed
 
-Details: `docs/catalogue-expansion.md`, section "Scaling optimisation (U5.2)".
+| File | Change |
+|---|---|
+| `src/metaspike/domain/source_records.py` | New `ContentHashMemo` (per-run, keyed by record object). `SourceRecord.content_hash` itself is untouched. |
+| `src/metaspike/resolution/quarantine.py` | `evaluation_fingerprint(view, overrides, hashes=None)`: reads content hashes through the memo when one is given. Payload, ordering, canonical JSON and SHA-256 untouched. |
+| `src/metaspike/catalogue/incremental.py` | `generate_catalogue_blocked` creates one memo per call and passes it to both fingerprint calls and the decision log. `GenerationStats` gained `content_hashes_requested` / `content_hashes_computed`. The cross-check side stays unmemoised. |
+| `src/metaspike/catalogue/evaluation.py` | `WorkCount` reports the two new counters (offline evaluation summary only). |
+| `tests/catalogue_scale.py` | Harness counts real `content_hash` computations by wrapping the property, in a separate second run. |
+| `tests/fingerprint_reference.py` | New. Verbatim copy of the U5.2 `evaluation_fingerprint` (checked by diff), used as the reference. |
+| `tests/test_fingerprint_memo.py` | New. 9 tests. |
+| `docs/catalogue-expansion.md` | New section "Quarantine fingerprint hashing (U5.3)". U5 and U5.2 figures left as recorded. |
 
-## Code changed, and why
+Not changed (no diff): `resolver.py`, `normalize.py`, `blocking.py`,
+`catalogue/generate.py` (the reference engine), `persistence.py`, `eligibility.py`,
+`sources/`, `scoring/`, `features/`, `events/`, `event_sources/`, `validation/`,
+`schemas/`, `apps/`, `tests/fixtures`, `.github/`, the golden set. No persisted format
+changed; no schema changed; no migration concern. The memo is never written anywhere.
 
-| File | Change | Why |
-|---|---|---|
-| `resolution/blocking.py` | The packaging-variant key | Removes the full-scan fallback (Target A) |
-| `catalogue/eligibility.py` | A per-call lookup | Removes the per-entity scans (Target B) |
-| `tests/eligibility_reference.py` | New: the previous eligibility, verbatim | The reference for parity |
-| `tests/test_steam_eligibility_index.py` | New | Parity tests |
-| `tests/test_catalogue_blocking.py` | Adversarial tests added; two tests that described the old fallback updated | See "Tests" |
-| `tests/test_catalogue_expansion.py` | Pinned work counts updated | Full scans 60 → 0 |
-| `docs/catalogue-expansion.md` | New section | |
+## Root cause
 
-Not changed: `resolver.py`, `normalize.py`, `quarantine.py`, `models.py`,
-`catalogue/incremental.py`, `generate.py`, `persistence.py`, `coverage.py`,
-`evaluation.py`, `cli.py`, `domain/`, `sources/`.
+`SourceRecord.content_hash` is a property that serialises the whole record and takes a
+SHA-256 every time it is read. `evaluation_fingerprint` reads it for the incoming
+record, for every record of every candidate entity and for every unresolved linking
+record, on every pass. At 20,000 synthetic records that was 747,955 computations over
+20,000 records. Confirmed by counting, not inferred (see Benchmark).
 
-## A. Candidate blocking
+## The optimisation, exactly
 
-The resolver calls an entity a packaging variant when the incoming title core, minus
-rework words, minus numbers equal to one of **the other record's** release years,
-equals the other record's core minus rework words. Which numbers drop depends on the
-record compared with. The old index tried every subset of the incoming title's numbers
-(exponential) and above ten numbers returned "assess every entity".
+`ContentHashMemo.of(record)` returns `record.content_hash`, computed the first time
+that object is asked about and kept for the rest of the run. That is all. Larger
+designs (per-entity evidence summaries) were considered and not used: they add state
+that must be kept in step with entities, and were not needed for a clear gain.
 
-Now:
+## Cache lifetime and invalidation
 
-1. Every record is filed under the **words** of its core: the core with all numbers
-   removed, "a number" being tested exactly as the resolver tests it.
-2. Within that bucket each entry keeps its core and its release years, and the lookup
-   evaluates the resolver's own expression by calling the resolver's `_without` and
-   `_release_years`.
+- **Key: the record object** (`id(record)`), and the entry holds the record itself, so
+  it checks `held is record` and the address cannot be reused by another record while
+  the entry exists. **Not** the source-native key, and nothing a record says.
+- A `SourceRecord` is a frozen model: one object has one content hash for its life.
+- Any change is a new object (`model_copy(update=...)`, re-parse, re-fetch), which is
+  looked up afresh. Changed content under the same source id can never be answered by
+  the older record's entry.
+- **Lifetime: one call of `generate_catalogue_blocked`.** Created inside it, dropped
+  when it returns. Not module-level, not shared between runs, not stored. A
+  continuation is a new run with a new memo. Bounded by the records of that run.
+- Candidate membership, `bound_to`, linking context and overrides are still read
+  directly on every fingerprint; only the per-record hash is reused.
 
-### Why it is a superset (in fact exact, for this rule)
+Cases from the brief, and where each is shown (`tests/test_fingerprint_memo.py`):
 
-- Step 1 is a necessary condition. Dropping numbers never changes a title's words, so
-  two cores that become equal after dropping numbers already share the same words. A
-  record in any other bucket cannot match. Tested directly on 2,000 seeded token lists.
-- Step 2 is the resolver's comparison, not an approximation of it: same functions,
-  same inputs. Every entity it returns is one the resolver relates by packaging, and
-  every such entity is returned.
-- Every other key is unchanged: own key, ids both ways, URLs both ways, parent and
-  version parent, exact and alternative titles. Overrides and existing bindings are
-  still added by reference.
+| Case | Shown by |
+|---|---|
+| A same record repeatedly; B re-fetched unchanged | hash test: same value; a re-fetched object is computed afresh and equal |
+| C changed title; D changed external ids; E changed release dates; F `model_copy` | hash test and fingerprint test: new value each time, never the older answer |
+| G candidate gains or loses evidence; O a record in several candidate views; P several records on one entity | fingerprint test (gain, loss, one field of a candidate's record); real-build test (205,277 requests over 10,397 computations at 10,394 records) |
+| H rebinding / existing binding | fingerprint test (`bound_to`); quarantine test (a bound candidate record changes and reopens the quarantine) |
+| I corroborating evidence arrives | quarantine test: released by path A, one appended decision and binding |
+| J linking context changes | linking test: an unresolved linking record arriving later reopens the record |
+| K override changes | fingerprint test (applied, different, newer version, removed); linking test |
+| L continuation from previous state | builds test and quarantine test, both engines |
+| M two evaluations in one process | separate-runs test; no module-level memo exists |
+| N same title, different source ids | hash test: different content, different hash |
 
-No threshold lowered, no top-K, no similarity, no probabilistic filter, no assumption
-that a number is a year or a title unique. A test asserts none of those constructs is
-in the module's code.
+## Fingerprint and build parity
 
-### Remaining full-scan conditions
+- **Content hash:** `memo.of(r) == r.content_hash` for unchanged, re-fetched and
+  changed records, and across 3,000 short-lived records with garbage collection.
+- **Fingerprint:** current-with-memo == current-without == original U5.2 function, on
+  hand-built views; the value moves for 16 distinct evidence changes and stays for
+  changes that are not evidence.
+- **Every fingerprint in real builds:** more than 2,500 fingerprints computed while
+  building the recorded fixtures and a 1,500-record synthetic sample (first builds and
+  continuations) were each re-derived by the original function and matched.
+- **First generation:** blocked engine == reference engine (`==` and identical JSON) on
+  the recorded fixtures and synthetic samples, cross-check on.
+- **Incremental generation:** the same, for unchanged re-runs, new records, changed
+  records, newly corroborated quarantines, a changed bound record reopening a
+  quarantine, and a changed override.
+- **10,394 records (slow proof, run in this checkpoint):** blocked == reference, equal
+  JSON. 4,336 entities, 5,494 bindings, 4,087 quarantined, 0 full scans; 205,277 hashes
+  requested, 10,397 computed. (The three beyond the record count are records the run
+  holds as separate objects; a few more on small fixtures for the same reason. It is
+  one per object, as designed.)
 
-**None.** No input asks for every entity. Measured full scans went to 0 at every size
-and in the 10,394-record proof. The `None` return meaning "assess everything" stays in
-`wanted_refs`' contract, unused, as a safe way out for a future case.
+The reference engine was not edited and was not given a memo, so every engine
+comparison is also a memo-versus-no-memo comparison. No mismatch was found at any
+point.
 
-What remains for this rule is a bucket scan: titles with the same words in the same
-order share a bucket, compared by tuple, with no resolver call.
+## Quarantine re-evaluation behaviour (unchanged)
 
-## B. Indexed eligibility
+Each step run through both engines, states equal:
 
-`steam_eligibility` builds one lookup per call from the same state, records and
-`as_of`: games by id; per entity, records bound at `as_of`, in binding order; per
-entity, Steam apps currently quarantined that name it; records by key.
-`sampling_targets` groups each Steam record's binding history once.
+- unchanged evidence: skipped; the entry (evaluations, `first_seen`, `last_evaluated`,
+  fingerprint, history) is exactly what it was, including after a re-fetch;
+- a bound candidate record changes: the quarantine leaning on it is examined again
+  (`evaluations` 2, `first_seen` kept, `last_evaluated` moved) and, still ambiguous,
+  stays; an unrelated quarantine is not touched;
+- conflicting evidence examined again is still a conflict;
+- corroborating id evidence releases a title-only quarantine through the frozen
+  resolver; earlier history intact; a point-in-time read before the evidence still
+  shows the record unbound;
+- a later unresolved linking record reopens the record it links to;
+- an override resolves the record it names;
+- no record is dropped: every supplied record is bound or in quarantine.
 
-The lookup is a local value, discarded after the call. No persisted second source.
-Signatures unchanged. **The rule is character for character what it was** from the
-first deciding line to the end of the function; a test compares the two texts.
+No threshold moved. A title alone is still never an identity. No auto-merge was added.
 
-Preserved: bindings point-in-time; quarantine current at every `as_of`, not
-reconstructed; unconfirmed assertion not eligible; quarantined app not a binding;
-bound-but-unasserted not confirmed; several apps stay several ids.
+## Frozen recorded counts (unchanged, pinned by tests)
 
-## Exact parity results
-
-**Blocking.** `resolve(blocked_view(view)) == resolve(view)` (whole decision) and equal
-quarantine fingerprints, on: every golden case; the hand-built adversarial views; 120
-seeded random questions against 300 held records.
-`generate_catalogue_blocked == generate_catalogue` as states and as JSON, on: both
-recorded fixtures; a 700-record stratified sample; three input orderings; the seeded
-random catalogue of 420 records with cross-check on; and **10,394 records** (the
-pre-existing slow proof, run here: passed, 0 full scans). Cross-check mode unchanged.
-
-**Eligibility.** Against the verbatim reference, field for field and in order, plus the
-sampling targets with binding references, on: the 394 recorded rows; both fixture sets
-together and the bootstrap set alone; the reference engine's state; five moments around
-binding; a binding closed and replaced, and one closed without replacement; records
-withheld; the empty catalogue; a state with no bindings or quarantine; one synthetic
-entity per branch of the rule; a 3,000-record synthetic catalogue.
-
-No mismatch was found at any point.
-
-## Adversarial tests (all synthetic, each asserting offered == the resolver's own set)
-
-A title with 37 distinct numbers; twelve numbers, one being the other record's release
-year; several year-like tokens with different subsets released; a sequel numeral that
-is not a year, and the same numeral when it is; `2016` and `02016`; titles that are
-only numbers; a repeated year; exact and alternative titles both ways; one normalised
-title on three distinct games; series siblings in Arabic and Roman numerals; remaster,
-HD and packaging editions; a title of only packaging words; id links with unrelated
-titles both ways; a store URL alone, corroborated, and claimed by two games; parent and
-version-parent links; conflicting evidence; an override target with no evidence; an
-existing binding; no key at all; an empty index. Cases A to R of the brief are covered.
-
-## Frozen recorded counts (unchanged, pinned)
-
-15 bootstrap entities; 234 broad; 219 broad-only; 327 bound; 44 quarantined; 23
-related. Steam: 90 eligible, 69 inapplicable, 75 unknown, 91 apps. Wikimedia mapped 14;
-without any eligible source 135.
+394 records · 15 narrow entities · 234 broad · 219 broad-only · 327 bound ·
+44 quarantined · 23 related. Steam: 90 eligible / 69 inapplicable / 75 unknown,
+91 apps. Wikimedia mapped 14. 135 without an eligible source. Golden set v3: 200 cases,
+178 correct, 0 false auto merges; file and content hashes unchanged. On the recorded
+394 rows the engine requests 749 content hashes and computes 397.
 
 ## Benchmark
 
-**Method.** Synthetic records only (`tests/catalogue_samples.py`). Identical datasets
-and the same deterministic id factory on both sides. Same machine, same day, one
-process per size, nothing else running. Apple M3, 8 cores, 8 GB, macOS 26.6.2, Python
-3.12.15. One run per size per side. Laptop timings, not production metrics.
+**Method.** Same machine, same synthetic datasets (`tests/catalogue_samples.py`), same
+deterministic id factory, one fresh process per size (so peak memory is not
+cumulative). Apple M3, 8 cores, 8 GB, macOS 26.6.2, Python 3.12.15. Before = commit
+`55531e0` run from an untouched `git archive` export with only the measuring harness
+replaced; after = the working tree that became `2494916`. Times come from an
+uninstrumented run; hash computations are counted in a second run of the same
+evaluation with the `content_hash` property wrapped on the class, so the figure is real
+computations, not accesses. "Requested" is the engine's own count of accesses.
 
-- Before: commit `c89ea4b`, run from an untouched export of it.
-- After: commit `4eface9`.
+**One run per size per side.** Variability was not measured; treat differences of a few
+percent, and all memory differences here, as noise. Laptop timings on synthetic data,
+not production measurements, and not a prediction for real records.
 
-| Records | | Resolving | Coverage | Total | Entities examined | Full scans | Resolver calls | Peak memory |
-|---|---|---|---|---|---|---|---|---|
-| 1,000 | before | 0.46 s | 0.05 s | 0.51 s | 25,176 | 60 | 1,030 | 54 MB |
-| | after | 0.14 s | 0.01 s | 0.15 s | 2,233 | 0 | 1,030 | 54 MB |
-| 5,000 | before | 10.38 s | 0.96 s | 11.33 s | 578,428 | 312 | 5,167 | 105 MB |
-| | after | 1.09 s | 0.08 s | 1.18 s | 11,858 | 0 | 5,167 | 109 MB |
-| 10,000 | before | 44.73 s | 4.00 s | 48.74 s | 2,289,686 | 628 | 10,343 | 170 MB |
-| | after | 3.22 s | 0.20 s | 3.41 s | 23,887 | 0 | 10,343 | 177 MB |
-| 20,000 | before | 191.41 s | 21.87 s | 213.28 s | 9,108,927 | 1,260 | 20,690 | 305 MB |
-| | after | 10.70 s | 0.25 s | 10.95 s | 47,982 | 0 | 20,690 | 308 MB |
+| Records | | Resolving | Coverage | Total | Hashes computed | Requested | Fingerprint checks | Resolver calls | Entities examined | Peak memory |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | before | 0.14 s | 0.01 s | 0.15 s | 5,184 | – | 804 | 1,030 | 2,233 | 56 MB |
+| | after | 0.10 s | 0.01 s | 0.11 s | 1,000 | 5,184 | 804 | 1,030 | 2,233 | 55 MB |
+| 5,000 | before | 1.08 s | 0.08 s | 1.16 s | 59,515 | – | 4,042 | 5,167 | 11,858 | 108 MB |
+| | after | 0.71 s | 0.03 s | 0.75 s | 5,000 | 59,515 | 4,042 | 5,167 | 11,858 | 111 MB |
+| 10,000 | before | 3.33 s | 0.24 s | 3.57 s | 204,525 | – | 8,086 | 10,343 | 23,887 | 171 MB |
+| | after | 1.75 s | 0.19 s | 1.94 s | 10,000 | 204,525 | 8,086 | 10,343 | 23,887 | 179 MB |
+| 20,000 | before | 10.49 s | 0.29 s | 10.78 s | 747,955 | – | 16,188 | 20,690 | 47,982 | 307 MB |
+| | after | 5.41 s | 0.29 s | 5.69 s | 20,000 | 747,955 | 16,188 | 20,690 | 47,982 | 311 MB |
+| 50,000 | before | 78.03 s | 1.00 s | 79.03 s | 4,401,151 | – | 41,532 | 51,729 | 121,421 | 707 MB |
+| | after | 36.48 s | 0.98 s | 37.47 s | 50,000 | 4,401,151 | 41,532 | 51,729 | 121,421 | 719 MB |
 
-Entities, quarantined records, related products, resolver calls and fingerprint checks
-are identical on both sides at every size. The "before" column reproduces U5's own
-measurements to within a second. U5's original figures are left as recorded in the doc.
+Entities (432 / 2,070 / 4,117 / 8,210 / 20,230) and quarantined counts are identical on
+both sides at every size. The baseline's hash counts equal the figures U5.2 profiled.
+Memory: up to 12 MB more at 50,000 (one 64-character string per record), not
+distinguishable from noise with one run. The U5 and U5.2 figures in
+`docs/catalogue-expansion.md` are left as historical.
 
-## Remaining performance bottlenecks
+## Remaining performance issues
 
-**Resolving is still superlinear**: each doubling multiplies it by about 3 (was 4.3).
-Profiled at three sizes, the remaining growth is in the quarantine fingerprint:
-`evaluation_fingerprint` hashes every record of every candidate entity each time a
-quarantined record is re-examined, and `SourceRecord.content_hash` is recomputed each
-call (59,515 calls at 5,000; 204,525 at 10,000; 747,955 at 20,000). A few synthetic
-entities accumulate records in proportion to the sample (largest: 8, 16, 32 records;
-mean 1.26 throughout), and every candidate for one re-hashes all of it. Whether real
-catalogues have such entities is unknown.
+Resolving is still superlinear: about ×2.5 from 5,000 to 10,000, ×3.1 from 10,000 to
+20,000 and ×6.7 from 20,000 to 50,000. Profiling puts the remainder inside the frozen
+resolver's own assessment (`_assess`, `_has_id_link`, `_names`, `_title_relation`) when
+a candidate entity holds many records; the largest synthetic entity holds 8 / 16 / 32
+records at 5,000 / 10,000 / 20,000. That is resolver work, not hashing, and reducing it
+would mean touching or wrapping frozen identity code, so it was left alone. Whether
+real catalogues produce such entities is not known.
 
-Not changed: it is outside the two targets and decides when a quarantine is
-re-resolved. Also unaddressed: whole-state snapshots per generation.
+## Known Unicode issue (separate, not fixed)
 
-Caveats on the gain: the synthetic sample deliberately puts a dozen numbers in about 6%
-of titles. On the 394 recorded rows there were 0 full scans before, so on data like
-that the blocker's gain is small. No 50,000 run was made. Nothing ran on Cloud Run.
+The resolver's `_without` uses `str.isdigit()` and then `int()`. Some Unicode digits
+(for example Ethiopic) pass the first and fail the second with `ValueError`. It
+predates U5.2, is in frozen resolver code, and is not touched here. Nothing in U5.3
+testing showed a wider consequence. It needs its own reviewed decision.
 
-## A latent fault found, not fixed
+## Quality gates
 
-The resolver's `_without` tests `str.isdigit()` then calls `int()`. A few characters
-pass the first and fail the second (Ethiopic digits), so such a title raises
-`ValueError` inside the resolver. Pre-existing, identical before and after, left alone
-because the resolver is frozen here.
+Backend (in the product worktree):
 
-## Tests and slow-test exclusions
+- `uv run ruff format --check` — 223 files already formatted
+- `uv run ruff check` — All checks passed
+- `uv run mypy` — no issues in 210 source files
+- `uv run pytest` — **1,508 passed, 8 deselected in 306.44s** (default `slow`/`live`
+  exclusions; includes the 9 new fingerprint tests and all catalogue and quarantine
+  regressions)
+- `uv run metaspike export-schemas --check` — Schemas are up to date
+- `uv run metaspike evaluate-resolver` — exit 0; 200 cases, 0 false auto merges
 
-Added: 6 adversarial blocking tests; 5 eligibility parity tests.
+All re-run on 2026-10-14 on the exact tree that was committed.
 
-Changed deliberately: the test that asserted a crowded title falls back to assessing
-everything was replaced by one asserting it is keyed; the stratified-sample test now
-asserts 0 full scans where it asserted more than 0; the pinned 1,000-record work counts
-moved from 60 full scans and 25,176 entities offered to 0 and 2,233, with resolver
-calls (1,030) and fingerprint checks (804) unchanged. No golden label was touched.
+Slow tests, run explicitly (`pytest -v -m slow tests/test_catalogue_blocking.py
+tests/test_catalogue_expansion.py`): **4 passed, 43 deselected in 1286.77s** — the
+10,394-record blocked-versus-reference proof (1,267.79 s) and the 5,000 / 10,000 /
+20,000 scale cases. No slow test was excluded. `live` tests were not run (no live
+source calls are permitted).
 
-**Slow tests actually run in this checkpoint: all four**, as tests: the 5,000, 10,000
-and 20,000 scale cases, and the 10,394-record blocked-versus-reference proof. 4 passed
-in 29 minutes. Separately, the benchmark above was run as a script for both sides.
+Frontend (`apps/dev-ui`, no frontend change; run 2026-10-13 before the implementation
+commit, tree unchanged since): `contract:check`, `typecheck`, `lint`, `test`
+(179 passed), `build` — all passed.
 
-## Gates
+A note on elapsed time: the slow proof was first attempted on 2026-10-13 and did not
+finish because the laptop, on a nearly empty battery, kept sleeping. It was re-run on
+2026-10-14 on a charged machine; the result above is that run. The benchmark table was
+measured earlier on 2026-10-13, before the battery ran down.
 
-Backend: `ruff format --check` clean (221 files); `ruff check` clean; `mypy` clean (208
-files); `pytest` **1,499 passed, 8 deselected** (default `slow`/`live` exclusions; the
-slow ones were then run explicitly, above); `export-schemas --check` up to date;
-`evaluate-resolver` exit 0: golden set v3, 200 cases, 0 false automatic merges,
-precision 52/52, real-evidence recall 44/44, quarantine rate 55/200, as before.
+## Production isolation (read-only, 2026-10-14 00:44–00:46 UTC)
 
-Frontend (no frontend change): `contract:check`, `typecheck`, `lint`, `test` (179
-passed), `build` all pass.
-
-## Unchanged
-
-- **Source policy**: `sources/` and `domain/source_policy.py` no diff.
-- **Identity rules**: `resolver.py`, `normalize.py`, `quarantine.py` no diff; golden set
-  byte-identical.
-- **Score**: `scoring/` `3b857c551d5ab5b0`, `features/` `24cf7d170f57d8ab`; golden
-  replay bit-for-bit.
-- **Other intelligence**: `events/` `333373c61ae6c37f`, `event_sources/`, `validation/`
-  no diff; fingerprint tests pass.
-- **Artifact contract**: 1.5.0; `schemas/` and `apps/` no diff.
-- **Catalogue safety**: policy fail-closed, retained-source, completeness, sidecar and
-  `as_of` tests all pass. Broad production discovery still `False`.
-  `CatalogueRepository`, `advance_catalogue` and `CURRENT` untouched.
-
-## Production isolation (read-only, 00:52 and 01:20 UTC 2026-10-13)
-
-Read from GCP and GitHub:
-
-- `main` = `cb33198`, level with origin, clean; `product/local-ui` not merged; no pull
-  request; a push to it starts no workflow; last workflow run still 38104941975.
-- Terraform state generation `1791685217422653`: unchanged.
+- `main` = `cb33198`, level with `origin/main`, clean. `product/local-ui` not merged.
+  No pull request. Last workflow run still 38104941975 (11 Oct, `main`); a push to the
+  product branch starts no workflow. `.github/` not modified.
+- Terraform state generation `1791685217422653`: unchanged. No Terraform was run.
 - Control record generation `1791684706340016`: unchanged.
-- Scheduler configuration ENABLED, `0 * 12-18 10 *`: unchanged.
-- Seven jobs, generation 6, image `sha256:a8680b2be8b5…`: unchanged. Every soak
-  execution ran that image.
-- IAM, dataset schemas, secrets, alert policies: identical to the previous snapshot.
-  0 secret versions, 0 user keys. Repository variables unchanged.
-- No Wikimedia, Steam or IGDB call by U5.2. Local Steam quota ledger still 3.
-- No benchmark was run anywhere but this laptop.
-- The portfolio repository was not touched.
+- Scheduler ENABLED, configuration unchanged; only `lastAttemptTime` differs from the
+  previous snapshot.
+- Seven jobs: image and configuration identical to the previous snapshot.
+- IAM, dataset schemas, secrets, alert policies: identical. 0 secret versions, 0
+  user-managed keys across 10 service accounts.
+- Repository variables unchanged (`SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
+  `SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`).
+- No Wikimedia, Steam or IGDB call. No job triggered. Benchmarks ran only on this
+  laptop. The portfolio repository was not touched.
+- `BROAD_DISCOVERY_ENABLED` is still `False`; `CatalogueRepository`,
+  `advance_catalogue` and `CURRENT` untouched.
 
-## C2-F observation (read-only, 01:20 UTC 2026-10-13; separate; not altered; not judged)
+## C2-F observation (read-only, 2026-10-14 00:44 UTC; separate; not altered; not judged)
 
 | | |
 |---|---|
-| Executions since the window opened | 28, none failed |
+| Executions since the window opened | 53; all 53 succeeded; none running |
 | 12 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
-| 13 October so far | 2 dispatcher (00:00, 01:00) |
-| Scheduler | last attempt 01:00:05Z; next 02:00Z |
-| Warehouse rows (00:52 reading) | `collection_runs` 68, `expected_targets` 42, `period_observations` 1,568 |
+| 13 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
+| 14 October so far | 1 dispatcher (00:00) |
+| Scheduler | last attempt 2026-10-14T00:00:10Z |
+| Warehouse rows | `collection_runs` 120, `expected_targets` 56, `period_observations` 1,624 |
 
-Read from Cloud Run, Cloud Scheduler and BigQuery. A little over a day into a seven-day
-window. This is not a statement that C2-F has passed. Nothing was triggered, restarted
-or changed.
+The one failed task in the project's execution list (`ms-wikimedia-mr9kc`, 7 October)
+predates the soak window. Two days into a seven-day window. This is not a statement
+that C2-F has passed. Nothing was triggered, restarted, cancelled or changed.
 
-## Post-C2-F integration still pending
+## Production integration still deferred
 
-Nothing here is adopted in production. The blocked engine is what production's
-`advance_catalogue` already calls, so a production image built from this branch would
-pick the change up; no such image has been built, and none may be until this branch is
-reviewed and merged after C2-F. Still to verify then: behaviour on real records at
-scale; a first broad build on the production job's vCPU and memory; the fingerprint
-cost on real data. Broad discovery remains a separate reviewed decision.
+Nothing here is adopted in production. Production's `advance_catalogue` calls the
+blocked engine, so an image built from this branch would pick the change up; none has
+been built and none may be until review and merge after C2-F.
+
+## Product intelligence gaps (for the next decision, not started)
+
+Performance is no longer the obvious next step. The substantive gaps are: Wikimedia
+identifiers beyond the bootstrap set (14 of 234 entities mapped), source-policy
+clearance beyond private development, source coverage and agreement (135 entities
+without any eligible monitoring source), and creator opportunity scoring.
 
 ## Commits
 
-`4eface9` perf: optimize offline catalogue blocking and eligibility; then this handoff.
+`2494916` perf: reduce redundant quarantine fingerprint hashing; then this handoff.
 Pushed to `origin/product/local-ui` only. No PR, no merge to `main`, no deployment.
 
 ## Exact next approval required
 
-ChatGPT review of U5.2.
+ChatGPT review of U5.3, then explicit user authorisation for whatever comes next.
 
-STOP. The next checkpoint has not been started.
+STOP. No further checkpoint has been started.
