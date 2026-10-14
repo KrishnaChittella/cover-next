@@ -12,6 +12,8 @@ hundred records and quadratic beyond that. This module produces THE SAME
                    bound record stays bound, exactly as before, and is not re-examined
     plain builders the binding history, decision log and quarantine are accumulated
                    in place and frozen once at the end
+    one hash each  a record's content hash is computed once per run and kept for the
+                   run (`ContentHashMemo`), instead of on every fingerprint that reads it
 
 It is not a second resolver and holds no identity rule. `resolve`,
 `evaluation_fingerprint` and every helper of `generate_catalogue` are called as they
@@ -53,7 +55,7 @@ from metaspike.domain.identity import (
     SourceRecordKey,
     new_canonical_id,
 )
-from metaspike.domain.source_records import SourceRecord
+from metaspike.domain.source_records import ContentHashMemo, SourceRecord
 from metaspike.lifecycle.rules import RULE_VERSION
 from metaspike.resolution.blocking import CandidateIndex, ContextIndex, wanted_refs
 from metaspike.resolution.models import (
@@ -89,6 +91,9 @@ class GenerationStats:
     most_entities_offered: int = 0
     full_scans: int = 0
     cross_checked: int = 0
+    # Content hashes: how often one was asked for, and how often it had to be computed.
+    content_hashes_requested: int = 0
+    content_hashes_computed: int = 0
 
 
 def generate_catalogue_blocked(
@@ -116,6 +121,9 @@ def generate_catalogue_blocked(
         for identifier, game in known.items()
     }
     index = CandidateIndex()
+    # This run's content hashes. Made here and dropped when the run returns: no other
+    # run sees it, and a changed record is a different object with its own entry.
+    hashes = ContentHashMemo()
     order = {identifier: position for position, identifier in enumerate(entities)}
     slugs = {entity.game.slug for entity in entities.values()}
 
@@ -156,7 +164,7 @@ def generate_catalogue_blocked(
         entry = LoggedDecision(
             sequence=len(logged) + 1,
             record=record.key,
-            record_content_hash=record.content_hash,
+            record_content_hash=hashes.of(record),
             decided_at=as_of,
             decision=decision,
             canonical_game_id=resulting,
@@ -245,7 +253,7 @@ def generate_catalogue_blocked(
             held = quarantined.get(record.key)
             if held is not None:
                 tally.fingerprint_checks += 1
-                fingerprint = evaluation_fingerprint(fingerprint_view, overrides)
+                fingerprint = evaluation_fingerprint(fingerprint_view, overrides, hashes)
                 if cross_check:
                     _same_fingerprint(record, fingerprint, full_view(record), links, overrides)
                 if held.fingerprint == fingerprint:
@@ -268,7 +276,7 @@ def generate_catalogue_blocked(
             progressed = True
             if decision.kind is DecisionKind.QUARANTINE:
                 if fingerprint is None:
-                    fingerprint = evaluation_fingerprint(fingerprint_view, overrides)
+                    fingerprint = evaluation_fingerprint(fingerprint_view, overrides, hashes)
                     if cross_check:
                         _same_fingerprint(record, fingerprint, full_view(record), links, overrides)
                 quarantined.pop(record.key, None)
@@ -299,6 +307,8 @@ def generate_catalogue_blocked(
         for identifier, entity in entities.items()
     )
     tally.entities_at_end = len(entities)
+    tally.content_hashes_requested = hashes.requested
+    tally.content_hashes_computed = hashes.computed
     return CatalogueState(
         generated_at=as_of,
         resolver_version=RESOLVER_VERSION,

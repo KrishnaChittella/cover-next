@@ -18,7 +18,7 @@ from pydantic import AwareDatetime, Field
 from metaspike.catalogue.overrides import OverrideSet
 from metaspike.domain.identity import SourceRecordKey
 from metaspike.domain.model import FrozenModel
-from metaspike.domain.source_records import SourceRecord
+from metaspike.domain.source_records import ContentHashMemo, SourceRecord
 from metaspike.resolution.models import (
     CandidateAssessment,
     DecisionKind,
@@ -29,30 +29,40 @@ from metaspike.resolution.models import (
 from metaspike.resolution.resolver import candidate_refs
 
 
-def evaluation_fingerprint(view: ResolverInput, overrides: OverrideSet) -> str:
+def evaluation_fingerprint(
+    view: ResolverInput, overrides: OverrideSet, hashes: ContentHashMemo | None = None
+) -> str:
     """Changes exactly when something that could change the decision changes:
 
     - the record itself (its content hash)
     - any candidate entity, or the set of candidates
     - linking evidence from another unresolved record
     - the override that applies to this record
+
+    `hashes` only saves recomputing content hashes this run has already computed. With
+    it or without it the payload, and so the fingerprint, is the same string.
     """
     record = view.incoming
     candidates = set(candidate_refs(view))
     override = overrides.for_record(record.key)
+    content = _content_hash if hashes is None else hashes.of
     payload = {
-        "record": record.content_hash,
+        "record": content(record),
         "candidates": sorted(
-            [entity.ref, sorted(r.content_hash for r in entity.records)]
+            [entity.ref, sorted(content(r) for r in entity.records)]
             for entity in view.entities
             if entity.ref in candidates
         ),
-        "linking": sorted(other.content_hash for other in view.context if _links(other, record)),
+        "linking": sorted(content(other) for other in view.context if _links(other, record)),
         "bound_to": view.bound_to,
         "override": None if override is None else [override.ref, override.added_in_version],
     }
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _content_hash(record: SourceRecord) -> str:
+    return record.content_hash
 
 
 def _links(other: SourceRecord, record: SourceRecord) -> bool:

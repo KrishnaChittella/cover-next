@@ -124,6 +124,9 @@ class WorkCount(FrozenModel):
     most_entities_offered: int = Field(ge=0)
     full_scans: int = Field(ge=0)
     cross_checked: int = Field(ge=0)
+    # Content hashes asked for by the engine, and how many of those had to be computed.
+    content_hashes_requested: int = Field(ge=0)
+    content_hashes_computed: int = Field(ge=0)
     seconds: float = Field(ge=0)
 
     @property
@@ -330,6 +333,8 @@ def _work(stats: GenerationStats, seconds: float) -> WorkCount:
         most_entities_offered=stats.most_entities_offered,
         full_scans=stats.full_scans,
         cross_checked=stats.cross_checked,
+        content_hashes_requested=stats.content_hashes_requested,
+        content_hashes_computed=stats.content_hashes_computed,
         seconds=seconds,
     )
 

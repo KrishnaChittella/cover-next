@@ -505,9 +505,10 @@ proportion to the sample: the largest holds 8 records at 5,000, 16 at 10,000 and
 entity re-hashes all of it. Whether real catalogues contain entities like that is not
 known.
 
-This was **not** changed. It is in the quarantine and source-record code, outside the
-two operations this checkpoint was for, and the fingerprint decides when a quarantined
-record is re-resolved, so it deserves its own equivalence argument.
+This was **not** changed in U5.2. It is in the quarantine and source-record code,
+outside the two operations that checkpoint was for, and the fingerprint decides when a
+quarantined record is re-resolved, so it deserved its own equivalence argument. It was
+addressed in U5.3; see the next section.
 
 Also not addressed: a whole-state snapshot per generation; and `directly_reachable`,
 `_Links` and the evaluation summary are linear passes that were not examined closely.
@@ -550,6 +551,207 @@ Collection cadence remains the cost that matters, and those figures are unchange
   calls, so this code would be picked up by a production image built from it. No such
   image has been built, and none may be until this branch is reviewed and merged after
   C2-F.
+
+## Quarantine fingerprint hashing (U5.3)
+
+**Offline, on the product branch only.** One more processing change. It alters how
+often a hash is computed and nothing about what is hashed, what a fingerprint is, or
+when a quarantined record is looked at again. Production adoption is still after C2-F.
+
+The U5.2 measurements above stay as recorded. The measurements here are new, taken
+against the U5.2 commit as the baseline.
+
+### Why it was costly
+
+A quarantined record is re-examined only when its *evaluation fingerprint* changes. The
+fingerprint is a SHA-256 over a canonical payload of: the record's content hash; for
+each candidate entity, its id and the sorted content hashes of every record it holds;
+the content hashes of unresolved records that link to it; the entity it is already
+bound to; and the override that applies. All of that is needed: each part is something
+that could change the decision.
+
+A record's content hash is itself a serialisation of the whole record and a SHA-256.
+`SourceRecord.content_hash` is a property that does that work every time it is read.
+So each fingerprint re-serialised and re-hashed every record of every candidate entity,
+on every pass, though no record had changed. At 20,000 synthetic records the engine
+read 747,955 content hashes of 20,000 records.
+
+### What was done
+
+`ContentHashMemo` (`domain/source_records.py`): the content hashes of the records one
+run handles, each computed once. `generate_catalogue_blocked` makes one at the start of
+a run and passes it to `evaluation_fingerprint`, which reads hashes through it.
+
+That is the whole change. `memo.of(record)` returns `record.content_hash`, read once
+and kept. The content hash, the fingerprint payload, its ordering and its SHA-256 are
+untouched; no algorithm or payload version changed.
+
+The other approaches considered (maintaining per-entity summaries as records attach)
+were not needed to get a clear gain and would have added state that has to be kept in
+step with the entities. This one adds none.
+
+### Why a kept hash cannot hide new evidence
+
+The memo is keyed by the record **object**, and holds a reference to it:
+
+- A record is immutable. One object has one content hash for as long as it exists.
+- Any change to a record is a new object: `model_copy(update=...)`, a re-parse, a
+  re-fetch. A new object is looked up afresh. Nothing a record says, and not its source
+  id, is part of the key, so changed content under the same source id is never answered
+  from an older record's entry.
+- Because the memo holds each record, the record stays alive, and an address cannot be
+  reused for a different record while its entry exists.
+- The memo is created inside a run and dropped when the run returns. It is not
+  module-level, not shared between runs and not stored. A continuation is a new run
+  with a new memo, given the records as they are now.
+
+What changes a fingerprint is unchanged, because the function still reads the same
+things: a candidate entity gaining or losing a record changes the list of hashes; a
+rebinding changes `bound_to`; linking context and overrides are read as before.
+
+The reference engine, `generate_catalogue`, was not given a memo. Neither was the
+cross-check's all-pairs side. So every comparison between the engines is also a
+comparison between hashing with and without one.
+
+### Proof of equivalence
+
+- **A hash.** `memo.of(record) == record.content_hash` for unchanged, re-fetched and
+  changed records (external id, title, release date, parent, version parent,
+  developer), for equal-but-distinct objects, and across 3,000 short-lived records with
+  garbage collection between them.
+- **A fingerprint.** The original function is kept verbatim in
+  `tests/fingerprint_reference.py`. On hand-built views, the current function with a
+  memo, the current function without one, and the original give the same string, and
+  that string moves for each of sixteen distinct changes of evidence and stays put for
+  the changes that are not evidence (a re-fetch, a non-candidate entity, input order,
+  unrelated context, an override for another record).
+- **Every fingerprint a real build computes.** With the engine's fingerprint call
+  wrapped, each of more than 2,500 fingerprints computed while building the recorded
+  fixtures and a 1,500-record synthetic sample, first builds and continuations, was
+  re-derived by the original function and matched.
+- **A build.** The blocked engine and the reference engine return equal states, and
+  equal JSON, on the recorded fixtures and on synthetic samples, for a first build and
+  for each continuation, with cross-check on. The pre-existing blocked-versus-reference
+  tests pass unchanged, including the 10,394-record one, re-run here.
+
+### Quarantine behaviour, unchanged
+
+Each step below is run through both engines and must give the same state:
+
+- unchanged evidence: nothing is decided again, and the entry (evaluations, dates,
+  fingerprint, history) is exactly what it was, including after a re-fetch;
+- a bound candidate record changes: the quarantine that leans on it reopens, is
+  examined again (`evaluations` 2, `first_seen` kept, `last_evaluated` moved), and,
+  the evidence still being ambiguous, stays; an unrelated quarantine is not touched;
+- conflicting evidence examined again is still a conflict;
+- corroborating id evidence releases a title-only quarantine: one appended decision
+  (path A), one appended binding, earlier history intact, and a point-in-time read
+  before the evidence still shows the record unbound;
+- an unresolved linking record arriving later reopens the record it links to;
+- an override added for a quarantined record resolves it;
+- no record is dropped: every supplied record is either bound or in quarantine.
+
+No threshold moved. A title is still never an identity.
+
+### Before and after
+
+Same machine, same day, same synthetic datasets, same deterministic id factory, one
+process per size, nothing else running. Apple M3, 8 cores, 8 GB, macOS 26.6.2, Python
+3.12.15. One run per size per side for the times. Laptop timings, not production
+metrics.
+
+- **Before**: commit `55531e0` (U5.2), run from an untouched export of that commit with
+  only the measuring harness replaced.
+- **After**: this checkpoint's commit.
+
+Content-hash computations are **counted, not inferred**: the harness wraps the
+`content_hash` property on the class in a second, separate run of the same evaluation,
+so the figure is every real computation by anyone and is comparable across the two
+sides. Times are from the first, uninstrumented run. "Requested" is the engine's own
+count of how often it asked.
+
+`uv run python -m tests.catalogue_scale 1000 5000 10000 20000`
+
+| Records | | Resolving | Coverage | Total | Content hashes computed | Requested | Fingerprint checks | Resolver calls | Entities examined | Peak memory |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1,000 | before | 0.14 s | 0.01 s | 0.15 s | 5,184 | – | 804 | 1,030 | 2,233 | 56 MB |
+| | after | 0.10 s | 0.01 s | 0.11 s | 1,000 | 5,184 | 804 | 1,030 | 2,233 | 55 MB |
+| 5,000 | before | 1.08 s | 0.08 s | 1.16 s | 59,515 | – | 4,042 | 5,167 | 11,858 | 108 MB |
+| | after | 0.71 s | 0.03 s | 0.75 s | 5,000 | 59,515 | 4,042 | 5,167 | 11,858 | 111 MB |
+| 10,000 | before | 3.33 s | 0.24 s | 3.57 s | 204,525 | – | 8,086 | 10,343 | 23,887 | 171 MB |
+| | after | 1.75 s | 0.19 s | 1.94 s | 10,000 | 204,525 | 8,086 | 10,343 | 23,887 | 179 MB |
+| 20,000 | before | 10.49 s | 0.29 s | 10.78 s | 747,955 | – | 16,188 | 20,690 | 47,982 | 307 MB |
+| | after | 5.41 s | 0.29 s | 5.69 s | 20,000 | 747,955 | 16,188 | 20,690 | 47,982 | 311 MB |
+| 50,000 | before | 78.03 s | 1.00 s | 79.03 s | 4,401,151 | – | 41,532 | 51,729 | 121,421 | 707 MB |
+| | after | 36.48 s | 0.98 s | 37.47 s | 50,000 | 4,401,151 | 41,532 | 51,729 | 121,421 | 719 MB |
+
+Entities (432 / 2,070 / 4,117 / 8,210), quarantined records, related products,
+resolver calls, fingerprint checks and entities examined are identical on both sides at
+every size. The baseline's hash counts are exactly the figures U5.2 profiled.
+
+- **Hashes computed: one per record.** 747,955 became 20,000 at 20,000 records. The
+  engine still *asks* 747,955 times; it computes 20,000.
+- **Time roughly halved** at 10,000 and 20,000.
+- **Memory**: a few megabytes more at the larger sizes, within run-to-run noise for a
+  single run. The memo holds one 64-character string per record.
+- **50,000 was run once on each side**, as a single larger size beyond the usual four.
+  It gave 20,230 entities and 20,766 quarantined records on both sides. It is the first
+  measurement at that size and the only one; it used about 0.7 GB.
+
+### What is still superlinear
+
+Resolving still grows faster than the data: about ×2.5 from 5,000 to 10,000, ×3.1 from
+10,000 to 20,000, and ×6.7 from 20,000 to 50,000, which is close to quadratic over that
+last step.
+
+Profiled at 10,000 and 20,000 after this change, what remains is the **resolver's own
+assessment of candidates**: `_assess`, `_has_id_link`, `_names` and `_title_relation`
+walk every record of a candidate entity, and the fingerprint calls `candidate_refs`,
+which assesses each offered entity. The number of assessments is linear (33,644 at
+10,000; 67,634 at 20,000). The work per assessment is not, because a few synthetic
+entities hold records in proportion to the sample (the largest: 8, 16, 32 records at
+5,000, 10,000, 20,000; the mean stays 1.26). The hash *requests* for those entities are
+quadratic too, but each is now a dictionary lookup.
+
+That is inside the frozen resolver and was not touched. Whether real catalogues contain
+entities that accumulate records like this is not known; it is a property of one shape
+in the synthetic sample.
+
+Also still unaddressed: a whole-state snapshot per generation.
+
+### The numeric-Unicode fault: a separate known item
+
+Unchanged, and not caused by U5.2 or U5.3. The resolver's `_without` tests a title
+token with `str.isdigit()` and then calls `int()` on it. Some characters pass the first
+and fail the second (Ethiopic digits such as `፩`), so a title containing one raises
+`ValueError` inside the resolver. NFKC normalisation converts most such forms (a
+superscript `²` becomes `2`) but not all. No test added in this checkpoint exercises
+it. It needs its own reviewed decision, because fixing it means changing how the
+resolver reads titles, which is identity behaviour.
+
+### Limits of what this shows
+
+- Synthetic records only at scale; one laptop; one run per size per side.
+- The gain depends on how often quarantined records are re-examined against entities
+  with several records. On the 394 recorded rows the engine asked for 749 hashes and
+  computed 397, so there the saving is small in absolute terms.
+- Nothing ran on Cloud Run.
+
+### Where this leaves the catalogue work
+
+Three measured costs are gone: full scans, per-entity eligibility scans, and repeated
+content hashing. What remains is inside the resolver and in snapshot storage, and both
+are separate reviewed decisions.
+
+Processing speed is no longer what limits breadth. The limits are the ones listed under
+"What multi-source demand signals still need": entities beyond the bootstrap 14 have no
+Wikimedia identifier; the sources are not cleared for broader collection; there is no
+agreement rule across source families; and there is no creator-opportunity score. Those
+are product-intelligence gaps, and they are the more useful next work.
+
+Still to be verified after the soak, as before: behaviour on real records at scale; a
+first broad build on the production job's vCPU and memory; and adoption itself, which
+needs this branch reviewed and merged after C2-F.
 
 ## Multi-source foundation: what exists, and what was not added
 

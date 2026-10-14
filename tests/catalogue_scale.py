@@ -10,13 +10,20 @@ Nothing is fetched and nothing is stored.
 
 What this measures is the cost of resolving. It says nothing about how well real data
 resolves; the golden set does that.
+
+Each size is evaluated twice. The first run is timed and left alone. The second counts
+how many times a record's content hash is actually COMPUTED, by wrapping the property
+on the class; it is slower for that, so nothing from it is reported as a time. Counting
+at the property means the figure is comparable across implementations, whether or not
+one of them keeps hashes it has already computed.
 """
 
 import json
 import resource
 import sys
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -59,6 +66,23 @@ def evaluate_synthetic(size: int) -> BroadEvaluation:
     )
 
 
+@contextmanager
+def counting_content_hashes() -> Iterator[list[int]]:
+    """Count every real computation of `SourceRecord.content_hash` while active."""
+    original = SourceRecord.__dict__["content_hash"]
+    count = [0]
+
+    def counted(record: SourceRecord) -> str:
+        count[0] += 1
+        return str(original.fget(record))
+
+    SourceRecord.content_hash = property(counted)  # type: ignore[method-assign,assignment]
+    try:
+        yield count
+    finally:
+        SourceRecord.content_hash = original  # type: ignore[method-assign]
+
+
 def _peak_rss_mb() -> float:
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     # Bytes on macOS, kilobytes on Linux.
@@ -76,7 +100,18 @@ def measure(size: int) -> dict[str, object]:
         id_factory=counting_ids(),
     )
     total = perf_counter() - started
+    peak = round(_peak_rss_mb())
     summary = evaluation.summary
+    with counting_content_hashes() as computed:
+        again = evaluate_broad_catalogue(
+            records,
+            policies=CATALOGUE_POLICIES,
+            stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+            as_of=AS_OF,
+            id_factory=counting_ids(),
+        )
+    # The counting run is the same evaluation, and must come to the same catalogue.
+    assert again.state == evaluation.state and again.scoped == evaluation.scoped
     work = summary.broad_work
     resolving = summary.scoped_work.seconds + work.seconds
     return {
@@ -86,6 +121,10 @@ def measure(size: int) -> dict[str, object]:
         "related_products": summary.related_products,
         "resolver_calls": work.resolver_calls,
         "fingerprint_checks": work.fingerprint_checks,
+        # Counted at the property, in a second run: every real computation, by anyone.
+        "content_hashes_computed": computed[0],
+        # What the engine itself asked for, where it reports that (None before it did).
+        "content_hashes_requested": getattr(work, "content_hashes_requested", None),
         "entities_examined": work.entities_offered,
         "entities_all_pairs": work.entities_all_pairs,
         "share_of_all_pairs": round(work.share_of_all_pairs or 0.0, 4),
@@ -95,7 +134,7 @@ def measure(size: int) -> dict[str, object]:
         "resolving_seconds": round(resolving, 2),
         "coverage_seconds": round(total - resolving, 2),
         "total_seconds": round(total, 2),
-        "peak_rss_mb": round(_peak_rss_mb()),
+        "peak_rss_mb": peak,
     }
 
 

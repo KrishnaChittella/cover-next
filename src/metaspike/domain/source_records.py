@@ -172,3 +172,46 @@ class SourceRecord(FrozenModel):
         payload = self.model_dump(mode="json", exclude={"fetched_at"})
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class ContentHashMemo:
+    """The content hashes of the records one run handles, each computed once.
+
+    `SourceRecord.content_hash` serialises the whole record and hashes it every time it
+    is read. A run that fingerprints quarantined records reads the same records' hashes
+    over and over. This keeps each answer for the life of the run.
+
+    It adds no way of computing a hash: `of(record)` is `record.content_hash`, read
+    once. It is keyed by the record OBJECT, not by anything about it:
+
+    - A record is immutable, so one object has one hash for as long as it exists.
+    - Any change to a record is a new object (`model_copy`, a re-parse, a re-fetch), so
+      it is looked up afresh. Nothing a record says, and not its source id, is part of
+      the key, so changed content under the same source id can never be answered from
+      an older record's entry.
+    - Each entry keeps a reference to its record. An object's identity cannot be
+      reused while the object is alive, so an entry can never be read for a different
+      record that happens to land at the same address.
+
+    A memo belongs to one run and is discarded with it. It is not shared between runs,
+    not global and not stored, so there is no second place a hash could go stale.
+    """
+
+    def __init__(self) -> None:
+        self._held: dict[int, tuple[SourceRecord, str]] = {}
+        # How often a hash was asked for, and how often it actually had to be computed.
+        self.requested = 0
+        self.computed = 0
+
+    def of(self, record: SourceRecord) -> str:
+        self.requested += 1
+        held = self._held.get(id(record))
+        if held is not None and held[0] is record:
+            return held[1]
+        value = record.content_hash
+        self.computed += 1
+        self._held[id(record)] = (record, value)
+        return value
+
+    def __len__(self) -> int:
+        return len(self._held)
