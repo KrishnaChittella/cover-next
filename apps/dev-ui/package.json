@@ -18,6 +18,10 @@
     "contract:check": "node scripts/generate-contract.mjs --check",
     "data:sync": "node scripts/sync-data.mjs",
     "data:replay": "node scripts/sync-data.mjs --replay",
+    "opportunities:recorded": "node scripts/opportunities.mjs recorded",
+    "opportunities:synthetic": "node scripts/opportunities.mjs synthetic",
+    "opportunities:schema": "node scripts/opportunities.mjs schema",
+    "opportunities:schema:check": "node scripts/opportunities.mjs schema --check",
     "check": "npm run contract:check && npm run typecheck && npm run lint && npm run test && npm run build"
   },
   "dependencies": {

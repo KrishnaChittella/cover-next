@@ -41,6 +41,59 @@ source: `data:replay` runs `uv run metaspike run --replay tests/fixtures/wikimed
 | `npm run typecheck`, `npm run lint`, `npm test` | The checks, one at a time |
 | `npm run check` | All of them, then a production build |
 
+## Creator opportunities (private, local only)
+
+`/opportunities` shows the U6.3 creator-opportunity rubric (`creator_opportunity_rules_v1`)
+over a **private** report. It is off by default and never on in a production build.
+
+```
+cd apps/dev-ui
+npm run opportunities:recorded     # recorded-only report: verified evidence, as of 2026-10-05
+npm run opportunities:synthetic    # SYNTHETIC demonstration, as of 2026-10-20
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
+# http://127.0.0.1:3000/opportunities            verified evidence only
+# http://127.0.0.1:3000/opportunities?view=synthetic
+```
+
+Both generators run `uv run metaspike evidence ... --opportunities --json --out ...` offline
+and write to `<repo>/.metaspike/private/opportunities/{verified,synthetic}.json`, which is
+git-ignored and not under any served directory.
+
+**How it is loaded.** The pages are server components rendered on request
+(`force-dynamic`), never at build time. `src/private/opportunities/loader.ts` reads one of
+two fixed files chosen by a fixed view name; only the exact word `synthetic` selects the
+synthetic file, and nothing a browser sends becomes part of a path. An absolute directory
+may be configured in the server environment as `METASPIKE_OPPORTUNITY_DIR`; one inside
+`public/` or `artifacts/` is refused. The read is excluded from build tracing, so no report
+can be traced or bundled into build output. No client component imports the reader.
+
+**Enabling.** `METASPIKE_PRIVATE_OPPORTUNITIES=1` with the dev server. In `next build` and
+`next start` (`NODE_ENV=production`) the page never reads a report and says so.
+
+**Validation.** A report is rendered only if its `rules_version` is
+`creator_opportunity_rules_v1` (otherwise: unsupported version), it validates against
+`src/private/opportunities/report.schema.json` (generated from the engine's Python model;
+`npm run opportunities:schema` regenerates it, `opportunities:schema:check` and a backend
+test check it), its distribution is private, and its two orders list every assessed game in
+order. Anything else is refused and nothing from it is shown. An absent report says how to
+generate one.
+
+**Verified and synthetic.** The default view shows **verified readiness only**. When no
+verified evidence establishes anything, it says so: "No real creator opportunity is
+established by the currently verified evidence." The synthetic view carries the banner
+"SYNTHETIC DEMONSTRATION — NOT A REAL RECOMMENDATION", keeps the verified table, and adds a
+separate simulated table whose every readiness is prefixed `SIMULATED:`. Simulated readiness
+is never shown as a game's verified status.
+
+**Order and explanations** are the engine's own: the UI renders the positions and the
+"above the next because" sentence it was given, computes no score and re-sorts nothing. A
+tie broken only by canonical id is shown as `=` and as "Indistinguishable on the evidence —
+ordered by id only, which means nothing".
+
+**What it does not show**, because it does not exist: a validated opportunity, a
+probability, a percentage, a market total, a verified creator or community source. The
+rubric's thresholds are unvalidated and the page says so.
+
 ## Pages
 
 | Route | Artifact | Shows |
@@ -48,6 +101,8 @@ source: `data:replay` runs `uv run metaspike run --replay tests/fixtures/wikimed
 | `/` | `current.json`, `source-health.json` | Scope notice, run snapshot, leaderboard with search, sort and filters, unranked games with reasons, what exists today |
 | `/games` | `current.json` | Every game in the run, searchable |
 | `/games/[slug]` | `games/{slug}.json` | Rank, score, components, confidence and its factors, why-now reasons, event intelligence, history chart, features, coverage |
+| `/opportunities` | private report (see above) | The creator-opportunity shortlist, verified view by default; `?view=synthetic` for the labelled demonstration |
+| `/opportunities/[slug]` | private report | One game: why, why now, what changed, events, angles, creator coverage, discussion, unknowns, freshness and provenance, why it might be wrong |
 | `/radar` | `radar.json` | Dated events that have not started, by window. Timing and context only |
 | `/validation` | `validation.json` | A walk-forward backtest of score v0: evidence status first, then what was tested, score v0 beside simple alternatives, the look-ahead checks, limitations, and any past day's ranking with what followed |
 | `/sources` | `source-health.json` | What each source returned in this run, and each event source: stage clearance, checks, posts observed, candidates classified, promoted and not promoted. Counts only, never a post |

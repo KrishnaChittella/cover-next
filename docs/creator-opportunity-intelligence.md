@@ -141,6 +141,13 @@ recorded series moves past the threshold. It is tested on a copy of real verifie
 evidence with one family's movement replaced, in memory only: a watchlist entry, never a
 candidate, with creator supply and community stated unknown.
 
+## In the developer UI (U6.4)
+
+`/opportunities` in `apps/dev-ui` renders a generated private report, verified view by
+default, with a separate labelled synthetic demonstration. It is off by default, never on
+in a production build, reads one of two fixed local files, and validates the report against
+a schema generated from this model. See `apps/dev-ui/README.md`.
+
 ## Limitations
 
 - No threshold here is validated: 3.5 is borrowed from score v0, 7 days is a choice.

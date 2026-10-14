@@ -486,3 +486,19 @@ def test_score_v0_is_untouched_by_the_rubric(world: World, report: EvidenceRepor
         # The rubric holds no score of any kind, and does not carry score v0's.
         assert not [f for f in type(assessment).model_fields if "score" in f]
         assert str(game.score_v0.value) not in {s.text for s in assessment.why_now}
+
+
+def test_the_ui_reads_the_engine_s_own_report_schema() -> None:
+    """U6.4: the developer UI validates private reports against a schema generated from
+    this model. It lives beside the UI's private reader, not among the public schemas."""
+    committed = (
+        REPO / "apps" / "dev-ui" / "src" / "private" / "opportunities" / "report.schema.json"
+    )
+    generated = json.dumps(
+        OpportunityShortlist.model_json_schema(mode="serialization"), indent=2, sort_keys=True
+    )
+    assert committed.read_text() == generated + "\n", (
+        "regenerate with: cd apps/dev-ui && npm run opportunities:schema"
+    )
+    assert not any("opportunit" in p.name for p in (REPO / "schemas").iterdir())
+    assert not (REPO / "apps" / "dev-ui" / "public" / "opportunities").exists()

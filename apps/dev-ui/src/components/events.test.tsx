@@ -395,6 +395,7 @@ describe("navigation", () => {
     expect(within(nav).getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Overview",
       "Games",
+      "Opportunities", // U6.4: the private opportunity view
       "Radar",
       "Validation",
       "Sources",

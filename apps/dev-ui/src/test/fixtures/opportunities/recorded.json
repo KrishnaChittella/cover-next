@@ -1,0 +1,387 @@
+{
+ "rules_version": "creator_opportunity_rules_v1",
+ "as_of": "2026-10-05T12:00:00Z",
+ "distribution": "private_development_only",
+ "contains_synthetic": false,
+ "contains_unverified": false,
+ "entries": [
+  {
+   "position": 1,
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "indistinguishable on the evidence; ordered by canonical id only, which means nothing"
+  },
+  {
+   "position": 2,
+   "canonical_game_id": "780b4850-6248-4a81-8fe0-7f0762376cfc",
+   "slug": "gta-v",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "more sources answered"
+  },
+  {
+   "position": 3,
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "last in the list"
+  }
+ ],
+ "simulated_entries": [
+  {
+   "position": 1,
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "indistinguishable on the evidence; ordered by canonical id only, which means nothing"
+  },
+  {
+   "position": 2,
+   "canonical_game_id": "780b4850-6248-4a81-8fe0-7f0762376cfc",
+   "slug": "gta-v",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "more sources answered"
+  },
+  {
+   "position": 3,
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "last in the list"
+  }
+ ],
+ "assessments": [
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "name": "Minecraft",
+   "as_of": "2026-10-05T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 1
+   },
+   "simulated_readiness": "insufficient_evidence",
+   "simulated_facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 1
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "unresolved",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "unknown",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-04T00:00:00Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "unknown",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "not_collected",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "creator_supply",
+     "kind": "creator_supply",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "community_interest",
+     "kind": "community_interest",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    }
+   ],
+   "movements": [
+    {
+     "family": "wikimedia_readership",
+     "source": "wikimedia_pageviews",
+     "standing": "verified",
+     "direction": "flat",
+     "log_lift": 0.1573035070930171,
+     "robust_z": 0.15063374320949272,
+     "observed_through": "2026-10-04T00:00:00Z"
+    }
+   ],
+   "events": [],
+   "angles": [],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "No creator-supply input: how many videos cover this game is unknown.",
+   "community": "No community input: what players discuss about this game is unknown.",
+   "why_now": [],
+   "unconfirmed": [],
+   "caveats": [],
+   "missing": [
+    "No creator-supply source exists, so how many videos already cover this game is unknown. Unknown is not low competition.",
+    "No community-interest source exists, so discussion volume is unknown.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "One demand family observes this game, so nothing corroborates it: steam_current_players is unknown.",
+    "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "1 source record(s) name this game and are quarantined. They contribute nothing until they are resolved.",
+    "Not publishable under the current source policies: igdb."
+   ],
+   "uncertainty": "1 verified source(s) answered for this game; 0 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  },
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "780b4850-6248-4a81-8fe0-7f0762376cfc",
+   "slug": "gta-v",
+   "name": "Grand Theft Auto V",
+   "as_of": "2026-10-05T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "simulated_readiness": "insufficient_evidence",
+   "simulated_facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "unresolved",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-04T00:00:00Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "unknown",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "not_collected",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "creator_supply",
+     "kind": "creator_supply",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "community_interest",
+     "kind": "community_interest",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    }
+   ],
+   "movements": [
+    {
+     "family": "wikimedia_readership",
+     "source": "wikimedia_pageviews",
+     "standing": "verified",
+     "direction": "flat",
+     "log_lift": -0.42368269825191973,
+     "robust_z": -1.860717113861273,
+     "observed_through": "2026-10-04T00:00:00Z"
+    }
+   ],
+   "events": [],
+   "angles": [],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "No creator-supply input: how many videos cover this game is unknown.",
+   "community": "No community input: what players discuss about this game is unknown.",
+   "why_now": [],
+   "unconfirmed": [],
+   "caveats": [],
+   "missing": [
+    "No creator-supply source exists, so how many videos already cover this game is unknown. Unknown is not low competition.",
+    "No community-interest source exists, so discussion volume is unknown.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "One demand family observes this game, so nothing corroborates it: steam_current_players is unknown.",
+    "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "1 source record(s) name this game and are quarantined. They contribute nothing until they are resolved.",
+    "Not publishable under the current source policies: igdb, steam_catalogue."
+   ],
+   "uncertainty": "2 verified source(s) answered for this game; 0 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  },
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "name": "Rust",
+   "as_of": "2026-10-05T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "simulated_readiness": "insufficient_evidence",
+   "simulated_facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "missing",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "not_collected",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "not_collected",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "creator_supply",
+     "kind": "creator_supply",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "community_interest",
+     "kind": "community_interest",
+     "state": "not_integrated",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    }
+   ],
+   "movements": [],
+   "events": [],
+   "angles": [],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "No creator-supply input: how many videos cover this game is unknown.",
+   "community": "No community input: what players discuss about this game is unknown.",
+   "why_now": [],
+   "unconfirmed": [],
+   "caveats": [],
+   "missing": [
+    "No creator-supply source exists, so how many videos already cover this game is unknown. Unknown is not low competition.",
+    "No community-interest source exists, so discussion volume is unknown.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "No demand family has a current, verified observation of this game: wikimedia_pageviews is missing; steam_current_players is not_collected.",
+    "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "Not publishable under the current source policies: igdb, steam_catalogue."
+   ],
+   "uncertainty": "2 verified source(s) answered for this game; 0 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  }
+ ],
+ "summary": "No real recommendation can be justified: no game has verified evidence that says 'now'."
+}
