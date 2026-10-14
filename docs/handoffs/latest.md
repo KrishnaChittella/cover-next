@@ -1,154 +1,187 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.1.1: YOUTUBE API CONTRACT AND TEMPORAL CLOSEOUT — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.2: OFFLINE REDDIT COMMUNITY-INTEREST INTEGRATION — CHATGPT REVIEW REQUIRED
 
-Branch `product/local-ui` only. Offline. No live source call, no credential, no cloud
-access, no deployment, no pull request, no merge. U6.1 was not reverted or redesigned.
-No Reddit integration and no opportunity scoring were started.
+Branch `product/local-ui` only. Offline. No live source call, no account, no
+credential, no cloud access, no deployment, no pull request, no merge. **No later
+checkpoint has been started**: no opportunity scoring, no public publishing, no
+production integration.
 
-1. **Starting SHA:** `0cae13fb739636a11c784dea72674f140fd0a5ad` (U6.1 handoff). Verified
-   at the start: on `product/local-ui`, at that commit, tree clean.
-2. **Implementation SHA:** `37586b4325d9d215b7f42e5d0b47d98efde12ffe` — `fix: close YouTube request and time-boundary gaps`.
+1. **Approved starting SHA:** `b73091cd1d64230d94a5ce5476be7adf798b28bb` (U6.1.1
+   handoff). Verified at the start: on `product/local-ui`, at that commit, tree clean.
+2. **Implementation SHA:** `bb997253d4994d7af4a628b5fd62fd6880e45a86` — `feat: integrate offline Reddit community interest`.
 
-## 3. Exact changed files
+## Things to review first
+
+1. **Reddit's own pages could not be read.** `reddit.com/dev/api`,
+   `support.reddithelp.com` and `redditinc.com` refused every fetch from this environment
+   (HTTP 403 and blocked hosts). The API shape and the terms come from secondary sources
+   and are marked **NOT VERIFIED** throughout. Nothing real can proceed until they are
+   read from Reddit itself.
+2. **Reddit data is refused at every stage.** Secondary sources report that every
+   application, noncommercial included, needs approval under Reddit's Responsible
+   Builder Policy. The policy therefore has approval `required`/`pending`, and the
+   existing policy model refuses it everywhere. To make an offline demonstration
+   possible at all, the evidence gate reads a community input at private development
+   **only if it holds no Reddit data**: declared synthetic, or every post in it linking
+   to the reserved `.invalid` domain. Any other local store is refused, not merely
+   unverified. This is a judgement call; it is stricter than the YouTube path.
+3. **A defect found in U6.1's name matching, fixed here.** Catalogue aliases in another
+   script (Korean, Chinese, Cyrillic) lost their letters to the title tokeniser and became
+   bare numbers ("데드 스페이스 3" → "3"). Every title containing such a number was read
+   as naming those games. In U6.1 that could only leave a video *uncertain*, never wrongly
+   supported. `GameNames.of` now skips names whose letters do not survive the tokeniser,
+   executable file names, and names under three letters and digits. This touches
+   `src/metaspike/creator_sources/association.py`; all 25 YouTube tests pass unchanged.
+4. **Association rests on declared communities.** Reddit gives no classification of a
+   post, so "supported" means the post is in the community the query plan declares as
+   the game's own, or names the game in a declared gaming community. A declared scope is
+   a human assertion and is reported as one.
+5. **The private evidence report is now `game_evidence_v3`** (community interest).
+
+## 3. Exact files changed
 
 | File | Change |
 |---|---|
-| `src/metaspike/creator_sources/youtube.py` | `videos.list` sends `part` and `id` only; `VIDEOS_PARTS` constant; docstrings record the reset time and that `YouTubeQuota` is offline only. |
-| `src/metaspike/creator_sources/reading.py` | Details dated after `as_of` are withheld; the reason `video_details_dated_after_the_moment_read_at`; the count `details_withheld_as_future_dated`. |
-| `tests/test_creator_supply.py` | 3 new tests; 1 existing test made independent of an ordering it never controlled (below). |
-| `docs/youtube-creator-supply.md` | The request contract, the reset time, the offline-only quota account, the time rule. |
+| `src/metaspike/community_sources/` (7 files) | New: policy, query model, listing parser, budget, adapter, replay; collector; store; association; themes and angles; reading; synthetic scenario. |
+| `src/metaspike/domain/source_policy.py` | `SourcePurpose.COMMUNITY_INTEREST`, sharing creator supply's refusal rules; the refusal wording is now per purpose (YouTube's text is unchanged). |
+| `src/metaspike/creator_sources/association.py` | The name-matching fix (item 3). |
+| `src/metaspike/evidence/assemble.py`, `model.py`, `provenance.py`, `render.py` | The community row and reading, its gate, detection, rendering; report v3. |
+| `src/metaspike/cli.py` | `--community-dir`; the scenario includes community interest. |
+| `tests/test_community_interest.py` | New, 13 tests. |
+| `tests/test_creator_supply.py` | Expected lists now include the new source, purpose and the two community modules that reuse U6.1 code; report version. |
+| `tests/test_evidence.py` | Report version string. |
+| `docs/reddit-community-interest.md` | New. |
+| `docs/multi-source-evidence.md`, `docs/youtube-creator-supply.md`, `README.md` | Pointers. |
 
-Exactly the four expected files. Nothing under `infra/`, `.github/`, `apps/`, `schemas/`
-or `publishing/`.
+Nothing under `infra/`, `.github/`, `apps/`, `schemas/`, `tests/fixtures/` or
+`publishing/`. No Reddit file was added under `tests/fixtures/`.
 
-## 4. The unsupported parameter fixed
+## 4. Reddit API contract investigated
 
-U6.1 sent `videos.list` with `part=snippet,statistics,topicDetails`, `id=<ids>` and
-`maxResults=50`. `maxResults` is not supported with `id` and was removed. The request is
-now exactly `part` and `id` (plus `key` only if a key is ever given). The 50-id
-self-imposed bound, deduplication, request accounting (1 unit a call), parsing,
-missing-id handling and replay are unchanged. `search.list` is unchanged.
+| Point | Reported by secondary sources | Status |
+|---|---|---|
+| `GET /r/{sub}/search` | `q`, `restrict_sr`, `sort`, `t`, `limit` (default 25, max 100), `after` | NOT VERIFIED |
+| Listing | `kind: Listing`, `data.after`, `data.children[]` of `kind: t3` | NOT VERIFIED |
+| Rate limit | 100 queries/minute per OAuth client, 10-minute average; `X-Ratelimit-*` headers | NOT VERIFIED |
+| Deletion | Remove content deleted on Reddit; delete stored content within 48 hours recommended | NOT VERIFIED |
 
-## 5. Official API contract evidence
+Fields read from a post: id, subreddit, title, permalink, creation time, score, comment
+count, flair, and whether its link is on `.invalid` (the link itself is not kept).
+Never read: usernames or author ids, bodies, comments, media, profiles, private
+communities, messages.
 
-From developers.google.com/youtube/v3/docs/videos/list, read 2026-10-14:
+## 5. Source-access conditions
 
-- `maxResults`: "supported for use in conjunction with the `myRating` parameter, but it
-  is not supported for use in conjunction with the `id` parameter. Acceptable values are
-  1 to 50, inclusive."
-- `pageToken`: the same note — not supported with `id`.
-- Documented as usable with `id`: `hl`, `maxHeight`, `maxWidth`,
-  `onBehalfOfContentOwner`, `regionCode`, `videoCategoryId`.
-- `part` values include `snippet`, `statistics` and `topicDetails`, the three asked for.
+Reported: approval required for every application under the Responsible Builder Policy;
+free within the rate limit for noncommercial use once approved; commercial use needs a
+separate agreement. Not requested, not denied. `REDDIT_DATA_POLICY`: approval
+required/pending; derived output unknown; retention 2 days; display and attribution
+unknown; cleared for private development only on the basis that no Reddit data is held;
+collection, public launch and commercial use not cleared. Being noncommercial grants
+nothing by itself.
 
-The regression test captures the outgoing request with an offline mock transport (and a
-socket that refuses to connect) and checks: method, host and path; parameters exactly
-`{part, id}`; `part` and `id` values and id order; no `maxResults` or `pageToken`;
-every parameter within the documented set; batches of 50 and 10 for 60 ids, each id
-once; `search.list` still sending its documented parameters.
+## 6. Query and sample semantics
 
-## 6. Temporal defect root cause
+A query names the game, the words, a declared scope (own community, general gaming,
+site-wide), the subreddit, communities declared unrelated, a page size, and why it is
+asked. One run, at most three pages a query, from a local budget of at most 20
+requests; a 429 or a zero remaining-requests header halts it. Each query is recorded as
+complete, page-limited, rate-limited, budget-limited or failed. The game's reading uses
+the six creator-supply states; without input it is `not_integrated` as before.
 
-The parser rejects a publication time more than one hour after the response's
-*retrieval* time; within that hour it keeps it. The reading filtered search results by
-`as_of` but took the latest details retrieved by `as_of` without checking their own
-publication time. A detail retrieved at T-30m claiming publication at T+20m was
-therefore used at T: its classification made the video supported, and its channel, date
-and view count entered the counts.
+## 7. Game and topic relevance (`community_association_rules_v1`)
 
-The fix is in the reading only; the parser's check is unchanged. A detail retrieved by
-`as_of` whose publication time is after `as_of` is withheld entirely. The video falls
-back to its search snippet (the snippet's channel and date), is `uncertain` with the
-reason `video_details_dated_after_the_moment_read_at`, shows no counters, and is counted
-in `details_withheld_as_future_dated`. No timestamp is corrected and no earlier detail
-is substituted: two details that disagree are left unresolved. Read at or after the
-claimed time, the same detail is used.
+Supported: in the declared own community (unless only other games are named), or named
+alone in a declared gaming community. Excluded: in a community declared unrelated, or
+the match is part of a longer catalogue name. Uncertain: everything else. Deterministic;
+no probability or weight; no resolver involvement; no game created or merged.
 
-## 7. Before and after
+## 8. Community-interest evidence model
 
-Run against the pre-fix `youtube.py` and `reading.py` (stashed), with the new tests:
+Per game: queries and completeness; candidate, supported, uncertain and excluded posts;
+duplicates across queries; distinct supported communities; creation recency; how many
+supported posts carry a score and a comment count; themes; candidate angles.
+`total_discussion_known` is always false. A score is not a count of people, a comment
+count is not independent demand, and nothing is combined with other sources' numbers.
+Score v0, demand and events are unchanged with or without the input (tested).
+
+## 9. Evidence-backed candidate angles (`community_theme_rules_v1`)
+
+Themes from fixed word lists on titles: question, how-to, update, issue, comparison; or
+none. An angle needs at least two distinct supported posts sharing a theme and something
+specific (a version number, or a content word from their titles). It names its kinds,
+what is shared, and each supporting post's id, community, creation and retrieval time.
+Status `candidate_not_validated`. A theme in one post only is listed, not an angle. In
+the scenario: "update or patch breakdown — about version 2.3, 3 posts" and "explainer /
+how-to — about getting, offlined, stop, 2 posts".
+
+## 10. Point-in-time correctness
+
+`created_at`, `retrieved_at` and `as_of` kept apart. Only pages retrieved and posts
+created by `as_of` are used, including a post the parser kept within its one-hour
+tolerance. A later search never describes earlier. Scores and comments are those of the
+latest retrieval used; a later score (340) is not shown at an earlier moment (12). Pages
+older than 48 hours are not read. Tested at four moments.
+
+## 11. Source-policy and provenance tests
+
+The scenario's store passed as a local store is read and recognised as synthetic; a
+local store with nothing synthetic about it is refused ("required approval has not been
+granted"); synthetic input is refused outside private development; a verified claim
+without a pinned digest is refused; a missing policy is refused; nothing in
+`publishing/`, `schemas/`, jobs, scheduling, warehouse, pipeline or sources refers to
+Reddit; artifact contract 1.5.0.
+
+## 12. Offline demonstration
 
 ```
-FAILED test_videos_list_is_asked_by_id_with_part_and_nothing_else
-  assert {'part': ..., 'maxResults': '50'} == {'part': ..., 'id': ...}
-FAILED test_nothing_dated_after_the_moment_contributes_to_a_reading
-  assert <AssociationState.SUPPORTED> is <AssociationState.UNCERTAIN>
-  (SYNtime0002, channel 'UCfuture...', taken from the future-dated detail)
-2 failed
+uv run metaspike evidence --as-of 2026-10-20T12:00:00+00:00 --synthetic-scenario \
+    --game rust --game dota-2 --game counter-strike-2 --game elden-ring --game minecraft
 ```
 
-After the fix: both pass. `test_nothing_dated_after_the_moment_contributes_to_a_reading`
-covers cases A–I on one synthetic store read at several moments: a search and details
-from before the moment (used); a detail retrieved before but dated after it (withheld);
-a search result dated after it, details retrieved after it, a search made after it
-(absent); a later, larger view count (not shown earlier); the same store read later (all
-used, the detail as retrieved); the boundary one second either side of the claimed time;
-no future-dated detail in supported videos or channels; and no earlier detail put in a
-contradicting later one's place. `test_the_synthetic_scenario_is_still_deterministic`
-covers J: the scenario rebuilt is byte-identical, and its counts are unchanged.
+Run. Shows cases A–N (table in `docs/reddit-community-interest.md`). Every line is
+marked `[SYNTHETIC]`; no title is printed.
 
-## 8. Full test results (2026-10-14, on the committed tree)
+## 13. Quality gates (2026-10-14, on the committed tree)
 
-- `uv run ruff format --check` — 240 files already formatted
+- `uv run ruff format --check` — 250 files already formatted
 - `uv run ruff check` — All checks passed
-- `uv run mypy` — no issues in 225 source files
-- `uv run pytest` — **1,565 passed, 8 deselected in 378.21s** (1,562 before, plus 3)
+- `uv run mypy` — no issues in 234 source files
+- `uv run pytest` — **1,578 passed, 8 deselected in 393.60s** (1,565 before, plus 13)
 - `uv run metaspike export-schemas --check` — Schemas are up to date
 - `uv run metaspike evaluate-resolver` — exit 0; golden set v3, 200 cases, 0 false auto merges
-- `uv run pytest tests/test_creator_supply.py` — 25 passed
-- `uv run pytest tests/test_evidence.py` — 32 passed
+- `tests/test_community_interest.py` 13 passed; `tests/test_creator_supply.py` 25 passed;
+  `tests/test_evidence.py` 32 passed
 
-One existing test changed. `test_video_details_are_asked_for_in_bounded_batches` read
-two `videos.list` fetches from the store in order. Both carry the same retrieval time,
-so the store orders them by fetch id, a hash of the request; removing `maxResults`
-changed the hash and swapped them. The test now sorts them by size. Its expectations
-(batches of 50 and 10, one missing id) are unchanged.
+Four test expectations of mine were wrong on first run and corrected: an assumed order
+of same-moment fetches, a word ("broke") not in the issue list, and two U6.1 lists that
+now legitimately include Reddit. A one-line doc edit followed the full run; the three
+doc-reading test files were re-run: 146 passed. Not run: `live` tests; the four `slow`
+catalogue proofs (no catalogue code changed). Frontend not touched.
 
-Not run: `live` tests (not permitted); the four `slow` catalogue proofs (no catalogue
-code changed). Frontend not touched.
+Frozen rules unchanged: `resolver_v2`, `baseline_rules_v1`, `signal_semantics_v2`,
+`metaspike_score_v0`, the event, validation and outcome rules, golden labels, U5.2/U5.3,
+artifact contract 1.5.0. Every existing source policy unchanged.
 
-## 9. Quota documentation correction
+## 14. Known limitations and blockers
 
-From developers.google.com/youtube/v3/determine_quota_cost (last updated 2026-10-08),
-read 2026-10-14: "Daily quotas reset at midnight Pacific Time (PT)"; "a default quota
-allocation of 100 `search.list` calls, 100 `videos.insert` calls, and 10,000 units per
-day combined for all other endpoints"; search.list "The quota cost is 1 per call", in
-its own bucket. The model already matched; the U6.1 handoff's statement that the reset
-time was not established was wrong and is corrected in the documentation.
-`YouTubeQuota` is now documented, in the code and the document, as an in-memory account
-for one run: offline only, not persistent, not following the Pacific reset, and
-unsuitable as a production quota manager. No ledger or scheduler was built.
+1. **Blocker:** Reddit's documentation and terms must be read from Reddit's own pages.
+2. **Blocker:** access must be requested and approved before any Reddit data is used.
+3. No deletion job; no rate limiter across runs; no real query plans.
+4. Association depends on declared communities; site-wide posts are always uncertain.
+5. Themes are word lists on titles: no bodies, no comments, no semantics. Many real
+   questions will be unclassified; "X or Y?" is not a comparison.
+6. Angles are candidates only; nothing validates them as opportunities.
+7. Everything is exercised on invented data.
+8. No opportunity scoring: no rule weighs discussion against demand or competition.
 
-## 10. Source-policy and frozen-rule parity
-
-`YOUTUBE_DATA_POLICY` and every other source policy unchanged. The creator-supply report
-stays private; verified, unverified and synthetic standings, publication refusals,
-sample completeness, duplicate handling, the association rules, identity, demand
-evidence and score v0 unchanged. No change to `resolver_v2`, `baseline_rules_v1`,
-`signal_semantics_v2`, `metaspike_score_v0`, the event, validation or outcome rules, the
-golden labels, or the artifact contract (1.5.0).
-
-## 11. Remaining known YouTube limitations
-
-1. Nothing real: no API project, key, request or recorded response.
-2. No threshold for "substantial" versus "limited" creator competition.
-3. A sample is a lower bound; search is not exhaustive.
-4. The association rule has only seen invented titles; category id `20` = Gaming is
-   still unverified from the documentation read.
-5. No deletion or refresh job for the 30-day limit.
-6. The quota account is offline only; no persistent ledger follows the Pacific reset.
-7. Two details for one video that disagree are left unresolved, never reconciled.
-8. Policy text read in summary, without legal review; the aggregation and
-   derived-metrics clauses may forbid per-game counts.
-
-## 12. C2-F isolation
+## 15. Git-only production isolation
 
 C2-F isolation: Git-only verification. No GCP access, no production action.
 
-## Commits
+## 16. No later checkpoint
 
-`37586b4` fix: close YouTube request and time-boundary gaps; then this handoff. Pushed
-to `origin/product/local-ui` only.
+Nothing beyond U6.2 has been started.
 
-STOP. Awaiting independent ChatGPT review and explicit user authorisation.
+STOP.
