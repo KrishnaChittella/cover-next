@@ -1,307 +1,214 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.0: OFFLINE MULTI-SOURCE EVIDENCE INTEGRATION — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.0.1: EVIDENCE PROVENANCE AND HISTORICAL METADATA CLOSEOUT — CHATGPT REVIEW REQUIRED
 
 Branch `product/local-ui` only. Offline. No production action, no live source call, no
 credential, no cloud resource, no deployment, no pull request, no merge to `main`. This
-file is the product-branch handoff; `main`'s handoff was not touched. **No further
-checkpoint has been started.**
+file is the product-branch handoff; `main`'s handoff was not touched. U6.0 was not
+reverted and the evidence system was not redesigned. **U6.1 has not been started.**
 
-- **Approved starting SHA:** `a009ea3315f8b0df389d1e039b99dbc387040522` (U5.3 handoff).
-  Verified at the start: on `product/local-ui`, at that commit, tree clean.
-- **Implementation SHA:** `18b72bc38f869039515b45e0f327a10c58423d3b` —
-  `feat: integrate offline multi-source game evidence`.
+- **Starting baseline:** `f98e20e05fc2e840575d09d0af142771de217c64` (U6.0 handoff; U6.0
+  implementation `18b72bc`). Verified at the start: on `product/local-ui`, at that
+  commit, tree clean.
+- **Implementation SHA:** `a3abea802d4dcdbc712c2f45578bb9b0a9b26e7a` —
+  `fix: distinguish unverified evidence and historical metadata`.
 - **Production `main`:** `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, unchanged.
 
-**In one line:** a local, private command now reads what is held about a canonical game
-at a moment, source by source, using the existing components unchanged; and the honest
-result on real data is that **no game has two real demand signals at the same moment**,
-so multi-source integration is demonstrated only on clearly labelled synthetic data.
-
-## Three things to review first
-
-1. **Pageview freshness is read at the source's due boundary, not the wall clock.** The
-   frozen engine's daily freshness counts whole days from the last bucket to the moment
-   it is read and knows nothing of publication lag. Read at the wall clock, daily
-   pageviews are `stale` even when every due day is held (seen on the recorded data at
-   2026-10-05 12:00). The evidence layer hands the engine the end of the latest period
-   the source was due to have published. Pageviews are then stale exactly when a due day
-   is missing, as score v0 treats it. **No engine rule or constant changed**
-   (`pageviews_read_at` in `evidence/assemble.py`). This is a judgement call of mine.
-2. **Metadata history is not kept.** Only a source record's latest version is held. A
-   reading before a record's latest fetch does not use it, and what leaned on it reads
-   as `unknown`. It never borrows the later version. This is a limit, not a fix.
-3. **Synthetic origin is declared, not detected.** Stores carry no origin. The command
-   labels its own scenario synthetic and refuses to mix it with stored evidence, but a
-   store someone filled by replaying the synthetic Steam News fixtures and then passed
-   as `--events-dir` would be labelled `local_store`. The fixtures' README and the
-   doc say so; nothing enforces it.
-
-## Exact changed files
+## Exact files changed
 
 | File | Change |
 |---|---|
-| `src/metaspike/evidence/__init__.py` | New package. |
-| `src/metaspike/evidence/model.py` | New. The typed reading and its eight states. |
-| `src/metaspike/evidence/assemble.py` | New. `assess_evidence`, the policy gate, the pageview cut. |
-| `src/metaspike/evidence/render.py` | New. Text output; no source text printed. |
-| `src/metaspike/evidence/synthetic.py` | New. The labelled synthetic scenario. |
-| `src/metaspike/cli.py` | New `evidence` command and its helpers. No existing command changed. |
-| `tests/test_evidence.py` | New. 27 tests. |
-| `docs/multi-source-evidence.md` | New. |
-| `README.md` | One paragraph pointing to the command and the document. |
+| `src/metaspike/evidence/provenance.py` | New. Pinned recording digests, the verified / unverified / synthetic rule, detection of the scenario's own data. |
+| `src/metaspike/evidence/model.py` | `Origin.UNVERIFIED_FILES`; `Standing`; `InputProvenance.standing` and `.digests`; `usable` now needs a verified origin; `BoundRecord.content_known`; `Movement.standing`; `GameEvidence.verified_demand_families`, `unconfirmed_demand_families`, `events_verified`, `unverified_sources`; `EvidenceReport.contains_unverified`. |
+| `src/metaspike/evidence/assemble.py` | Metadata state from held content, not from the binding; per-game provenance corrected by what is stored; honesty check on every input; new gaps. |
+| `src/metaspike/evidence/render.py` | Standing on inputs, sources, movements and events; bound records whose content was not held. |
+| `src/metaspike/cli.py` | The `evidence` command derives provenance from content instead of declaring it (22 lines added, 34 removed). No other command touched. |
+| `tests/test_evidence.py` | 5 new tests; 2 existing output expectations updated for the new wording. |
+| `docs/multi-source-evidence.md` | Origin, historical metadata, freshness verification, limits. |
 
-Nothing else. No change under `infra/`, `.github/`, `apps/`, `schemas/`,
-`tests/fixtures/`, or to any resolver, feature, scoring, event, validation, publishing,
-source or policy module. No artifact schema changed (contract still 1.5.0;
-`export-schemas --check` is clean). No new persisted format: the report is printed, or
-written only where `--out` says.
+Exactly the files the brief expected. Nothing under `infra/`, `.github/`, `apps/`,
+`schemas/`, `tests/fixtures/`, and no resolver, feature, scoring, event, validation,
+publishing, source, store or policy module. The changes to the evidence model are local
+to the private evidence report; no store format, sample, artifact schema or public
+contract changed.
 
-## Integrated sources
+## Root causes
 
-| Source | Kind | How it is read |
-|---|---|---|
-| IGDB | catalogue metadata | Recorded rows, resolved by `resolver_v2`; bindings at `as_of` |
-| Steam app list | catalogue metadata | The same |
-| Wikimedia pageviews | demand signal | Recorded responses, cut to what was published by `as_of` |
-| Steam concurrent players | demand signal | The sample store, point in time, through the binding valid at observation |
-| Steam News | event evidence | The event store and the source store, as of `as_of` |
-| Creator supply | — | `not_integrated` |
-| Community interest | — | `not_integrated` |
+**A. Unverified local evidence.** The command labelled whatever `--sample-store`,
+`--events-dir` and `--event-sources-dir` pointed at as `local_store`, and
+`SourceEvidence.usable` rejected only `synthetic`. Readable was treated as real. The
+same hole existed one level up: the command declared `--recorded` and
+`--wikimedia-replay` directories to be `recorded_response` by fiat, whatever was in
+them. The review named the stores; I closed both, since they are the same mistake.
 
-## Reused components (none modified)
+**B. Historical metadata.** `catalogue_source` set `available` whenever a binding
+existed. `identity()` already withheld a record's content when its only held version was
+fetched later, so the report showed a source as available while showing none of what it
+said.
 
-`MappingHistory` · `steam_eligibility`, `sampling_targets`, `active_binding` ·
-`build_time_series`, `latest_due_period` · `steam_family_v2`, `wikimedia_family_v2`,
-`read_entity_history` · `hourly_aggregates`, `daily_aggregates`, `current_level` ·
-`usable_features` (as `Consumer.OPPORTUNITY_SCORE`, so the shadow-only change point is
-withheld) · `entity_evidence_v2` · `assess_entity` (score v0) · `assess_events`,
-`upcoming_radar`, `coverage_of` · `EventStore`, `EventSourceStore.latest_candidates` ·
-`require_catalogue_sources`, `retained_sources`, `require_event_source`,
-`SourcePolicy.registration_refusal` · and, in the scenario, the real `SteamNewsAdapter`,
-`ingest`, classifier and promotion gate through `replay_news_client`.
+## Chosen provenance handling
 
-## Real versus synthetic
+Three standings, decided by one rule in `provenance.py`:
 
-**Real and recorded, in the repository:** 402 catalogue rows; daily pageviews for six
-games through 3 October 2026.
+- **verified**: the input's content matches a digest pinned in the code. Three
+  recordings are pinned (the six pageview responses, the two catalogue fixture
+  directories). Bytes only: a renamed copy is still verified; one changed byte is not.
+- **synthetic**: declared by the command's own scenario, or **detected in what is
+  stored** — a scenario sample carries the run id `synthetic-scenario`; a test
+  announcement points at the reserved `.invalid` domain.
+- **unverified**: everything else, including every local store.
 
-**Real, local to this machine only:** the fifteen announcements of the one supervised
-Steam News probe of 11 October (three apps). Not in the repository; no new request made.
+No option declares an input real. An input claiming `recorded_response` without a
+pinned digest is refused before anything is read. Store formats, samples, the feature
+engine and source policies are untouched; no global state; no filename guessing.
 
-**Not held anywhere:** player-sample history. No sample store has ever been filled.
+Unverified and synthetic evidence stays visible with its numbers exactly as the engine
+gives them. It is never `usable`, never a verified demand family, never a verified event.
 
-**Synthetic:** everything the scenario writes (player samples for four apps,
-announcements for three), and one rebinding built inside two tests. Labelled in every
-place it surfaces; never `usable`; never counted as a demand family observing a game.
+## Synthetic re-import regression (`test_synthetic_stores_read_as_local_stores_are_never_confirmed_evidence`)
 
-Tests on recorded data: identity, metadata, quarantine, pageviews, the publication-lag
-cut, score v0 parity, policy. Tests on synthetic data only: everything about player
-samples, promoted and upcoming events, candidates.
+The scenario's stores read (a) declared synthetic, (b) as ordinary local stores, through
+the library and through the command:
 
-## Working demonstration command
+- Inputs on path (b) read `unverified`; Dota 2's samples and announcements are then
+  detected as synthetic from their content, with the reason stated.
+- `independent_demand_families`, `verified_demand_families` and `usable_sources` are
+  identical on both paths and identical to a reading with no stores at all, for all
+  fifteen games. Neither path gains a confirmed family.
+- States, reasons, bindings, latest-observed times, freshness, the engine's demand
+  reading, sample completeness, event intelligence, upcoming events, candidate counts,
+  movement features, score v0 and its confidence are equal on both paths.
+- Where the store gives no sign (a never-sampled app; a game looked at with no posts),
+  the standing stays `unverified`.
+- Text and JSON show all three standings; both reports are `private_development_only`;
+  the publication refusal names synthetic and unestablished origin.
 
-```
-uv run metaspike evidence --as-of 2026-10-05T12:00:00+00:00 \
-    --wikimedia-replay tests/fixtures/wikimedia --recorded-through 2026-10-03
+## Real demand-family counting
 
-uv run metaspike evidence --as-of 2026-10-20T12:00:00+00:00 \
-    --wikimedia-replay tests/fixtures/wikimedia --recorded-through 2026-10-03 \
-    --synthetic-scenario
-```
+`independent_demand_families` = demand sources that are `available` **and** verified.
+On the recorded inputs it is unchanged from U6.0 (six games with one, none with two).
+`demand.evidence_breadth` is the frozen engine's output and still counts a synthetic or
+unverified family as observed (asserted: `observed_count` 1 while the confirmed count is
+0). The engine was not modified; the model, the doc and the text now say that the
+engine's breadth is not the confirmed count, and current-but-unverified families are
+listed separately as `unconfirmed_demand_families`.
 
-Both were run. Offline, read-only, byte-identical on a second run (tested).
+A copy of the pageview recording with one view count changed reads `available` with the
+altered value shown, `unverified`, and counts as zero confirmed families.
 
-## End-to-end examples (actual output, abridged)
+## Event provenance
 
-**Real, 2026-10-05 12:00 UTC — Minecraft:**
+Announcements from a synthetic or unverified store still run through classification,
+promotion and Event Heat, and the result is shown. `events_verified` is false; the text
+prints "Events below come from UNVERIFIED (or SYNTHETIC) announcements: a diagnostic,
+NOT verified real-world events"; a gap `events_not_verified` says the same.
+`test_local_data_of_unestablished_origin_is_shown_and_not_counted` covers plausible
+local samples and an announcement with nothing synthetic about them.
 
-```
-Minecraft  (minecraft)
-  canonical id d1c9712e-1691-49c0-be37-a3ea0dd06760  [frozen_bootstrap]  lifecycle EVERGREEN
-    no source record was bound to this game at this moment
-    quarantined, NOT bound: igdb:121 (title_only)
-  igdb                  catalogue_metadata unresolved
-  wikimedia_pageviews   demand_signal      available      latest 2026-10-04 00:00Z ids Minecraft
-  steam_current_players demand_signal      unknown        No source record is bound to this entity.
-  steam_news            event_evidence     not_collected
-  creator_supply        creator_supply     not_integrated
-    families that could observe this game: 1; with current REAL observations: 1
-    wikimedia_readership: current_level 6013, expected_level 5138, log_lift 0.1573, robust_z 0.1506
-      not usable for scoring (shadow-only): change_point
-  Score v0 (pageviews only, unchanged): 12.2, confidence 59 (medium)
-  Events: UNAVAILABLE (no_event_coverage). That is not the same as no events.
-  Usable now: wikimedia_pageviews
-```
+## Historical metadata regression (`test_metadata_is_available_only_once_its_content_was_held`)
 
-**Real, the fifteen original games at that moment:** pageviews available for 6, missing
-for 8 (no recording held), unknown for 1; Steam players eligible but not collected for 8,
-inapplicable for 5, unknown for 2. **Games with two demand families: 0.**
+A binding valid from 5 October whose only held record was fetched on 10 October:
 
-**Real, 2026-10-12 00:00 UTC with this machine's local event stores:** the six pageview
-series are `stale`; Counter-Strike 2, Dota 2 and Baldur's Gate 3 have current Steam News
-coverage, five announcements read each, none promoted, event heat 0.
+- **Before the fetch:** the binding is listed with its mapping version and start;
+  `content_known` is false; no product type, date or parent is shown; the source is
+  `missing` with the reason "bound to the game at this moment, but no version of the
+  record fetched by then is held…"; not usable; the Steam app it asserts is not used, so
+  Steam's standing is `unknown`; the later release date appears nowhere in the report.
+- **From the fetch on:** `available`, content shown, latest-observed is the fetch time.
+- Canonical id, binding and mapping history identical throughout. The other source's
+  row for the same game, fetched in time, is unaffected. On the recorded fixtures as
+  they are, every bound record's content was held and no source reads `missing`.
 
-**SYNTHETIC, 2026-10-20 12:00 UTC — Dota 2 (invented; not a finding):**
+The existing rebinding tests pass unchanged.
 
-```
-  steam_current_players demand_signal      available      latest 2026-10-20 11:45Z ids 570   [SYNTHETIC, private only]
-  steam_news            event_evidence     available      latest 2026-10-20 11:00Z ids 570   [SYNTHETIC, private only]
-    families that could observe this game: 2; with current REAL observations: 0
-    steam_players (concurrent_players, maturity partial_baseline)  [SYNTHETIC]
-  Events: coverage current; event heat 30.720; 2 relevant event(s)
-    upcoming: season starts 2026-10-23 00:00Z (day precision), in 60 h
-    announcements read: 3; promoted to events 2; candidates only 1
-  SYNTHETIC, not observations: steam_current_players, steam_news
-```
+## Pageview freshness: verified and kept
 
-## Point-in-time correctness
+Checked on the recorded Minecraft series at ten moments (table in the doc). The reading
+is `available` exactly when score v0's `staleness_days` is 0 and v0's freshness factor
+is 1.0; stale with 1, 4 and 15 missing due days; identical at four times on one day;
+equal to `RecordedHistory.inputs_at` wherever the backtest can stand; and with 3 October
+removed from the recording, available on the 4th and stale on the 5th. With every due
+day held, the engine handed the wall clock returns `applicable_but_stale` and withholds
+every feature; handed the due boundary it reports the same buckets. It does not change
+freshness semantics or hide missing data, so the implementation is unchanged.
 
-- Bindings at `as_of`; a later rebinding leaves an earlier reading identical to one made
-  from the state that never had it; samples before and after a rebinding stay with the
-  entity bound at the time; stored samples byte-identical afterwards.
-- Samples, announcements, events and checks stored after `as_of` are not read; the same
-  stores read two days apart show the announcements and the synthetic climb only later.
-- Pageviews: the cut equals `RecordedHistory.inputs_at` at four moments; on 4 October at
-  noon the 3rd is recorded and not yet published, and is not used.
-- A moment before the catalogue state existed is refused, as is a naive time.
-- Quarantine entries first seen later are not listed. Metadata: see item 2 above.
+## Quality gates (2026-10-14, on the committed tree)
 
-## Acceptance tests A–T
-
-| | Covered by |
-|---|---|
-| A, B | `test_pageviews_alone…`, `test_metadata_gives_identity…` (recorded) |
-| C–I | samples association, inapplicable, never sampled, reported zero, stale/fresh, incomplete hour and day, several apps (synthetic samples) |
-| J | `test_a_quarantined_record_is_never_treated_as_bound` (recorded: `igdb:121`) |
-| K | `test_a_later_rebinding_changes_nothing_before_it` |
-| L–O | candidate only, promoted event, upcoming with timing, timing not established |
-| P | `test_a_reading_uses_nothing_later…`, `test_pageviews_are_cut…` |
-| Q | `test_restricted_evidence_cannot_be_read_for_a_public_stage_or_published` |
-| R | `test_synthetic_evidence_is_never_presented_as_an_observation` |
-| S | `test_creator_supply_and_community_interest_are_absent_not_zero` |
-| T | `test_score_v0_is_what_it_has_always_been`, `test_other_evidence_does_not_move_score_v0` |
-
-Plus the command's own tests (offline, deterministic, refusals) and one asserting the
-layer defines no rule of its own.
-
-## Source-policy gate results
-
-- Every input's source must have a policy clearing the stated stage for its purpose
-  before anything is read. Missing policy, or a policy under another source's name: refused.
-- At `public_launch`: the recorded catalogue is refused (IGDB not cleared); with only
-  pageviews and the bootstrap entities it is allowed; adding synthetic samples, the event
-  store or the source store is refused, each by its own policy. `private_collection` and
-  `commercial_production` with the scenario: refused.
-- The report is `private_development_only` always. Nothing in `publishing/` imports it;
-  `schemas/` has no entry for it; `--out` refuses the artifacts directory.
-- No source policy was changed and no unknown permission was read as granted.
-
-What stands between each source and a noncommercial public launch, from the policies:
-Wikimedia nothing; IGDB attribution in the product and IGDB's answer on the partnership
-question; Steam app list branding, links, disclaimers and a privacy policy (the branding
-guidance has not been located); Steam players and Steam News an explicit answer on
-derived metrics and events (both `unknown`). Detail in `docs/multi-source-evidence.md`.
-
-## Existing score parity
-
-With the publication lag set to zero, the reading at midnight after the recording
-reproduces the frozen `score_v0_replay_golden.json` score and confidence for all fifteen
-games (six scored). Under the real one-day lag it equals `assess_entity` on the
-backtest's own inputs. Adding samples and events changes no score or confidence.
-
-## Golden resolver parity
-
-`uv run metaspike evaluate-resolver`: golden set v3, 200 cases, hash `c2b3aef7b372`,
-**0 false automatic merges**, exit 0. No resolver file changed.
-
-## Quality gates
-
-Backend, on the committed tree (2026-10-14):
-
-- `uv run ruff format --check` — 229 files already formatted (230 after the handoff's
-  doc-only follow-up check; clean both times)
+- `uv run ruff format --check` — 231 files already formatted
 - `uv run ruff check` — All checks passed
-- `uv run mypy` — no issues in 216 source files
-- `uv run pytest` — **1,535 passed, 8 deselected in 347.17s** (1,508 before, plus the 27
-  new tests). The three test files that read the docs and README were re-run after the
-  documentation was written: 146 passed.
+- `uv run mypy` — no issues in 217 source files
+- `uv run pytest` — **1,540 passed, 8 deselected in 363.99s** (1,535 before, plus 5)
 - `uv run metaspike export-schemas --check` — Schemas are up to date
-- `uv run metaspike evaluate-resolver` — exit 0, 0 false auto merges
-- `uv run pytest tests/test_evidence.py` — 27 passed in about 40 s
+- `uv run metaspike evaluate-resolver` — exit 0; golden set v3, 200 cases, 0 false auto merges
+- `uv run pytest tests/test_evidence.py` — 32 passed in about 55 s
 
-Not run: `live` tests (no live call is permitted) and the four `slow` catalogue proofs
-(no catalogue or resolver code changed; last run in U5.3, 4 passed).
+Two existing expectations were changed, both for wording the fix changed on purpose (the
+input line now reads "verified recorded_response"; the input JSON gained `standing` and
+`digests`). Two of my new tests first failed on my own wrong expectations and were
+corrected: an "altered" copy I had not actually altered, and an assumption that score v0
+drops confidence to zero on one missing day (it lowers its freshness factor per day).
+Neither was a product fault. No unrelated test failed.
 
-Frontend: **not touched** (no file under `apps/` changed, no artifact contract changed).
-Not re-run here; last verified in U5.3 on 2026-10-13: `contract:check`, `typecheck`,
-`lint`, `test` (179 passed), `build`, all passed.
+Not run: `live` tests (not permitted); the four `slow` catalogue proofs (no catalogue or
+resolver code changed; last run in U5.3, 4 passed). Frontend not touched and not re-run
+(last verified in U5.3: all five gates passed, 179 tests).
 
-## Measured local cost
+## Frozen rules and source policies
 
-Apple M3, Python 3.12.15, one run each: fifteen games on recorded inputs 1.4 s, 72 MB;
-all 234 entities as JSON 1.5 s, 87 MB; fifteen games with the synthetic scenario 7.3 s,
-95 MB; all 234 entities with a synthetic sample store about 35 s in process. Laptop
-figures only. No cloud resource was used.
+No change to `resolver_v2`, `baseline_rules_v1`, `signal_semantics_v2`,
+`metaspike_score_v0`, `event_heat_rules_v1`, `event_classification_rules_v1`,
+`validation_protocol_v1`, `outcome_rules_v1`, any source policy, the artifact contract
+(1.5.0), the golden labels, or the U5.2 and U5.3 catalogue code. Score v0 parity against
+the frozen golden file and against the backtest's inputs still passes. Policy refusals
+at public stages still pass.
 
-## Production isolation (read-only, 2026-10-14 01:51 UTC)
+## Production isolation (read-only, 2026-10-14 02:22 UTC)
 
 - `main` = `cb33198`, level with `origin/main`, clean. No pull request. Last workflow
-  run still 38104941975 (11 October, `main`).
-- Terraform state generation `1791685217422653`: unchanged. No Terraform was run.
-- Control record generation `1791684706340016`: unchanged.
-- Scheduler ENABLED, configuration unchanged; only `lastAttemptTime` differs from the
-  previous snapshot. Jobs, IAM, dataset schemas, secrets and alert policies identical.
-  0 secret versions; 0 user-managed keys across 10 service accounts.
-- Repository variables unchanged (`SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
-  `SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`).
-- `BROAD_DISCOVERY_ENABLED` is still `False`. No collector was activated. No Wikimedia,
-  Steam, IGDB, YouTube or Reddit request was made. The portfolio repository was not touched.
+  run still 38104941975 (11 October, `main`). `.github/` and `infra/` not modified.
+- Terraform state generation `1791685217422653` and control record generation
+  `1791684706340016`: unchanged. Scheduler configuration, jobs, IAM, dataset schemas,
+  secrets and alert policies identical to the previous snapshot. 0 secret versions; 0
+  user-managed keys. Repository variables unchanged.
+- `BROAD_DISCOVERY_ENABLED` is still `False`. No source was called. Nothing was
+  published. The portfolio repository was not touched.
 
-## C2-F observation (read-only, 2026-10-14 01:51 UTC; separate; not altered; not judged)
+## C2-F observation (read-only, 2026-10-14 02:22 UTC; separate; not altered; not judged)
 
-| | |
-|---|---|
-| Executions since the window opened | 54; all 54 succeeded; none running |
-| 12 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
-| 13 October | 24 dispatcher, 1 Wikimedia collector, 1 warehouse |
-| 14 October so far | 2 dispatcher (00:00, 01:00) |
-| Warehouse rows | `collection_runs` 120, `expected_targets` 56, `period_observations` 1,624 |
+55 executions since the window opened, all succeeded, none running: 12 October 24
+dispatcher, 1 Wikimedia collector, 1 warehouse; 13 October the same; 14 October so far 3
+dispatcher. Warehouse rows: `collection_runs` 120, `expected_targets` 56,
+`period_observations` 1,624. This is not a statement that C2-F has passed. Nothing was
+triggered, restarted, paused, cancelled or changed.
 
-Two days into a seven-day window. This is not a statement that C2-F has passed. Nothing
-was triggered, restarted, paused, cancelled or changed.
+## Remaining known limitations
 
-## Unfinished source integrations
-
-- **Creator supply (YouTube):** no adapter, no policy, no fixtures. Reported as
-  `not_integrated`.
-- **Community interest (Reddit):** the same.
-- **Steam players:** the adapter, store and features exist; no real history is held.
-- **Steam News:** real coverage exists for three apps on one day, locally only.
-- **Wikimedia:** six of fifteen games recorded; 14 of 234 entities have an identifier.
-
-## Concrete blockers for final intelligence
-
-1. No game has two real demand families at one moment, so nothing about agreement
-   between sources can be measured yet.
-2. No creator-supply or community-interest source, and no policy for either.
-3. No opportunity score is defined: no rule for combining families or weighing demand
-   against supply. Score v0 reads pageviews alone.
-4. Steam players and Steam News clear private development only; their derived-output
-   permission is `unknown`, so nothing from them can be published as things stand.
-5. No combination rule for games with several Steam apps.
-6. Metadata history is not kept (item 2 at the top).
-7. Wikimedia identifiers exist only for the original fifteen games.
+1. **Genuine local data cannot be verified yet.** Every local store is unverified,
+   including the real Steam News probe of 11 October and any real samples collected
+   later. Verifying them needs an origin recorded at collection time: a change to the
+   collection contract, for its own review.
+2. **Detection is a safety net, not proof.** It recognises the scenario's run id and
+   the `.invalid` domain. Synthetic data without those marks reads as unverified, which
+   still counts for nothing; it is never mistaken for verified.
+3. **A pinned digest vouches for bytes, not for truth.** The three pins assert that the
+   committed fixtures are the recordings the repository documents them to be.
+4. **A record altered in memory is not caught.** The library takes records as objects;
+   the digest is checked on the directory the command loads them from. A caller that
+   changes records after loading keeps the verified label (tests do this deliberately).
+5. **Metadata history is not kept.** Only the latest version of a source record is
+   held, so content before its latest fetch is `missing`, never reconstructed.
+6. Unchanged from U6.0: no game has two verified demand families; no creator-supply or
+   community-interest source; no opportunity score; no multi-app combination rule.
 
 ## Commits
 
-`18b72bc` feat: integrate offline multi-source game evidence; then this handoff. Pushed
-to `origin/product/local-ui` only. No PR, no merge to `main`, no deployment.
+`a3abea8` fix: distinguish unverified evidence and historical metadata; then this
+handoff. Pushed to `origin/product/local-ui` only. No PR, no merge to `main`, no
+deployment.
 
 ## Exact next approval required
 
-Independent ChatGPT review of U6.0, then explicit user authorisation for whatever comes
-next. The YouTube, Reddit, final scoring, deployment and public-launch checkpoints have
-not been started.
+Independent ChatGPT review of U6.0.1, then explicit user authorisation. U6.1 and every
+other workstream are not started.
 
 STOP.
