@@ -34,6 +34,12 @@ from metaspike.catalogue.eligibility import (
 from metaspike.catalogue.evaluation import require_catalogue_sources, retained_sources
 from metaspike.catalogue.generate import CatalogueState
 from metaspike.catalogue.legacy_ids import LEGACY_ID_TO_CANONICAL
+from metaspike.community_sources.reading import (
+    CommunityInterestReading,
+    read_community_interest,
+)
+from metaspike.community_sources.reddit import SOURCE_ID as REDDIT_SOURCE
+from metaspike.community_sources.store import CommunityStore
 from metaspike.creator_sources.association import GameNames
 from metaspike.creator_sources.reading import CreatorSupplyReading, SupplyState, read_creator_supply
 from metaspike.creator_sources.store import CreatorSupplyStore
@@ -82,6 +88,7 @@ from metaspike.evidence.provenance import (
     has_synthetic_run,
     is_reserved_reference,
     require_honest,
+    wholly_reserved,
 )
 from metaspike.features.access import READABLE_FEATURES, Consumer, usable_features
 from metaspike.features.aggregate import current_level, daily_aggregates, hourly_aggregates
@@ -151,7 +158,10 @@ _READ_FROM_INPUT = frozenset(
 )
 
 # A creator-supply source is in the reading only when its input is given.
-CREATOR_PURPOSES: Mapping[str, SourcePurpose] = {YOUTUBE_SOURCE: SourcePurpose.CREATOR_SUPPLY}
+CREATOR_PURPOSES: Mapping[str, SourcePurpose] = {
+    YOUTUBE_SOURCE: SourcePurpose.CREATOR_SUPPLY,
+    REDDIT_SOURCE: SourcePurpose.COMMUNITY_INTEREST,
+}
 
 _SUPPLY_STATE = {
     SupplyState.NOT_QUERIED: EvidenceState.MISSING,
@@ -195,6 +205,8 @@ class EvidenceInputs:
     events_provenance: InputProvenance = NO_INPUT
     creator_supply: CreatorSupplyStore | None = None
     creator_supply_provenance: InputProvenance = NO_INPUT
+    community: CommunityStore | None = None
+    community_provenance: InputProvenance = NO_INPUT
 
 
 def _policy(inputs: EvidenceInputs, source: str) -> SourcePolicy:
@@ -227,6 +239,8 @@ def require_sources(inputs: EvidenceInputs) -> None:
         _require(inputs, STEAM_SOURCE)
     if inputs.creator_supply is not None:
         _require(inputs, YOUTUBE_SOURCE)
+    if inputs.community is not None:
+        _require_community(inputs, inputs.community)
     seen: set[str] = set()
     if inputs.events is not None:
         seen |= {check.source for check in inputs.events.checks()}
@@ -237,6 +251,34 @@ def require_sources(inputs: EvidenceInputs) -> None:
     for source in sorted(seen):
         # Every source that left anything in the stores, whenever it did.
         require_event_source(source, inputs.policies, inputs.stage, _USE)
+
+
+def community_is_synthetic(inputs: EvidenceInputs, store: CommunityStore) -> bool:
+    """Whether the community input holds nothing of Reddit's: declared or detected synthetic."""
+    if inputs.community_provenance.synthetic:
+        return True
+    return wholly_reserved(post.reserved_link for f in store.listings() for post in f.posts)
+
+
+def _require_community(inputs: EvidenceInputs, store: CommunityStore) -> None:
+    """Reddit's own terms gate Reddit's data, and access has not been approved.
+
+    So any input that may hold Reddit data is refused, at every stage, by the policy's
+    own refusal. An input that holds none (synthetic, declared or recognised in every
+    post it holds) may be read at private development only, because it is not Reddit
+    data. At any other stage it is refused like anything else.
+    """
+    policy = _policy(inputs, REDDIT_SOURCE)
+    synthetic = community_is_synthetic(inputs, store)
+    if synthetic and inputs.stage is DeploymentStage.PRIVATE_DEVELOPMENT:
+        return
+    refusal = policy.registration_refusal(SourcePurpose.COMMUNITY_INTEREST, inputs.stage)
+    if refusal is None and not synthetic:
+        return
+    raise SourcePolicyError(
+        f"{REDDIT_SOURCE}: "
+        + (refusal or "synthetic community input is read at private development only")
+    )
 
 
 def policy_view(policy: SourcePolicy, purpose: SourcePurpose, stage: DeploymentStage) -> PolicyView:
@@ -757,6 +799,42 @@ class _Assessment:
         )
         return row, reading
 
+    def community_interest(
+        self, game: CanonicalGame
+    ) -> tuple[SourceEvidence, CommunityInterestReading | None]:
+        """The community row and its reading, or the unchanged absent row."""
+        store = self.inputs.community
+        if store is None:
+            return _not_integrated(COMMUNITY_INTEREST, EvidenceKind.COMMUNITY_INTEREST, None), None
+        game_id = game.canonical_game_id
+        related = [
+            product.title
+            for product in self.inputs.state.related_products
+            if game_id in product.entity_ids and product.record in self.by_key
+        ]
+        reading = read_community_interest(
+            store, self.names[game_id], self.catalogue_names, related, self.as_of
+        )
+        declared = self.inputs.community_provenance
+        provenance = (
+            detected_synthetic(
+                declared, "every post it holds links to the reserved .invalid domain"
+            )
+            if not declared.synthetic and community_is_synthetic(self.inputs, store)
+            else declared
+        )
+        state = _SUPPLY_STATE[reading.state]
+        row = SourceEvidence(
+            source=REDDIT_SOURCE,
+            kind=EvidenceKind.COMMUNITY_INTEREST,
+            state=state,
+            reason=reading.summary,
+            latest_observed_at=reading.latest_retrieved_at,
+            provenance=provenance if state in _READ_FROM_INPUT else NO_INPUT,
+            policy=self.view(REDDIT_SOURCE),
+        )
+        return row, reading
+
     def candidate_counts(self, canonical_game_id: str) -> CandidateCounts:
         own = [c for c in self.candidates if c.canonical_game_id == canonical_game_id]
         promoted = sum(c.observation_id is not None for c in own)
@@ -799,6 +877,7 @@ class _Assessment:
             )
         )
         creators, supply = self.creator_supply(game)
+        communities, discussion = self.community_interest(game)
         sampled = self.samples_provenance(game_id)
         announced = self.events_provenance(game_id)
         readers, pageviews, readers_state, readers_reason = self.pageviews_reading(game)
@@ -831,7 +910,7 @@ class _Assessment:
             ),
             self.event_source(game, eligibility, apps, announced),
             creators,
-            _not_integrated(COMMUNITY_INTEREST, EvidenceKind.COMMUNITY_INTEREST, None),
+            communities,
         )
         demand_sources = [item for item in sources if item.kind is EvidenceKind.DEMAND_SIGNAL]
         # Confirmed means current AND verified. The engine's own breadth, in `demand`,
@@ -862,6 +941,7 @@ class _Assessment:
             ),
             candidates=self.candidate_counts(game_id),
             creator_supply=supply,
+            community_interest=discussion,
             independent_demand_families=independent,
             verified_demand_families=verified,
             unconfirmed_demand_families=unconfirmed,
@@ -872,7 +952,7 @@ class _Assessment:
             restricted_sources=tuple(item.source for item in sources if item.restricted),
             synthetic_sources=tuple(item.source for item in sources if item.provenance.synthetic),
             unverified_sources=tuple(item.source for item in sources if item.provenance.unverified),
-            gaps=_gaps(sources, identity, events, independent, supply),
+            gaps=_gaps(sources, identity, events, independent, supply, discussion),
         )
 
 
@@ -914,6 +994,7 @@ def _gaps(
     events: EventIntelligence,
     independent: int,
     supply: CreatorSupplyReading | None = None,
+    discussion: CommunityInterestReading | None = None,
 ) -> tuple[Gap, ...]:
     """What a creator-opportunity recommendation would still need. Stated, never scored."""
     gaps = [
@@ -944,6 +1025,25 @@ def _gaps(
         Gap(
             code="community_interest_not_integrated",
             text="No community-interest source exists, so discussion volume is unknown.",
+        )
+        if discussion is None
+        else Gap(
+            code="community_interest_not_sampled",
+            text=(
+                f"No current community sample is held for this game "
+                f"({discussion.state.value}), so what players discuss is unknown. Unknown "
+                "is not low interest."
+            ),
+        )
+        if discussion.state in (SupplyState.NOT_QUERIED, SupplyState.EXPIRED)
+        else Gap(
+            code="community_interest_is_a_sample",
+            text=(
+                f"Community interest is a bounded sample ({discussion.state.value}): what "
+                "these searches showed being discussed, not how much interest exists. "
+                f"{len(discussion.angles)} candidate angle(s), none validated as an "
+                "opportunity."
+            ),
         ),
         Gap(
             code="opportunity_score_not_defined",
@@ -1054,6 +1154,7 @@ def assess_evidence(
         inputs.samples_provenance,
         inputs.events_provenance,
         inputs.creator_supply_provenance,
+        inputs.community_provenance,
     ):
         require_honest(claimed)
     if as_of < inputs.state.generated_at:
@@ -1074,7 +1175,10 @@ def assess_evidence(
     purposes = dict(PURPOSES)
     if inputs.creator_supply is not None:
         provenance[YOUTUBE_SOURCE] = inputs.creator_supply_provenance
-        purposes.update(CREATOR_PURPOSES)
+        purposes[YOUTUBE_SOURCE] = CREATOR_PURPOSES[YOUTUBE_SOURCE]
+    if inputs.community is not None:
+        provenance[REDDIT_SOURCE] = inputs.community_provenance
+        purposes[REDDIT_SOURCE] = CREATOR_PURPOSES[REDDIT_SOURCE]
     games = tuple(assessment.game(catalogue.get(game_id)) for game_id in wanted)
     return EvidenceReport(
         as_of=as_of,

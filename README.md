@@ -356,7 +356,10 @@ With `--synthetic-scenario` or `--creator-supply-dir` the reading also carries a
 creator-supply sample: YouTube-shaped responses parsed offline, each video associated
 with a game or not, and the sample described without ever being called the market.
 MetaSpike has never called YouTube; see
-[docs/youtube-creator-supply.md](docs/youtube-creator-supply.md).
+[docs/youtube-creator-supply.md](docs/youtube-creator-supply.md). With
+`--synthetic-scenario` or `--community-dir` it also carries a community-interest sample
+from Reddit-shaped posts, with themes and candidate angles; MetaSpike has never called
+Reddit; see [docs/reddit-community-interest.md](docs/reddit-community-interest.md).
 
 ## Architecture
 

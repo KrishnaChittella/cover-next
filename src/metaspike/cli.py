@@ -36,6 +36,9 @@ from metaspike.catalogue.evaluation import (
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.catalogue.persistence import BROAD_DISCOVERY_ENABLED
 from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_seed_catalogue
+from metaspike.community_sources.reddit import REDDIT_DATA_POLICY
+from metaspike.community_sources.store import CommunityStore
+from metaspike.community_sources.synthetic import build_synthetic_community
 from metaspike.creator_sources.store import CreatorSupplyStore
 from metaspike.creator_sources.synthetic import build_synthetic_creator_supply
 from metaspike.creator_sources.youtube import YOUTUBE_DATA_POLICY
@@ -403,6 +406,13 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         metavar="DIR",
         help="a local creator-supply store (read as found: its origin is unverified)",
+    )
+    evidence.add_argument(
+        "--community-dir",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="a local community-interest store (refused unless it holds no Reddit data)",
     )
     evidence.add_argument(
         "--synthetic-scenario",
@@ -1409,6 +1419,7 @@ EVIDENCE_POLICIES: Mapping[str, SourcePolicy] = {
     **CATALOGUE_SOURCE_POLICIES,
     **EVENT_SOURCE_POLICIES,
     YOUTUBE_DATA_POLICY.source: YOUTUBE_DATA_POLICY,
+    REDDIT_DATA_POLICY.source: REDDIT_DATA_POLICY,
     WIKIMEDIA_PAGEVIEWS_POLICY.source: WIKIMEDIA_PAGEVIEWS_POLICY,
     STEAM_CURRENT_PLAYERS_POLICY.source: STEAM_CURRENT_PLAYERS_POLICY,
 }
@@ -1458,13 +1469,14 @@ def _evidence(args: argparse.Namespace) -> int:
         args.events_dir,
         args.event_sources_dir,
         args.creator_supply_dir,
+        args.community_dir,
     ]
     if args.synthetic_scenario and any(path is not None for path in given):
         return _fail(
             EXIT_INVALID_CATALOGUE,
             "--synthetic-scenario replaces --sample-store, --events-dir, "
-            "--event-sources-dir and --creator-supply-dir; synthetic and stored evidence "
-            "are never mixed",
+            "--event-sources-dir, --creator-supply-dir and --community-dir; synthetic and "
+            "stored evidence are never mixed",
         )
     if args.out is not None and _inside(args.out, DEFAULT_ARTIFACTS_DIR):
         return _fail(
@@ -1517,6 +1529,7 @@ def _evidence(args: argparse.Namespace) -> int:
         events_dir: Path | None,
         sources_dir: Path | None,
         creators_dir: Path | None,
+        community_dir: Path | None,
         synthetic: bool,
     ) -> EvidenceInputs:
         def origin_of(reference: str) -> InputProvenance:
@@ -1553,6 +1566,10 @@ def _evidence(args: argparse.Namespace) -> int:
             creator_supply_provenance=NO_INPUT
             if creators_dir is None
             else origin_of(str(creators_dir)),
+            community=None if community_dir is None else CommunityStore(community_dir),
+            community_provenance=NO_INPUT
+            if community_dir is None
+            else origin_of(str(community_dir)),
         )
 
     scenario: tuple[str, ...] = ()
@@ -1573,12 +1590,14 @@ def _evidence(args: argparse.Namespace) -> int:
                 game.slug: (game.canonical_game_id, game.name) for game in state.catalogue.games
             }
             creators = build_synthetic_creator_supply(root, named, as_of)
-            scenario = (*built.description, *creators.description)
+            communities = build_synthetic_community(root, named, as_of)
+            scenario = (*built.description, *creators.description, *communities.description)
             inputs = stores(
                 root / "samples",
                 root / "events",
                 root / "event-sources",
                 creators.store.root,
+                communities.store.root,
                 synthetic=True,
             )
             report = assess_evidence(inputs, as_of, games)
@@ -1588,6 +1607,7 @@ def _evidence(args: argparse.Namespace) -> int:
             args.events_dir,
             args.event_sources_dir,
             args.creator_supply_dir,
+            args.community_dir,
             synthetic=False,
         )
         report = assess_evidence(inputs, as_of, games)

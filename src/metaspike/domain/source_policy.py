@@ -67,6 +67,9 @@ class SourcePurpose(StrEnum):
     # Who has already published about a game: sampled videos and channels. What is
     # derived is a description of a bounded sample, never a figure of the source's own.
     CREATOR_SUPPLY = "creator_supply"
+    # What communities are discussing about a game: sampled posts and their themes.
+    # What is derived is a description of a bounded sample, never a measure of demand.
+    COMMUNITY_INTEREST = "community_interest"
 
 
 class StageClearance(FrozenModel):
@@ -276,7 +279,7 @@ class SourcePolicy(FrozenModel):
                         f"({self.redistribution_allowed.value}), so the source may not be "
                         f"part of a {stage.value} configuration"
                     )
-        if purpose is SourcePurpose.CREATOR_SUPPLY:
+        if purpose in (SourcePurpose.CREATOR_SUPPLY, SourcePurpose.COMMUNITY_INTEREST):
             # Counting a sample is a derived output. Privately the question may stay
             # unanswered; a prohibition is a prohibition at every stage.
             if self.derived_metrics_allowed is Permission.PROHIBITED:
@@ -284,15 +287,18 @@ class SourcePolicy(FrozenModel):
             if self.historical_storage_allowed in (Permission.UNKNOWN, Permission.PROHIBITED):
                 return "policy does not permit storing the source's results"
             if stage in PUBLIC_STAGES:
+                creator = purpose is SourcePurpose.CREATOR_SUPPLY
+                figures = "creator-supply figures" if creator else "community-interest figures"
+                content = "video data" if creator else "posts"
                 if not self.derived_output_permitted:
                     return (
-                        f"derived creator-supply figures are not explicitly allowed "
+                        f"derived {figures} are not explicitly allowed "
                         f"({self.derived_metrics_allowed.value}), so the source may not be "
                         f"part of a {stage.value} configuration"
                     )
                 if not self.redistribution_allowed.permits:
                     return (
-                        f"showing the source's video data is not explicitly allowed "
+                        f"showing the source's {content} is not explicitly allowed "
                         f"({self.redistribution_allowed.value}), so the source may not be "
                         f"part of a {stage.value} configuration"
                     )

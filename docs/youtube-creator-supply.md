@@ -295,6 +295,6 @@ derived figure; and a reviewed public data contract. None is started.
 
 ## Still to come
 
-Community interest (Reddit) has no adapter, policy or fixtures. Final opportunity
+Community interest (Reddit) has an offline path since U6.2 (see reddit-community-interest.md). Final opportunity
 ranking has no rule: nothing here says how creator supply should be weighed against
 demand, and the lower bound a sample gives is not yet a usable measure of competition.

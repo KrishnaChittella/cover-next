@@ -71,8 +71,33 @@ class GameNames:
 
     @classmethod
     def of(cls, canonical_game_id: str, name: str, aliases: Sequence[str] = ()) -> "GameNames":
-        tokens = dict.fromkeys(words(text) for text in (name, *aliases))
+        tokens = dict.fromkeys(words(text) for text in (name, *aliases) if usable_name(text))
         return cls(canonical_game_id, tuple(t for t in tokens if t))
+
+
+def usable_name(text: str) -> bool:
+    """Whether a catalogue name or alias can be matched against a title as words.
+
+    The title tokeniser keeps Latin letters and digits only. A name written in another
+    script loses its letters to it ("데드 스페이스 3" would become just "3") and would
+    then match every title containing that number, so it is not used. Neither is an
+    executable file name ("portal2.exe"), nor a name of under three letters and digits
+    ("BG", "D2"), which matches unrelated words far more often than the game. The name
+    itself is always kept in the catalogue; only its use for matching titles is limited.
+    (Found in U6.2; the effect before was conservative: titles with a bare number were
+    read as naming several games and left uncertain, never wrongly supported.)
+    """
+    tokens = words(text)
+    if not tokens or not any(any(char.isalpha() for char in token) for token in tokens):
+        return False
+    if text.casefold().strip().endswith(".exe"):
+        return False
+    if len("".join(tokens)) < 3:
+        return False
+    # Every letter of the name must have survived the tokeniser.
+    letters = [char for char in text.casefold() if char.isalpha()]
+    kept = "".join(tokens)
+    return all(char.isascii() for char in letters) and len(kept) >= 3
 
 
 @dataclass(frozen=True)

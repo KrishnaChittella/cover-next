@@ -139,6 +139,12 @@ def has_synthetic_etag(etags: Iterable[str | None]) -> bool:
     return any(etag is not None and etag.startswith(SYNTHETIC_ETAG_PREFIX) for etag in etags)
 
 
+def wholly_reserved(links: Iterable[bool]) -> bool:
+    """Whether every post in a store links to the reserved domain, and there is one."""
+    seen = list(links)
+    return bool(seen) and all(seen)
+
+
 def is_reserved_reference(reference: str | None) -> bool:
     """Whether a reference points at the reserved `.invalid` domain."""
     if not reference:

@@ -51,7 +51,10 @@ def _source_line(item: SourceEvidence) -> str:
     )
     if marks:
         line += f"   [{', '.join(marks)}]"
-    described_below = item.kind is EvidenceKind.CREATOR_SUPPLY and item.policy is not None
+    described_below = (
+        item.kind in (EvidenceKind.CREATOR_SUPPLY, EvidenceKind.COMMUNITY_INTEREST)
+        and item.policy is not None
+    )
     if item.reason and item.state is not EvidenceState.AVAILABLE and not described_below:
         line += f"\n{'':24}{item.reason}"
     return line
@@ -230,6 +233,57 @@ def _game(game: GameEvidence) -> list[str]:
                 f"      {video.video_id}  {video.association.value:<10}"
                 f"{', '.join(video.reasons)}  published {video.published_at:%Y-%m-%d %H:%MZ}"
             )
+    discussion = game.community_interest
+    if discussion is not None:
+        row = game.source("reddit_data")
+        mark = {
+            Standing.SYNTHETIC: "  [SYNTHETIC]",
+            Standing.UNVERIFIED: "  [UNVERIFIED ORIGIN]",
+        }.get(row.provenance.standing, "")
+        lines.append(
+            f"  Community interest: a SAMPLE of discussion, not the community "
+            f"({discussion.state.value}){mark}. Total discussion: UNKNOWN."
+        )
+        lines.append(f"    {discussion.summary}")
+        for searched in discussion.queries:
+            where = "all of Reddit" if searched.subreddit is None else f"r/{searched.subreddit}"
+            failure = "" if searched.error_code is None else f" ({searched.error_code.value})"
+            lines.append(
+                f"    query {searched.query_id[:12]} in {where} [{searched.scope.value}]: "
+                f"{searched.completeness.value}{failure}, {searched.pages_fetched} page(s), "
+                f"{searched.posts_returned} post(s), "
+                f"retrieved {searched.retrieved_at:%Y-%m-%d %H:%MZ}"
+            )
+        if discussion.candidate_posts:
+            lines.append(
+                f"    posts {discussion.candidate_posts} (returned twice: "
+                f"{discussion.duplicate_results}); supported {discussion.supported_posts} in "
+                f"{discussion.supported_subreddits} communit(ies); created in the last 24 h "
+                f"{discussion.supported_created_last_24h}, last 7 d "
+                f"{discussion.supported_created_last_7d}; score held for "
+                f"{discussion.supported_with_score}, absent for "
+                f"{discussion.supported_without_score}; comment count held for "
+                f"{discussion.supported_with_comment_count}, absent for "
+                f"{discussion.supported_without_comment_count}"
+            )
+        for post in discussion.discussions:
+            themes = ", ".join(theme.value for theme in post.themes) or "unclassified"
+            lines.append(
+                f"      {post.post_id}  r/{post.subreddit:<16}{post.association.value:<10}"
+                f"{', '.join(post.reasons)}  themes: {themes}"
+            )
+        for angle in discussion.angles:
+            posts = ", ".join(p.post_id for p in angle.supporting_posts)
+            lines.append(
+                f"    CANDIDATE ANGLE (not validated): {' / '.join(angle.kinds)} — about "
+                f"{', '.join(angle.about)}; {len(angle.supporting_posts)} supporting posts "
+                f"({posts})"
+            )
+        if discussion.observed_once:
+            lines.append(
+                "    themes seen in one post only (not angles): "
+                + ", ".join(discussion.observed_once)
+            )
     lines.append(f"  Usable now: {', '.join(game.usable_sources) or 'nothing'}")
     if game.restricted_sources:
         lines.append(f"  Private development only: {', '.join(game.restricted_sources)}")
@@ -277,7 +331,8 @@ def render(report: EvidenceReport, scenario: tuple[str, ...] = ()) -> str:
     absent = f"{EvidenceState.NOT_INTEGRATED.value}: no source, no policy"
     if not any(policy.purpose.value == "creator_supply" for policy in report.policies):
         lines.append(f"    {'creator supply':<22}{'-':<20}{absent}")
-    lines.append(f"    {'community interest':<22}{'-':<20}{absent}")
+    if not any(policy.purpose.value == "community_interest" for policy in report.policies):
+        lines.append(f"    {'community interest':<22}{'-':<20}{absent}")
     for game in report.games:
         lines.extend(_game(game))
     kinds = ", ".join(kind.value for kind in EvidenceKind)

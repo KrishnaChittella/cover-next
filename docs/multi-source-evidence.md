@@ -60,7 +60,7 @@ No frozen rule, score, schema or source policy was changed, and none needed to b
 | `demand_signal` | Wikimedia pageviews, Steam concurrent players | Attention, each family against its own history. |
 | `event_evidence` | Steam News | Promoted events and their timing. |
 | `creator_supply` | YouTube Data (U6.1, offline only) | A bounded sample of videos, when given; otherwise not integrated. See [youtube-creator-supply.md](youtube-creator-supply.md). |
-| `community_interest` | none | Not integrated. |
+| `community_interest` | Reddit (U6.2, offline only) | A bounded sample of discussion, when given; otherwise not integrated. See [reddit-community-interest.md](reddit-community-interest.md). |
 
 Pageviews are not player counts and neither is a view count. No raw number of one
 source is added to, averaged with, or compared against a raw number of another: each
@@ -357,7 +357,8 @@ resource was used and nothing was benchmarked anywhere else.
   them, or for weighing demand against supply. The reading is its input, not a draft of it.
 - **Creator supply (YouTube)**: an offline parser, association rule and reading exist
   since U6.1, on synthetic data only. Nothing has been collected.
-- **Community interest (Reddit)**: no adapter, no policy, no fixtures.
+- **Community interest (Reddit)**: an offline parser, rules and reading exist since
+  U6.2, on synthetic data only. Reddit's terms could not be read; nothing is collected.
 - **A combination rule** for games with several Steam apps.
 - **Real player history.** None is recorded; sampling is a private-development command.
 - **Wikimedia identifiers** beyond the fifteen original games (14 of 234 entities).

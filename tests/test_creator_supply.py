@@ -1013,7 +1013,7 @@ def report(world: World, supply: SyntheticCreatorSupply) -> EvidenceReport:
 def test_the_game_evidence_reading_carries_creator_supply_when_it_is_given(
     world: World, supply: SyntheticCreatorSupply, report: EvidenceReport, read: Read
 ) -> None:
-    assert report.report_version == "game_evidence_v2"
+    assert report.report_version == "game_evidence_v3"
     assert report.inputs[YOUTUBE].standing is Standing.SYNTHETIC and report.contains_synthetic
     expected = {
         "rust": (SupplyState.INCOMPLETE, EvidenceState.INCOMPLETE),
@@ -1248,6 +1248,7 @@ def test_youtube_is_cleared_for_private_development_and_nothing_else(
     # The other sources' policies are exactly what they were.
     assert sorted(cli.EVIDENCE_POLICIES) == [
         "igdb",
+        "reddit_data",  # U6.2
         "steam_catalogue",
         "steam_current_players",
         "steam_news",
@@ -1259,6 +1260,7 @@ def test_youtube_is_cleared_for_private_development_and_nothing_else(
         "catalogue_metadata",
         "event_intelligence",
         "creator_supply",
+        "community_interest",  # U6.2
     ]
 
 
@@ -1278,7 +1280,14 @@ def test_youtube_data_cannot_reach_a_published_artifact() -> None:
         for path in (REPO / "src" / "metaspike").rglob("*.py")
         if "creator_sources" in path.read_text() and "creator_sources" not in path.parts
     )
-    assert users == ["cli.py", "evidence/assemble.py", "evidence/model.py"]
+    # U6.2's community sources reuse the association names and the reading's states.
+    assert users == [
+        "cli.py",
+        "community_sources/association.py",
+        "community_sources/reading.py",
+        "evidence/assemble.py",
+        "evidence/model.py",
+    ]
     # No job, schedule or warehouse table collects it.
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):
         for path in (REPO / "src" / "metaspike" / area).glob("*.py"):
@@ -1325,7 +1334,7 @@ def test_the_command_demonstrates_creator_supply_offline_and_deterministically(
 
     code, printed, _ = run("--synthetic-scenario", "--game", "rust", "--json")
     document = json.loads(printed)
-    assert document["report_version"] == "game_evidence_v2"
+    assert document["report_version"] == "game_evidence_v3"
     assert document["inputs"][YOUTUBE]["standing"] == "synthetic"
     reading = document["games"][0]["creator_supply"]
     assert reading["state"] == "incomplete" and reading["total_competition_known"] is False

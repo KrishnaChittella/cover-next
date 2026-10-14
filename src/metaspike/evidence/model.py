@@ -12,7 +12,8 @@ why. It computes no score of its own and weighs nothing against anything else:
                          not promoted is a candidate and is only ever counted.
     creator supply       a bounded sample of videos, when one is given; otherwise not
                          integrated. A sample is never the market and never a zero.
-    community interest   not integrated. Reported as that, never as zero.
+    community interest   a bounded sample of discussions, when one is given; otherwise not
+                         integrated. A sample is never the community and never a zero.
 
 Nine states are kept apart, because each one calls for something different:
 
@@ -37,6 +38,7 @@ from typing import Any, Final, Literal, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
+from metaspike.community_sources.reading import CommunityInterestReading
 from metaspike.creator_sources.reading import CreatorSupplyReading
 from metaspike.domain.families import SourceFamily
 from metaspike.domain.games import GameId, LifecycleState
@@ -48,7 +50,7 @@ from metaspike.events.radar import RadarItem
 from metaspike.features.aggregate import DailyAggregate, HourlyAggregate
 from metaspike.features.semantics import EntityEvidenceV2
 
-EVIDENCE_REPORT_VERSION: Final = "game_evidence_v2"
+EVIDENCE_REPORT_VERSION: Final = "game_evidence_v3"
 PRIVATE_DEVELOPMENT_ONLY: Final = "private_development_only"
 
 
@@ -329,6 +331,9 @@ class GameEvidence(FrozenModel):
     # The creator-supply sample, when a creator-supply input was given. None otherwise.
     # A description of a bounded sample; never a count of the market, and never a score.
     creator_supply: CreatorSupplyReading | None = None
+    # The community-interest sample, when a community input was given. None otherwise.
+    # What the sample shows being discussed; never a measure of interest or demand.
+    community_interest: CommunityInterestReading | None = None
     # Independent demand families that are available now AND verified real observations.
     independent_demand_families: int = Field(ge=0)
     verified_demand_families: tuple[SourceFamily, ...] = ()
@@ -351,7 +356,8 @@ class EvidenceReport(FrozenModel):
     """A local, private reading. It is not an artifact and is never published."""
 
     # v2 (U6.1): creator supply; the `incomplete` state; and the U6.0.1 provenance fields.
-    report_version: Literal["game_evidence_v2"] = EVIDENCE_REPORT_VERSION
+    # v3 (U6.2): community interest.
+    report_version: Literal["game_evidence_v3"] = EVIDENCE_REPORT_VERSION
     as_of: AwareDatetime
     stage: DeploymentStage
     distribution: Literal["private_development_only"] = PRIVATE_DEVELOPMENT_ONLY
