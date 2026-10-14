@@ -16,7 +16,10 @@ or "limited" needs a threshold nobody has calibrated, and none is invented here.
 Time. A reading at `as_of` uses only searches and details RETRIEVED by `as_of`. A
 search answers for the moment it was asked: one made later is not a picture of earlier,
 whatever dates its videos carry, and is not used. Counters are the latest retrieved by
-`as_of` and are reported with that retrieval time; they are never a history. Anything
+`as_of` and are reported with that retrieval time; they are never a history. Nothing
+dated after `as_of` is used, however it got into the store: a search result or a video
+detail whose publication time is later than the moment read at contributes nothing to
+it, even when it was retrieved before that moment. Anything
 retrieved more than 30 days before `as_of` has passed YouTube's retention limit and is
 not read.
 """
@@ -33,6 +36,7 @@ from metaspike.creator_sources.association import (
     ASSOCIATION_RULES_VERSION,
     AssociationState,
     GameNames,
+    Reason,
     associate,
 )
 from metaspike.creator_sources.store import CreatorSupplyStore
@@ -46,6 +50,9 @@ from metaspike.domain.model import FrozenModel
 from metaspike.domain.signals import SourceErrorCode
 
 READING_VERSION: Final = "creator_supply_reading_v1"
+# Why a video has no details in a reading although some were retrieved: they are dated
+# after the moment read at, so none of them is used.
+DETAILS_DATED_AFTER_MOMENT: Final = "video_details_dated_after_the_moment_read_at"
 _RETENTION = timedelta(days=RETENTION_DAYS)
 _DAY = timedelta(days=1)
 
@@ -133,6 +140,8 @@ class CreatorSupplyReading(FrozenModel):
     newest_supported_published_at: AwareDatetime | None = None
     supported_with_view_count: int = Field(default=0, ge=0)
     supported_without_view_count: int = Field(default=0, ge=0)
+    # Videos whose retrieved details were not used because they are dated after `as_of`.
+    details_withheld_as_future_dated: int = Field(default=0, ge=0)
     # Searches retrieved by `as_of` that are past the retention limit and were not read.
     expired_searches: int = Field(default=0, ge=0)
     videos: tuple[SampledVideo, ...] = ()
@@ -233,6 +242,18 @@ def read_creator_supply(
             continue
         for found in batch.details:
             details[found.video_id] = (found, batch.retrieved_at)
+    # A detail can be retrieved by the moment and still claim a publication time after
+    # it: the parser tolerates a small clock difference against the RETRIEVAL time, and
+    # that tolerance is not a licence to read the future. Such a detail contradicts the
+    # moment it would be used at, so nothing of it is used: not its classification, its
+    # channel, its date or its counters. No earlier detail is put in its place either,
+    # since two details that disagree cannot be reconciled by guessing. The video falls
+    # back to its search snippet and stays uncertain, and the reason says why.
+    future_dated = {
+        video_id for video_id, (found, _) in details.items() if found.published_at > as_of
+    }
+    for video_id in future_dated:
+        del details[video_id]
 
     videos: list[SampledVideo] = []
     for video_id, pages_with_it in returned.items():
@@ -246,7 +267,12 @@ def read_creator_supply(
                 channel_id=channel_id if detail is None else detail.channel_id,
                 published_at=published_at if detail is None else detail.published_at,
                 association=verdict.state,
-                reasons=tuple(reason.value for reason in verdict.reasons),
+                reasons=tuple(
+                    DETAILS_DATED_AFTER_MOMENT
+                    if reason is Reason.NO_VIDEO_DETAILS and video_id in future_dated
+                    else reason.value
+                    for reason in verdict.reasons
+                ),
                 returned_by_queries=len(pages_with_it),
                 details_retrieved_at=None if held is None else held[1],
                 view_count=None if detail is None else detail.view_count,
@@ -289,6 +315,7 @@ def read_creator_supply(
         newest_supported_published_at=max((v.published_at for v in supported), default=None),
         supported_with_view_count=sum(v.view_count is not None for v in supported),
         supported_without_view_count=sum(v.view_count is None for v in supported),
+        details_withheld_as_future_dated=len(future_dated & returned.keys()),
         expired_searches=expired,
         videos=tuple(videos),
         summary=_summary(state, len(videos), len(supported), uncertain, excluded, len(channels)),

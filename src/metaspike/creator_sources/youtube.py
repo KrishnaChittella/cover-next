@@ -8,8 +8,11 @@ documentation as read on 2026-10-14:
 
     search.list   1 call in its own "Search Queries" bucket; default 100 calls a day.
                   Every page is another call. maxResults 0-50, default 5.
-    videos.list   1 unit of the general bucket; default 10,000 units a day.
+    videos.list   1 unit of the general bucket; default 10,000 units a day. Asked by
+                  `id`, with `part` and nothing else: `maxResults` and `pageToken` are
+                  documented as not supported together with `id`.
     any request   costs at least one, even when it is invalid.
+    daily quotas  "reset at midnight Pacific Time (PT)".
 
 `pageInfo.totalResults` is, in the documentation's words, "an approximation and may not
 represent an exact value", capped at 1,000,000. It is kept on the fetch record as what
@@ -65,6 +68,8 @@ MAX_RESULTS: Final = 50  # documented upper bound of maxResults
 DEFAULT_RESULTS: Final = 25  # self-imposed
 # Self-imposed: ids are sent in batches no larger than a page of results.
 MAX_IDS_PER_VIDEOS_CALL: Final = 50
+# The three documented parts of a video resource that are read. Nothing else is asked for.
+VIDEOS_PARTS: Final = "snippet,statistics,topicDetails"
 # The "Gaming" video category. A structured field of the video resource.
 GAMING_CATEGORY_ID: Final = "20"
 # Developer Policies III.E.4: API Data that is not user-authorised may be stored no
@@ -467,6 +472,11 @@ def api_error(status: int, body: object) -> tuple[SourceErrorCode, str | None]:
 class YouTubeQuota:
     """One day's allowance in both buckets, spent before each request is sent.
 
+    OFFLINE ONLY. This is an in-memory account for one run. It does not persist, does
+    not know what earlier runs spent, and does not track the documented reset at
+    midnight Pacific Time. It is not a production quota manager and must not be used
+    as one: real collection needs a persistent ledger keyed to the Pacific day.
+
     The limits default to the documented defaults and may be set lower, never higher.
     A request that cannot be paid for is not sent. Every request that is sent is paid
     for whatever comes back, because the API charges for invalid requests too. The two
@@ -616,10 +626,12 @@ class YouTubeAdapter:
             raise ValueError(f"between 1 and {MAX_IDS_PER_VIDEOS_CALL} video ids a call")
         retrieved_at = self._now()
         requested = tuple(video_ids)
+        # `part` and `id`, and nothing else. The method documents `maxResults` and
+        # `pageToken` as "not supported for use in conjunction with the `id` parameter",
+        # so neither is sent: the batch is bounded by how many ids are asked for.
         parameters: dict[str, str | int] = {
-            "part": "snippet,statistics,topicDetails",
+            "part": VIDEOS_PARTS,
             "id": ",".join(requested),
-            "maxResults": MAX_IDS_PER_VIDEOS_CALL,
         }
         base: dict[str, Any] = {
             "fetch_id": digest("ytf", VIDEOS_URL, parameters, retrieved_at, self._run_id),

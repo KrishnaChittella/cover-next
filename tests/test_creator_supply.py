@@ -446,7 +446,8 @@ def test_video_details_are_asked_for_in_bounded_batches(tmp_path: Path) -> None:
         2,
         2,
     )
-    first, second = store.videos()
+    # Both calls carry the same retrieval time, so their order in the store is not meaningful.
+    first, second = sorted(store.videos(), key=lambda fetch: -len(fetch.requested_ids))
     assert (len(first.requested_ids), len(second.requested_ids)) == (50, 10)
     # A video asked for and not returned is recorded as missing, not as empty details.
     assert second.missing_ids == (gone.video_id,) and summary.video_details_retrieved == 59
@@ -1358,3 +1359,294 @@ def test_the_command_demonstrates_creator_supply_offline_and_deterministically(
     assert "--creator-supply-dir" in options
     for word in ("--trust", "--verified", "--real", "--live", "--api-key", "--youtube-key"):
         assert word not in options, word
+
+
+# --- U6.1.1: the videos.list request, and nothing from the future ---------------------------
+
+# Every parameter `videos.list` documents as usable together with `id`, and the key.
+# `maxResults` and `pageToken` are documented as NOT supported with `id`.
+VIDEOS_PARAMETERS_ALLOWED_WITH_ID = frozenset(
+    {
+        "part",
+        "id",
+        "hl",
+        "maxHeight",
+        "maxWidth",
+        "onBehalfOfContentOwner",
+        "regionCode",
+        "videoCategoryId",
+        "key",
+    }
+)
+
+
+def test_videos_list_is_asked_by_id_with_part_and_nothing_else(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The outgoing request itself, captured. Not what a replay file happened to match."""
+
+    def no_socket(*_: object, **__: object) -> None:
+        raise AssertionError("a videos.list test tried to open a network connection")
+
+    monkeypatch.setattr(socket.socket, "connect", no_socket)
+    sent: list[httpx.Request] = []
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        ids = request.url.params["id"].split(",")
+        return httpx.Response(200, json=videos_body([resource(video_id) for video_id in ids]))
+
+    client = httpx.Client(transport=httpx.MockTransport(answer))
+    quota = YouTubeQuota()
+    adapter = YouTubeAdapter(client, quota, run_id="r", now=lambda: AS_OF)
+    ids = ["SYNv0000001", "SYNv0000002", "SYNv0000003"]
+    fetch = adapter.videos(ids)
+    (request,) = sent
+    assert request.method == "GET" and request.url.host == API_HOST
+    assert request.url.path == "/youtube/v3/videos"
+    # Exactly two parameters: the parts that are read, and the ids, in the order given.
+    assert dict(request.url.params) == {
+        "part": "snippet,statistics,topicDetails",
+        "id": "SYNv0000001,SYNv0000002,SYNv0000003",
+    }
+    assert "maxResults" not in request.url.params and "pageToken" not in request.url.params
+    assert set(request.url.params) <= VIDEOS_PARAMETERS_ALLOWED_WITH_ID
+    assert fetch.status is FetchStatus.OK and [d.video_id for d in fetch.details] == ids
+    assert fetch.requested_ids == tuple(ids) and fetch.missing_ids == ()
+    assert (fetch.units_spent, quota.other_units_used, quota.search_calls_used) == (1, 1, 0)
+    # With a key the only addition is the documented `key`.
+    keyed = YouTubeAdapter(
+        client, YouTubeQuota(), run_id="r", now=lambda: AS_OF, api_key=Secret("k")
+    )
+    keyed.videos(ids[:1])
+    assert set(sent[-1].url.params) == {"part", "id", "key"}
+    assert "maxResults" not in str(sent[-1].url)
+
+    # Through the collector: bounded batches of at most fifty, each id asked for once.
+    videos = [_Video(f"SYNw{n:07d}", "UCa", f"Rust {n}", AS_OF - DAY) for n in range(60)]
+    _search(tmp_path, "one", "Rust", videos[:50], next_token="P2")
+    _search(tmp_path, "two", "Rust", [*videos[40:], videos[0]], token="P2")  # eleven repeats
+    replayed = replay_youtube_client(tmp_path)
+    sent.clear()
+
+    def route(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/videos"):
+            return answer(request)
+        sent.append(request)
+        return replayed.send(request)
+
+    routed = httpx.Client(transport=httpx.MockTransport(route))
+    store = CreatorSupplyStore(tmp_path / "store")
+    query = SearchQuery(canonical_game_id=GAME, text="Rust", max_results=50)
+    summary = collect_creator_supply(
+        YouTubeAdapter(routed, YouTubeQuota(), run_id="r", now=lambda: AS_OF),
+        YOUTUBE_DATA_POLICY,
+        [query],
+        store,
+        stage=PRIVATE,
+        max_pages=2,
+    )
+    searches = [r for r in sent if r.url.path.endswith("/search")]
+    details = [r for r in sent if r.url.path.endswith("/videos")]
+    assert (len(searches), len(details)) == (2, 2)
+    asked = [request.url.params["id"].split(",") for request in details]
+    assert [len(batch) for batch in asked] == [50, 10]
+    flat = [video_id for batch in asked for video_id in batch]
+    assert flat == [video.video_id for video in videos] and len(set(flat)) == 60
+    for request in details:
+        assert set(request.url.params) == {"part", "id"}
+        assert request.url.params["part"] == "snippet,statistics,topicDetails"
+    assert (summary.other_units_spent, summary.videos_requests_sent) == (2, 2)
+    assert summary.video_details_retrieved == 60 and summary.candidate_videos == 60
+    # search.list is unchanged: it does take maxResults, and a page token when paging.
+    assert dict(searches[0].url.params) == {
+        "part": "snippet",
+        "type": "video",
+        "q": "Rust",
+        "maxResults": "50",
+        "order": "date",
+    }
+    assert searches[1].url.params["pageToken"] == "P2"
+    assert searches[1].url.params["maxResults"] == "50"
+    # Replay still answers deterministically, by id.
+    again = CreatorSupplyStore(tmp_path / "again")
+    collect_creator_supply(
+        YouTubeAdapter(routed, YouTubeQuota(), run_id="r", now=lambda: AS_OF),
+        YOUTUBE_DATA_POLICY,
+        [query],
+        again,
+        stage=PRIVATE,
+        max_pages=2,
+    )
+    assert [f.model_dump_json() for f in again.videos()] == [
+        f.model_dump_json() for f in store.videos()
+    ]
+
+
+def temporal_store(root: Path) -> CreatorSupplyStore:
+    """SYNTHETIC. One store holding evidence from before and after the moment AS_OF.
+
+    search   retrieved T-2h    V1 published T-1d, V2 published T-3h
+    details  retrieved T-90m   V1 as published, 100 views
+    search   retrieved T-30m   V4, claiming publication at T+10m (inside the
+                               parser's tolerance of its own retrieval)
+    details  retrieved T-30m   V2, claiming publication at T+20m, from another
+                               channel, classified as gaming, 777 views
+    details  retrieved T+1h    V1 again, 999,999 views
+    search   retrieved T+2h    V5 published T+90m
+    """
+    store = CreatorSupplyStore(root / "store")
+    names = "Rust"
+
+    def at(moment: datetime, run: str, directory: Path) -> YouTubeAdapter:
+        return Counting(directory).adapter(YouTubeQuota(), moment, run)
+
+    one = _Video("SYNtime0001", "UCearly000000000000001", "Rust wipe day", AS_OF - DAY, views=100)
+    two = _Video("SYNtime0002", "UCearly000000000000002", "Rust raid night", AS_OF - 3 * HOUR)
+    _search(root / "a", "s", names, [one, two])
+    store.add_searches([at(AS_OF - 2 * HOUR, "run-a", root / "a").search(ask(names), 0, None)])
+    _details(root / "b", "d", [one])
+    store.add_videos([at(AS_OF - 90 * MINUTE, "run-a", root / "b").videos([one.video_id])])
+
+    four = _Video("SYNtime0004", "UCearly000000000000004", "Rust first look", AS_OF + 10 * MINUTE)
+    _search(root / "c", "s", "Rust gameplay", [four])
+    store.add_searches(
+        [at(AS_OF - 30 * MINUTE, "run-c", root / "c").search(ask("Rust gameplay"), 0, None)]
+    )
+    future = _Video(
+        "SYNtime0002", "UCfuture00000000000000", "Rust raid night", AS_OF + 20 * MINUTE, views=777
+    )
+    _details(root / "d", "d", [future])
+    store.add_videos([at(AS_OF - 30 * MINUTE, "run-c", root / "d").videos([future.video_id])])
+
+    grown = _Video(
+        "SYNtime0001", "UCearly000000000000001", "Rust wipe day", AS_OF - DAY, views=999_999
+    )
+    _details(root / "e", "d", [grown])
+    store.add_videos([at(AS_OF + HOUR, "run-e", root / "e").videos([grown.video_id])])
+    five = _Video("SYNtime0005", "UCearly000000000000005", "Rust patch day", AS_OF + 90 * MINUTE)
+    _search(root / "f", "s", "Rust update", [five])
+    _details(root / "f", "d", [five])
+    later = at(AS_OF + 2 * HOUR, "run-f", root / "f")
+    store.add_searches([later.search(ask("Rust update"), 0, None)])
+    store.add_videos([later.videos([five.video_id])])
+    return store
+
+
+MINUTE = timedelta(minutes=1)
+
+
+def test_nothing_dated_after_the_moment_contributes_to_a_reading(tmp_path: Path) -> None:
+    store = temporal_store(tmp_path)
+    names = [GameNames.of(GAME, "Rust")]
+    # The parser kept the two near-future claims: they are within tolerance of their own
+    # retrieval. Its check is unchanged. Keeping them out of an earlier reading is the
+    # reading's job.
+    kept = {r.video_id: r for f in store.searches() for r in f.results}
+    assert kept["SYNtime0004"].published_at == AS_OF + 10 * MINUTE
+    stored_details = [d for f in store.videos() for d in f.details if d.video_id == "SYNtime0002"]
+    assert [d.published_at for d in stored_details] == [AS_OF + 20 * MINUTE]
+
+    now = read_creator_supply(store, names[0], names, [], AS_OF)
+    videos = {video.video_id: video for video in now.videos}
+    # A, B. Published before the moment, searched and detailed before it: used in full.
+    first = videos["SYNtime0001"]
+    assert first.association is AssociationState.SUPPORTED
+    assert first.published_at == AS_OF - DAY and first.details_retrieved_at == AS_OF - 90 * MINUTE
+    # G. The counter is the one retrieved by the moment, never the later, larger one.
+    assert first.view_count == 100
+
+    # C. Its details were retrieved before the moment and claim a publication time after
+    # it. Nothing of them is used; the search snippet stands, and the video is uncertain.
+    second = videos["SYNtime0002"]
+    assert second.association is AssociationState.UNCERTAIN
+    assert second.reasons == ("video_details_dated_after_the_moment_read_at",)
+    assert second.published_at == AS_OF - 3 * HOUR  # the snippet's, not a corrected one
+    assert second.channel_id == "UCearly000000000000002"  # the snippet's channel
+    assert second.details_retrieved_at is None
+    assert (second.view_count, second.like_count, second.comment_count) == (None, None, None)
+    assert now.details_withheld_as_future_dated == 1
+    # D, E, F. A result published after the moment, details retrieved after it, and a
+    # search made after it: none is in the reading.
+    assert set(videos) == {"SYNtime0001", "SYNtime0002"}
+    document = now.model_dump_json()
+    for absent in ("SYNtime0004", "SYNtime0005", "UCfuture", "999999", "777"):
+        assert absent not in document, absent
+    # I. One supported video from one channel. The future-dated detail adds neither.
+    assert (now.supported_videos, now.supported_channels, now.uncertain_videos) == (1, 1, 1)
+    assert now.most_videos_from_one_channel == 1 and now.candidate_videos == 2
+    assert (now.supported_with_view_count, now.supported_without_view_count) == (1, 0)
+    assert now.newest_supported_published_at == AS_OF - DAY
+    assert all(video.published_at <= AS_OF for video in now.videos)
+    assert all(
+        video.details_retrieved_at is None or video.details_retrieved_at <= AS_OF
+        for video in now.videos
+    )
+    assert now.latest_retrieved_at == AS_OF - 30 * MINUTE
+
+    # H. The same store, read after everything in it had happened and been retrieved.
+    later = read_creator_supply(store, names[0], names, [], AS_OF + 3 * HOUR)
+    after = {video.video_id: video for video in later.videos}
+    assert set(after) == {"SYNtime0001", "SYNtime0002", "SYNtime0004", "SYNtime0005"}
+    assert after["SYNtime0001"].view_count == 999_999
+    assert after["SYNtime0001"].details_retrieved_at == AS_OF + HOUR
+    # The detail is no longer from the future, so now it is used, as it was retrieved.
+    assert after["SYNtime0002"].association is AssociationState.SUPPORTED
+    assert after["SYNtime0002"].published_at == AS_OF + 20 * MINUTE
+    assert after["SYNtime0002"].channel_id == "UCfuture00000000000000"
+    assert after["SYNtime0002"].view_count == 777
+    assert later.details_withheld_as_future_dated == 0 and later.supported_channels == 3
+    # And between the two: the boundary itself. One second before the claimed time the
+    # detail is still withheld; at the claimed time it is used.
+    edge = AS_OF + 20 * MINUTE
+    just_before = read_creator_supply(store, names[0], names, [], edge - timedelta(seconds=1))
+    assert just_before.details_withheld_as_future_dated == 1
+    at_edge = read_creator_supply(store, names[0], names, [], edge)
+    assert at_edge.details_withheld_as_future_dated == 0
+    # The earlier reading is unchanged by having read the later ones, and nothing was rewritten.
+    assert read_creator_supply(store, names[0], names, [], AS_OF).model_dump_json() == document
+
+    # An earlier, well-dated detail is not put in the place of a later contradicting one.
+    earlier = _Video("SYNtime0002", "UCearly000000000000002", "Rust raid night", AS_OF - 3 * HOUR)
+    _details(tmp_path / "g", "d", [earlier])
+    store.add_videos(
+        [
+            Counting(tmp_path / "g")
+            .adapter(YouTubeQuota(), AS_OF - 100 * MINUTE, "run-g")
+            .videos([earlier.video_id])
+        ]
+    )
+    contradicted = read_creator_supply(store, names[0], names, [], AS_OF)
+    again = next(video for video in contradicted.videos if video.video_id == "SYNtime0002")
+    assert again.association is AssociationState.UNCERTAIN and again.view_count is None
+    assert contradicted.supported_videos == 1
+    # Before the contradicting detail was retrieved, the earlier one is what was known.
+    before_conflict = read_creator_supply(store, names[0], names, [], AS_OF - 45 * MINUTE)
+    known = next(video for video in before_conflict.videos if video.video_id == "SYNtime0002")
+    assert known.association is AssociationState.SUPPORTED
+    assert known.details_retrieved_at == AS_OF - 100 * MINUTE
+
+
+def test_the_synthetic_scenario_is_still_deterministic(
+    world: World, supply: SyntheticCreatorSupply, read: Read, tmp_path: Path
+) -> None:
+    games = {g.slug: (g.canonical_game_id, g.name) for g in world.state.catalogue.games}
+    rebuilt = build_synthetic_creator_supply(tmp_path, games, AS_OF)
+    assert [f.model_dump_json() for f in rebuilt.store.searches()] == [
+        f.model_dump_json() for f in supply.store.searches()
+    ]
+    assert [f.model_dump_json() for f in rebuilt.store.videos()] == [
+        f.model_dump_json() for f in supply.store.videos()
+    ]
+    rust = read("rust")
+    # Unchanged by the closeout: nothing in the scenario is dated after its moment.
+    assert (
+        rust.candidate_videos,
+        rust.supported_videos,
+        rust.uncertain_videos,
+        rust.excluded_videos,
+    ) == (9, 4, 3, 2)
+    assert rust.details_withheld_as_future_dated == 0
+    # No stored videos.list request carries a parameter it should not.
+    for fetch in supply.store.videos():
+        assert 1 <= len(fetch.requested_ids) <= MAX_IDS_PER_VIDEOS_CALL

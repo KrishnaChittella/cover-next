@@ -44,12 +44,18 @@ Read from the official documentation on 2026-10-14.
 | | |
 |---|---|
 | `search.list` | `part=snippet`, `type=video`, `q`, `maxResults` (0–50, default 5), `order`, `publishedAfter`, `videoCategoryId`, `pageToken`. Returns `items[]` with `id.videoId` and `snippet.publishedAt`, `channelId`, `title`; `nextPageToken`; `pageInfo.totalResults`. |
-| `videos.list` | `part=snippet,statistics,topicDetails`, `id`. Returns `snippet.categoryId`, `tags`; `statistics.viewCount`, `likeCount`, `commentCount`; `topicDetails.topicCategories`. |
+| `videos.list` | `part=snippet,statistics,topicDetails` and `id`, **and nothing else**. Returns `snippet.categoryId`, `tags`; `statistics.viewCount`, `likeCount`, `commentCount`; `topicDetails.topicCategories`. |
 | Errors | The documented envelope, by `reason`: `quotaExceeded`, `rateLimitExceeded`, and so on. |
 
 `pageInfo.totalResults` is, in the documentation's words, "an approximation and may not
 represent an exact value", with a maximum of 1,000,000. It is kept on the fetch record
 as what the source said and is **never** read as a count of competing videos.
+
+`videos.list` by id takes no `maxResults` and no `pageToken`: the method documents both
+as "not supported for use in conjunction with the `id` parameter". U6.1 sent
+`maxResults=50` with `id`; U6.1.1 removed it. The batch is bounded by how many ids are
+asked for, at most 50 a call (self-imposed), each id once. A test captures the outgoing
+request and checks its parameters are exactly `part` and `id`.
 
 Not read at all: descriptions, thumbnails, channel titles, comments, captions,
 transcripts, video content.
@@ -60,6 +66,8 @@ transcripts, video content.
 |---|---|---|
 | `search.list` | 1 call, in its own "Search Queries" bucket | 100 calls |
 | `videos.list` | 1 unit | 10,000 units, shared by all other endpoints |
+
+Daily quotas "reset at midnight Pacific Time (PT)", in the documentation's words.
 
 Each page of results is another search call. Every request costs at least one, even an
 invalid one. (An older figure of 100 units per search no longer matches the
@@ -77,8 +85,12 @@ call: that category id `20` is Gaming (taken from general knowledge of the API, 
 verified this session), and the batch size of 50 ids per `videos.list` call
 (self-imposed; the method page states no maximum).
 
-Not modelled: when the daily allowance resets. The pages read do not state it, so the
-account is per run, and whoever runs a real collection must carry the day's usage.
+**`YouTubeQuota` is offline only.** It is an in-memory account for one run. It does not
+persist, does not know what earlier runs spent, and does not follow the documented reset
+at midnight Pacific Time. It is not a production quota manager and is unsuitable as
+one. Real collection needs a persistent ledger keyed to the Pacific day; none is built,
+and no scheduler exists. (The U6.1 handoff said the reset time was not established. It
+is documented; that statement was wrong and is corrected here.)
 
 ## Is this video about this game?
 
@@ -170,7 +182,16 @@ A reading at `as_of` uses only searches and details *retrieved* by `as_of`:
 - Details retrieved after `as_of` are not used; the video is then uncertain.
 - A counter is the latest retrieved by `as_of`, shown with that retrieval time. A later,
   larger counter is never shown for an earlier moment. There is no counter history.
-- A response claiming a publication time after its own retrieval is rejected.
+- A response claiming a publication time more than an hour after its own retrieval is
+  rejected by the parser. That tolerance is against the *retrieval* time and is not a
+  licence to read the future, so the reading applies its own, stricter rule (U6.1.1):
+  **nothing dated after `as_of` contributes.** A search result published after `as_of`
+  is left out. A video detail retrieved by `as_of` but claiming a publication time after
+  it is not used at all: not its classification, channel, date or counters. The video
+  falls back to its search snippet and is `uncertain`, with the reason
+  `video_details_dated_after_the_moment_read_at`, and the reading counts how many
+  details were withheld this way. No timestamp is corrected, no earlier detail is put in
+  its place, and the same store read at or after the claimed time uses the detail.
 - Catalogue names come from the state the reading is given, which cannot postdate `as_of`.
 - For each query the latest run by `as_of` is the sample; an older run is not mixed in.
 
@@ -259,7 +280,8 @@ unverified provenance; the policy; publication isolation; the command.
 2. YouTube's answer, or a careful reading, on whether counting sampled videos per game
    is aggregation or a derived metric under the policies.
 3. A deletion and refresh job for the 30-day limit, and deletion on request.
-4. A quota ledger that persists across runs, with the reset time established.
+4. A quota ledger that persists across runs and follows the reset at midnight Pacific
+   Time. Today's account is in-memory and offline only.
 5. A query design: which words per game, which window, which order. Today's queries are
    the game's name.
 6. A way to verify collected data's origin, as for every local store (U6.0.1).
