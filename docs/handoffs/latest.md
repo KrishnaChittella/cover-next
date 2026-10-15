@@ -1,289 +1,205 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.7: SUPERVISED WIKIMEDIA RECORDING — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.7.1: WIKIMEDIA RECORDING TEMPORAL AND INSPECTION CLOSEOUT — CHATGPT REVIEW REQUIRED
 
 This checkpoint was worked on branch `product/local-ui` only, entirely offline:
 
-- no live source request was ever sent;
-- no cloud access, deployment or source activation;
-- no pull request, merge or publication.
+- no live source request;
+- no live recorder run;
+- no pin;
+- no cloud access or deployment;
+- no pull request or merge.
 
-**The live recorder has not been executed. No later checkpoint has been started.**
+**No later checkpoint has been started.**
 
 ## Things to review first
 
-1. **The live path exists, but it cannot run by accident.** `record-pageviews` only plans
-   by default. Sending requires both `--live` and `--confirm <plan id>`, where the id is
-   the one the preview printed. A changed scope, window, destination or policy changes
-   the id, and the run is refused before any transport is built. The single function that
-   builds a network transport, `cli._live_transport`, was replaced in every test, and
-   sockets were blocked.
-2. **Rate limiting reuses the existing limiter unchanged.** That limiter enforces the
-   policy's documented window (200 requests in 60 seconds), not a fixed gap, so a run of
-   at most 15 requests never waits. What is enforced: strictly sequential requests,
-   concurrency 1, no retry (`max_attempts=1`), and an attempt budget equal to the number
-   of planned requests. The F test checks exactly this. It does not claim any pacing
-   between requests.
-3. **The digest covers the bodies only, as for the existing pinned recording.**
-   Acquisition records and the manifest live in `acquisition/`, outside the digest, and
-   are checked against the bodies by `--inspect`.
-4. **Bindings carry `bound_from = MIGRATED_AT` (2026-10-04).** That is the bootstrap
-   catalogue's binding origin. The seed catalogue holds no later binding time.
+1. **The time guard runs inside `assess_evidence`, not only in the CLI.** A library
+   caller is held to it. It keys on the directory that the pageview provenance names. A
+   caller who builds a misleading *unverified* provenance by hand can still read a
+   recorder directory early; such data is unverified and counts for nothing. A caller
+   claiming *verified* cannot slip past: every non-legacy pinned digest must name a
+   recorder directory that is intact, complete and received by `as_of`.
+2. **Two evaluation modes are now explicit and tested.**
+   - Point-in-time readings (`assess_evidence`, `evidence`, the private UI) refuse an
+     `as_of` before receipt.
+   - `opportunity-history` stays a retrospective reconstruction of source periods
+     (validation_protocol_v1), so its moments may precede retrieval. It now also requires
+     an intact, complete recorder recording.
+   
+   Its report text is unchanged. The distinction is stated in code and in the runbook,
+   not added to the report, so the U6.5 fingerprint is unchanged.
+3. **A recording in which every target said "no data"** is classified `failed` by the
+   recorder's existing rule: everything answered, but nothing was recorded. This is
+   requirement K's "complete recording with no usable bodies". It is never review-ready
+   and never verified evidence.
+4. **One file outside the brief's likely list changed: `src/metaspike/evidence/
+   acquisition.py`.** It gains one public helper, `record_id_matches()`, which checks that
+   a record's id is still the digest of its own content. This lets inspection detect an
+   edited record. It is five lines, uses the existing private `_record_id`, and changes no
+   behaviour. `src/metaspike/opportunity/history.py` was also changed, for the
+   retrospective-mode requirement in §3.
 
-## 1. Approved starting SHA
+## 1. Starting SHA
 
-`bca28c3adfd0c061c93d45ca89cf9670d186e659`. Verified at the start: on
+`9510c95c895376e8d96804b2b3ac435124314fad`. Verified at the start: on
 `product/local-ui`, at that commit, tree clean.
 
 ## 2. Implementation SHA
 
-`824f7f6478a461232dfcf4dbaa58a8c198438fa9`: `feat: prepare supervised Wikimedia recording
-offline`.
+`aafaa05ece1483d6d0bdee600f669144083d3fbc`: `fix: enforce recording time and inspection
+safety`.
 
 ## 3. Exact files changed
 
 | File | Change |
 |---|---|
-| `src/metaspike/opportunity/history.py` | `material_content` replaces `_demand_values`; duplicates refused |
-| `src/metaspike/pageview_recorder.py` | New: plan, record, inspect, render |
-| `src/metaspike/cli.py` | `record-pageviews` command; `_live_transport`; `_recorder_sleep` |
-| `src/metaspike/source_readiness.py` | Wikimedia `next_step` text names the new command |
-| `tests/test_pageview_recorder.py` | New: 20 tests, mock transports only |
-| `tests/test_opportunity_history.py` | 2 hardening regressions |
-| `tests/test_evidence.py` | Allow-list names `pageview_recorder.py` |
-| `docs/wikimedia-recording-runbook.md` | New: the owner runbook |
-| `docs/source-readiness-and-real-data-activation.md` | Points at the runbook |
-| `docs/handoffs/latest.md` | This handoff (separate commit) |
+| `src/metaspike/pageview_recorder.py` | Adds `check_recording` and `RecordingCheck` (integrity, completeness and review-readiness), `require_usable_recording`, `is_recorder_output`, `LEGACY_PAGEVIEW_RECORDINGS` and `RecordingRefused`. Inspection reports the three separately. |
+| `src/metaspike/evidence/assemble.py` | `assess_evidence` calls `require_usable_recording` when pageviews are supplied. |
+| `src/metaspike/cli.py` | `evidence` refuses early with a clear message (exit 5). `--inspect` exits 0, 3 or 4. |
+| `src/metaspike/opportunity/history.py` | Verified demand from a recorder directory must be intact and complete. A non-legacy pinned digest without acquisition files is refused. |
+| `src/metaspike/evidence/acquisition.py` | `record_id_matches()` (see item 4 above). |
+| `tests/test_pageview_recorder.py` | 6 new tests; the partial-run test now asserts the honest diagnostic verdict. |
+| `docs/wikimedia-recording-runbook.md` | Inspection verdicts, exit codes, the time boundary, the two modes. |
+| `docs/handoffs/latest.md` | This handoff (separate commit). |
 
-No frontend file or contract changed, so the frontend gates were not run.
+No frontend file or contract changed.
 
-## 4. Historical comparison hardening
+## 4. Acquisition-time enforcement
 
-For verified demand, `evaluate_history` now compares `material_content` of the supplied
-recording with that of the replay of its pinned directory.
+`require_usable_recording(provenance, as_of)` applies to every directory the pageview
+input names that carries `acquisition/`.
 
-**What is compared:**
+- `check_recording` must find no problem. If it does, the recording is refused as "do not
+  hold together".
+- `as_of` must be at or after the latest `received_at` among the records. Otherwise it is
+  refused: "a reading at … could not have had them". Nothing is assessed: the guard runs
+  before the assessment, at the CLI with exit 5 and inside `assess_evidence` as a
+  `ValueError` subclass.
+- Read as verified, the recording must be review-ready: intact, complete, and at least one
+  body.
+- Read as verified, every digest must be a legacy fixture or a recorder directory.
+  Deleting `acquisition/` from a new recording never makes it legacy.
 
-- the requested window, and the set of sources run;
-- per signal: run source, game, signal key (source, metric and granularity), collection
-  status, error code and message;
-- per series: identity, granularity, window, `latest_due`;
-- per point: game, source, metric, granularity, period, status, value, reference and
-  source timestamp.
+No acquisition time is ever invented or backdated. The check compares recorded times only.
 
-Entries are compared in a canonical sorted order, so failed and unmapped signals count. A
-missing failure differs.
+## 5. Legacy historical-fixture compatibility
 
-**Duplicates.** A second entry for the same source, game and key is refused ("more than
-one entry"). It is never collapsed by a mapping.
+`LEGACY_PAGEVIEW_RECORDINGS = {260d787e…}` is the U6.0.1 pageview fixture. It predates
+acquisition records, so its retrieval times are unknown. It is read, as before, under the
+publication-lag reconstruction, and never as a point-in-time acquisition.
 
-**Excluded on purpose:** replay-time stamps (report and run times, each point's
-`observed_at`, and the freshness lag derived from it). The replay is run at the
-recording's own `observed_at`, so `latest_due` is still compared and nothing is backdated.
+Tested:
 
-**Regressions.** All values were left unchanged in each case.
+- the fixture is verified;
+- it is not recorder output;
+- the guard passes;
+- `assess_evidence` at `REAL_AS_OF` reads it as verified;
+- the U6.5 history fingerprint is unchanged: `ophist_b1d2af287f618f8ab1dbc9634b5b1292`,
+  with 546 assessments (0 candidate, 35 watchlist, 511 insufficient).
 
-| Change | Result |
+## 6. Complete versus partial inspection
+
+`inspect_recording` now reports three things separately:
+
+- **`integrity`:** `intact` or `problems found`;
+- **`run_status`:** `complete`, `partial` or `failed`;
+- **`review_ready`:** intact AND complete AND at least one body.
+
+It also gives a verdict.
+
+| Verdict | Exit code |
 |---|---|
-| A failure's error code changed | Refused |
-| A failed signal dropped | Refused |
-| A failure turned into "not mapped" | Refused |
-| `latest_due` moved a day earlier | Refused |
-| A point's article reference changed | Refused |
-| A signal duplicated | Refused ("more than one entry") |
-| Only the stamps changed (runs re-stamped, points' `observed_at` moved) | Accepted, same fingerprint |
+| `INTACT AND COMPLETE: ready for owner review (still UNVERIFIED)` | 0 |
+| `INTACT BUT PARTIAL: diagnostic only, NOT ready for pinning` | 3 |
+| `INTACT BUT FAILED: nothing usable was recorded, NOT ready for pinning` | 3 |
+| `PROBLEMS FOUND: not a usable recording` | 4 |
 
-**The U6.5 result is unchanged.** Fingerprint `ophist_b1d2af287f618f8ab1dbc9634b5b1292`,
-546 assessments: 0 candidate, 35 watchlist, 511 insufficient (tested through the CLI).
+Partial and failed runs are still inspected in full, including the replay. Every verdict
+repeats that integrity is not provenance.
 
-## 5. Recorder CLI contract
+## 7. Manifest consistency validation
 
-```
-metaspike record-pageviews (--game SLUG ... | --all-bootstrap) --out DIR [--through DAY] [--json]
-metaspike record-pageviews ... --live --confirm PLAN_ID      # owner only; NOT EXECUTED
-metaspike record-pageviews --inspect DIR [--json]
-```
+`check_recording` now refuses:
 
-**Planning**
+**File set**
 
-- Only explicit targets: bootstrap games with a bound article. That is 14, because FiveM
-  has none. The maximum is 15.
-- No discovery and no default selection.
-- Duplicates are refused, and non-bootstrap games are refused.
+- unexpected files or directories, at the top level or in `acquisition/`;
+- a body without a record;
+- a record without a body;
+- more than one record per article;
+- bodies or records that differ from what the manifest lists;
+- a bodies digest that differs from the one written at acquisition.
 
-**Window**
+**Records**
 
-- One window of exactly 90 days, ending on `--through` or on the latest due day.
-- The latest due day is `latest_due_period(DAILY, now, 24h)`, which is the day before
-  yesterday.
-- A day that is not yet due is refused.
+- a record whose id no longer matches its content (an edited record);
+- a binding to another game or article;
+- a record whose request is not the planned `GET <path>`;
+- a record whose source or policy digest is not the plan's;
+- record times that differ from the exchange's;
+- an exchange that is out of order or earlier than the plan.
 
-**Destination**
+**Manifest and outcomes**
 
-- It must not exist, and neither may its `.incomplete` twin.
-- It is refused under `artifacts/`, `public/`, `fixtures/`, `apps/`, `infra/` or
-  `.github/`.
+- a plan whose id no longer matches its content (an edited plan);
+- outcomes that are not the planned targets in planned order;
+- a recorded outcome that does not name its exact file and record id;
+- a non-recorded outcome that keeps a body;
+- a "not attempted" outcome that has an answer, or that appears before an attempted one;
+- a `requests_sent` count that differs from the attempted targets;
+- targets not attempted although the run says it did not stop;
+- a run status that disagrees with the outcomes.
 
-**Exit codes**
+## 8. Before and after regression evidence
 
-| Code | Meaning |
-|---|---|
-| 0 | Plan printed, or recording complete |
-| 3 | Recording partial or failed |
-| 4 | Inspection found a problem |
-| 5 | Refused |
+**Before (U6.7):** inspecting a partial or failed run said "no problems found", with exit
+0. `metaspike evidence --wikimedia-replay <recorder dir>` read a recording at any `as_of`,
+including before its responses were received.
 
-## 6. Replay and acquisition format
+**After (U6.7.1),** with mock transports and temporary files only:
 
-Each 200 response that the adapter parsed is kept, **byte for byte**, as `<article>.json`
-at the top of the directory. That is exactly what `replay_client` serves and
-`recording_digest` hashes.
+| | Test | Result |
+|---|---|---|
+| A | Reading at the last receipt | Accepted, CLI and library |
+| B | Reading one second before | Refused, exit 5, nothing assessed; unpinned and under a TEST-ONLY pin; library `assess_evidence` raises |
+| C | Legacy fixture | Behaviour unchanged |
+| D | Edited manifest outcome; edited plan; edited record time | Refused |
+| E | Dropped record; duplicated record | Refused |
+| F | Self-consistent record bound to another game | Refused ("binds another game") |
+| G | Self-consistent record with another request; with shifted times | Refused |
+| H | Complete run | `intact` / `complete` / ready; exit 0 |
+| I | Partial run (503 mid-run) | `intact` / `partial` / not ready; exit 3; refused if pinned; readable unpinned as unverified |
+| J | Failed run (transport failure) | `intact` / `failed` / not ready; exit 3; refused if pinned |
+| K | All "no data" | `failed`, 0 bodies, not ready; refused if pinned |
+| — | New recording with `acquisition/` deleted | Refused when pinned; unverified when not |
+| — | History mode | A complete recording is accepted at moments before receipt (retrospective, stated); a partial one is refused |
+| L, M, N and P | Existing replay, unverified-standing, no-network (sockets blocked, live transport replaced), planning, confirmation, policy and budget tests | All pass unchanged |
+| O | U6.5 fingerprint | Unchanged |
 
-**`acquisition/records.jsonl`** holds one `acquisition_record_v1` per kept body:
-
-- source, purpose and stage;
-- the policy's review date and digest;
-- `GET <path>`;
-- requested and received times;
-- SHA-256 and length;
-- the article, and its binding to the canonical game.
-
-**`acquisition/manifest.json`** holds:
-
-- the plan;
-- run status (`complete`, `partial` or `failed`), and why it stopped;
-- per target: status (`recorded`, `no_data`, `failed` or `not_attempted`), error code,
-  and the exchange (method, path, query, times, HTTP status, kept response headers, body
-  length);
-- requests sent;
-- the bodies' digest, marked NOT pinned;
-- standing `unverified`, with the trust statement.
-
-**Never written:** request headers (so no User-Agent contact), cookies, authorization,
-response headers outside an allowlist (content-type, content-length, date, etag,
-last-modified, cache-control, age, retry-after), environment values or credentials.
-
-## 7. Source and rate-limit safeguards
-
-- **Policy.** `registration_refusal(demand_signals, private_development)` runs at plan
-  time and again at record time. If the policy digest changed since planning, the run is
-  refused.
-- **Requests.** The existing `WikimediaPageviewsAdapter` and its limiter are used, with
-  no retry and a one-attempt-per-target budget.
-- **Request identity.** Each request sent must equal the planned method and path, with no
-  query, or the run stops.
-- **When the run stops.** It stops at the first error other than 404: a 429, 401, 403 or
-  5xx, an invalid body, or a network failure or timeout. Later targets become
-  `not_attempted`. A 404 is `no_data`, and the run continues. Nothing is invented for any
-  failure.
-- **Output.** It is written to `.incomplete` and renamed at the end.
-
-## 8. Origin verification boundaries
-
-- **A new recording is UNVERIFIED.** `recording_provenance` and `--inspect` both say so.
-- **What an acquisition record proves.** It proves integrity and permitted collection.
-  It does not prove that Wikimedia sent the bytes, and it gives no permission for public
-  use.
-- **The only route to verified.** Inspection, then owner review, then owner approval,
-  then the digest pinned in `PINNED_RECORDINGS` in a reviewed commit.
-- **No shortcuts.** There is no auto-pin, no override flag, and no change to
-  `PINNED_RECORDINGS` in U6.7.
-
-## 9. Offline end-to-end evidence
-
-`test_a_reviewed_and_pinned_mock_recording_reaches_the_opportunity_engine` walks the whole
-path:
-
-- **Recording.** An invented Wikimedia response goes through the recorder over a mock
-  transport. The raw bodies, the 14 acquisition records and the manifest are written.
-- **Before the pin.** Inspection passes, with standing `unverified`. Read by `metaspike
-  evidence --opportunities`, the pageviews are `unverified` and every entry is
-  `insufficient_evidence`.
-- **Test-only pin.** `provenance.PINNED_RECORDINGS` is monkeypatched in that test only;
-  the real table is untouched.
-- **After the pin.** The pageviews read as `verified`. The invented Minecraft rise
-  reaches `provisional_watchlist` through the unchanged rubric, in a private,
-  development-only report. Nothing goes under `artifacts/`.
-
-The values are invented. Nothing is claimed about any real game.
-
-## 10. Tests and quality gates (actual results)
-
-**Recorder tests A to W**
-
-| Test | What it covers |
-|---|---|
-| A | A plan sends and writes nothing |
-| B and C | Targets and bounds |
-| D and E | The 90-day window and the publication lag |
-| F | Sequential requests under the policy limit, with no retry |
-| G, H, I and R | A byte-exact, replayable recording with its records, unverified |
-| J | No cookie, secret header, User-Agent or contact written |
-| K | Deterministic records |
-| L, M and N | No data, and a 503, 429, 403 or two invalid bodies (parametrised) |
-| O and P | Destinations refused |
-| Q | Policy checked, and a change refused |
-| S | Altered or extra content found by inspection |
-| T | A transport failure stops the run, with no network fallback |
-| — | The CLI live path needs the matching plan id (mock transport) |
-| U | End to end |
-| W | No cloud or production path is reachable |
-
-V is the U6.5 fingerprint parity check, covered in `tests/test_opportunity_history.py`.
-
-**Backend gates**
+## 9. Full quality-gate results (actual)
 
 | Gate | Result |
 |---|---|
-| `uv run ruff format --check` | exit 0 |
+| `uv run ruff format --check` | exit 0 (267 files) |
 | `uv run ruff check` | exit 0 |
 | `uv run mypy` | exit 0, no issues in 246 files |
 | `uv run metaspike export-schemas --check` | exit 0, up to date |
 | `uv run metaspike evaluate-resolver` | exit 0; golden v3 `c2b3aef7b372`; false AUTO_MATCH merges 0; precision 100.0% (52/52); real-evidence recall 100.0%; NEW_ENTITY 100.0% |
-| Focused suites (see below) | 226 passed |
-| `uv run pytest` | **1,662 passed, 8 deselected**, exit 0 (previously 1,640) |
+| Targeted suites (see below) | 232 passed |
+| `uv run pytest` | **1,668 passed, 8 deselected**, exit 0 (previously 1,662) |
 
-The focused suites were recorder, readiness, history, historical validation, evidence,
-wikimedia, opportunity and v0 parity.
+The targeted suites were recorder, history, readiness, evidence, historical validation,
+opportunity, wikimedia and v0 parity.
+
+**Run time.** The full run took 17m40s, against 7m37s for U6.7. The machine was at 5%
+battery and not charging. On the same suite, the code before this change took 53s and the
+code after it took 47s, so the time is the machine's, not the change's.
 
 **Frontend gates:** not run, because no frontend code or contract changed. No live API
 test exists or was run.
 
-## 11. Future live command readiness
-
-The command for an authorised owner session is:
-
-```
-uv run metaspike record-pageviews --all-bootstrap \
-  --out .metaspike/recordings/wikimedia-YYYYMMDD --live --confirm PLAN_ID
-```
-
-It sends 14 requests, one at a time, with no retry. The output is reviewed with
-`--inspect`. The step-by-step runbook is `docs/wikimedia-recording-runbook.md`: preview,
-record, stop conditions, inspection, digest, pinning approval, private evidence, UI
-refresh, stopping and rollback.
-
-## 12. What was explicitly NOT executed
-
-- Any request to Wikimedia or any other source.
-- The live recorder: `cli._live_transport` was never called outside tests, where it was
-  replaced.
-- A real recording. `.metaspike/recordings` does not exist.
-- Any pin.
-- The C2-F acceptance review.
-- Any GCP or production access.
-
-## 13. Owner steps after C2-F acceptance
-
-1. Complete the separate C2-F acceptance review and authorise a live recording session.
-2. Set `METASPIKE_CONTACT`.
-3. Preview the plan, then run it with `--live --confirm`.
-4. Inspect the recording, and review the manifest.
-5. Approve pinning the exact digest. Claude adds it to `PINNED_RECORDINGS` in a reviewed
-   commit.
-6. Generate the private evidence and the opportunity report with `--wikimedia-replay`.
-
-## 14. Frozen-rule parity
+## 10. Frozen contract parity
 
 These are unchanged:
 
@@ -298,13 +214,10 @@ These are unchanged:
 - recommendation_snapshot_v2;
 - creator_opportunity_rules_v1.
 
-No file changed under `sources/`, `domain/`, `validation/` or `evidence/provenance.py`,
-nor in `opportunity/rules.py`. So the collectors, source policies and `PINNED_RECORDINGS`
-are unchanged, and so is the public artifact contract 1.5.0.
+Also unchanged: source policies, collectors, `PINNED_RECORDINGS`, the public artifact
+contract 1.5.0 and the U6.5 historical result.
 
-Steam, YouTube, Reddit and event intelligence remain on the roadmap, untouched.
-
-## 15. Git-only C2-F isolation
+## 11. Git-only C2-F isolation
 
 C2-F isolation: Git-only verification. No GCP access, no production action.
 
@@ -316,16 +229,24 @@ Verified with Git:
 - No changes under `infra/`, `.github/`, `artifacts/`, `schemas/`, `apps/` or
   `tests/fixtures/`.
 - `BROAD_DISCOVERY_ENABLED = False` is unchanged.
-- No deployment, source API contact, source activation or publication.
+- No deployment and no source call.
 
-## 16. No later checkpoint started
+A temporary worktree of `9510c95`, used only for the timing comparison, was removed.
 
-Nothing beyond U6.7 has been started:
+## 12. No live run occurred
 
+No request was sent to Wikimedia or any source. `cli._live_transport` was replaced in
+every test, and sockets were blocked. `.metaspike/recordings` does not exist. Nothing was
+pinned.
+
+## 13. No later checkpoint started
+
+Nothing beyond U6.7.1 has been started:
+
+- no U6.8;
 - no live recording;
 - no post-soak acceptance;
 - no pin;
-- no deployment or merge;
-- no next checkpoint.
+- no deployment, merge or publication.
 
 Awaiting independent ChatGPT review and explicit owner authorisation.
