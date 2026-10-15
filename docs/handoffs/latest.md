@@ -1,205 +1,146 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.7.1: WIKIMEDIA RECORDING TEMPORAL AND INSPECTION CLOSEOUT — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.7.2: VERIFIED PAGEVIEW CONTENT BINDING — CHATGPT REVIEW REQUIRED
 
 This checkpoint was worked on branch `product/local-ui` only, entirely offline:
 
-- no live source request;
-- no live recorder run;
-- no pin;
+- no live source request or live recorder run;
+- no new recording and no new pin;
 - no cloud access or deployment;
 - no pull request or merge.
 
 **No later checkpoint has been started.**
 
-## Things to review first
+## Starting and implementation SHAs
 
-1. **The time guard runs inside `assess_evidence`, not only in the CLI.** A library
-   caller is held to it. It keys on the directory that the pageview provenance names. A
-   caller who builds a misleading *unverified* provenance by hand can still read a
-   recorder directory early; such data is unverified and counts for nothing. A caller
-   claiming *verified* cannot slip past: every non-legacy pinned digest must name a
-   recorder directory that is intact, complete and received by `as_of`.
-2. **Two evaluation modes are now explicit and tested.**
-   - Point-in-time readings (`assess_evidence`, `evidence`, the private UI) refuse an
-     `as_of` before receipt.
-   - `opportunity-history` stays a retrospective reconstruction of source periods
-     (validation_protocol_v1), so its moments may precede retrieval. It now also requires
-     an intact, complete recorder recording.
-   
-   Its report text is unchanged. The distinction is stated in code and in the runbook,
-   not added to the report, so the U6.5 fingerprint is unchanged.
-3. **A recording in which every target said "no data"** is classified `failed` by the
-   recorder's existing rule: everything answered, but nothing was recorded. This is
-   requirement K's "complete recording with no usable bodies". It is never review-ready
-   and never verified evidence.
-4. **One file outside the brief's likely list changed: `src/metaspike/evidence/
-   acquisition.py`.** It gains one public helper, `record_id_matches()`, which checks that
-   a record's id is still the digest of its own content. This lets inspection detect an
-   edited record. It is five lines, uses the existing private `_record_id`, and changes no
-   behaviour. `src/metaspike/opportunity/history.py` was also changed, for the
-   retrospective-mode requirement in §3.
+- **Starting:** `349551dd16fcfb50e71311c9356b364d13a3964f`. Verified at the start: on
+  `product/local-ui`, at that commit, tree clean.
+- **Implementation:** `f86d3200628dc86bc18628988a966bb586181b39`: `fix: bind verified
+  pageviews to pinned replay content`.
 
-## 1. Starting SHA
-
-`9510c95c895376e8d96804b2b3ac435124314fad`. Verified at the start: on
-`product/local-ui`, at that commit, tree clean.
-
-## 2. Implementation SHA
-
-`aafaa05ece1483d6d0bdee600f669144083d3fbc`: `fix: enforce recording time and inspection
-safety`.
-
-## 3. Exact files changed
+## Exact changed files
 
 | File | Change |
 |---|---|
-| `src/metaspike/pageview_recorder.py` | Adds `check_recording` and `RecordingCheck` (integrity, completeness and review-readiness), `require_usable_recording`, `is_recorder_output`, `LEGACY_PAGEVIEW_RECORDINGS` and `RecordingRefused`. Inspection reports the three separately. |
-| `src/metaspike/evidence/assemble.py` | `assess_evidence` calls `require_usable_recording` when pageviews are supplied. |
-| `src/metaspike/cli.py` | `evidence` refuses early with a clear message (exit 5). `--inspect` exits 0, 3 or 4. |
-| `src/metaspike/opportunity/history.py` | Verified demand from a recorder directory must be intact and complete. A non-legacy pinned digest without acquisition files is refused. |
-| `src/metaspike/evidence/acquisition.py` | `record_id_matches()` (see item 4 above). |
-| `tests/test_pageview_recorder.py` | 6 new tests; the partial-run test now asserts the honest diagnostic verdict. |
-| `docs/wikimedia-recording-runbook.md` | Inspection verdicts, exit codes, the time boundary, the two modes. |
+| `src/metaspike/pageview_recorder.py` | New `bind_verified_pageviews`. `material_content` moved here unchanged (it now raises `RecordingRefused` on a duplicate). |
+| `src/metaspike/evidence/assemble.py` | `assess_evidence` calls `bind_verified_pageviews(state.catalogue, wikimedia, provenance, as_of)` after the U6.7.1 guard. |
+| `src/metaspike/opportunity/history.py` | The verified-demand block is replaced by `bind_verified_pageviews(..., as_of=None)`, wrapped as `HistoryRefused` with the same messages. `material_content` was removed from here. |
+| `tests/test_pageview_recorder.py` | 5 boundary regressions. |
+| `tests/test_evidence.py` | One test corrected (see "Things to review"). |
+| `docs/wikimedia-recording-runbook.md` | A short note on content binding. |
 | `docs/handoffs/latest.md` | This handoff (separate commit). |
 
-No frontend file or contract changed.
+No frontend file, contract or schema changed.
 
-## 4. Acquisition-time enforcement
+## Things to review
 
-`require_usable_recording(provenance, as_of)` applies to every directory the pageview
-input names that carries `acquisition/`.
+1. **One existing test fed forged data, and was corrected.**
+   `test_pageviews_are_stale_exactly_when_a_due_day_is_missing` removed a day from a copy
+   of the pinned recording but kept the pinned recording's *verified* provenance. That is
+   exactly the gap this checkpoint closes, so the new boundary refused it.
 
-- `check_recording` must find no problem. If it does, the recording is refused as "do not
-  hold together".
-- `as_of` must be at or after the latest `received_at` among the records. Otherwise it is
-  refused: "a reading at … could not have had them". Nothing is assessed: the guard runs
-  before the assessment, at the CLI with exit 5 and inside `assess_evidence` as a
-  `ValueError` subclass.
-- Read as verified, the recording must be review-ready: intact, complete, and at least one
-  body.
-- Read as verified, every digest must be a legacy fixture or a recorder directory.
-  Deleting `acquisition/` from a new recording never makes it legacy.
+   The test now labels the copy honestly, as `recording_provenance([copy])`, which is
+   unverified files. It keeps every staleness and freshness assertion, and adds an
+   assertion that claiming verified for the copy is refused. The test was not weakened:
+   it now checks one more thing.
+2. **Cost.** A verified pageview reading now replays its pinned directory once per
+   `assess_evidence` call, to compare content. With the six-article fixture this is cheap.
+   The full suite took 7m46s, against 7m37s in U6.7.
+3. **A gate rerun, disclosed.** My first full run used `-p no:logging` to cut log noise.
+   That flag disables pytest's `caplog` fixture, so 1 test failed and 5 errored in suites
+   that use `caplog`. Those suites are unrelated to this change, and they pass under the
+   normal plugin set. The reported result is a rerun of plain `uv run pytest`.
 
-No acquisition time is ever invented or backdated. The check compares recorded times only.
+## Verified-origin proof
 
-## 5. Legacy historical-fixture compatibility
+`bind_verified_pageviews(catalogue, recording, provenance, as_of)` does nothing for an
+unverified or synthetic input; such inputs are read as they are and counted for nothing.
+For a **verified** pageview input it refuses unless every one of these holds:
 
-`LEGACY_PAGEVIEW_RECORDINGS = {260d787e…}` is the U6.0.1 pageview fixture. It predates
-acquisition records, so its retrieval times are unknown. It is read, as before, under the
-publication-lag reconstruction, and never as a point-in-time acquisition.
+1. **`require_honest`:** every claimed digest is pinned.
+2. **Exactly one named directory**, whose `recording_digest` on disk still equals the
+   claimed digest. A pinned digest attached to another directory is refused.
+3. **Recorder or legacy.**
+   - **A recorder directory** (it has `acquisition/`) must pass `check_recording` with no
+     problem and be review-ready: intact, complete, non-empty. When `as_of` is given
+     (a point-in-time reading), every response must have been received by `as_of`.
+   - **Without acquisition records,** the digest must be the legacy U6.0.1 fixture.
+     Otherwise the input is refused.
+4. **`material_content(supplied) == material_content(replay of the directory)`.** The
+   replay uses the supplied report's window and `observed_at`.
+   - **Compared:** sources run; per signal, source, game, signal key, status, error code
+     and message; per series, identity, granularity, window and `latest_due`; per point,
+     game, source, metric, granularity, period, status, value, reference and source
+     timestamp.
+   - **Duplicates** are refused, never collapsed.
+   - **Ignored:** only replay-time stamps (run start and finish, point `observed_at`, and
+     the freshness lag derived from it).
 
-Tested:
+Where it is called:
 
-- the fixture is verified;
-- it is not recorder output;
-- the guard passes;
-- `assess_evidence` at `REAL_AS_OF` reads it as verified;
-- the U6.5 history fingerprint is unchanged: `ophist_b1d2af287f618f8ab1dbc9634b5b1292`,
-  with 546 assessments (0 candidate, 35 watchlist, 511 insufficient).
+- **`assess_evidence`** (library boundary): `as_of` is enforced.
+- **`opportunity-history`:** `as_of=None`. This is the retrospective reconstruction of
+  source periods, unchanged in meaning.
 
-## 6. Complete versus partial inspection
+Both share one implementation, and there is no cyclic import: neither the recorder nor
+the history evaluator imports `assemble`.
 
-`inspect_recording` now reports three things separately:
+**Limitation, stated plainly.** This binds data to reviewed, pinned bytes. It is not
+cryptographic authentication of Wikimedia. Unverified and synthetic inputs are not
+content-checked, because they claim nothing. A caller who hand-builds an *unverified*
+provenance naming no directory still reads as unverified and counts for nothing.
 
-- **`integrity`:** `intact` or `problems found`;
-- **`run_status`:** `complete`, `partial` or `failed`;
-- **`review_ready`:** intact AND complete AND at least one body.
+## Regression results
 
-It also gives a verdict.
+These tests use offline fixtures, mocks and temporary directories, with sockets blocked
+and the live transport replaced.
 
-| Verdict | Exit code |
-|---|---|
-| `INTACT AND COMPLETE: ready for owner review (still UNVERIFIED)` | 0 |
-| `INTACT BUT PARTIAL: diagnostic only, NOT ready for pinning` | 3 |
-| `INTACT BUT FAILED: nothing usable was recorded, NOT ready for pinning` | 3 |
-| `PROBLEMS FOUND: not a usable recording` | 4 |
-
-Partial and failed runs are still inspected in full, including the replay. Every verdict
-repeats that integrity is not provenance.
-
-## 7. Manifest consistency validation
-
-`check_recording` now refuses:
-
-**File set**
-
-- unexpected files or directories, at the top level or in `acquisition/`;
-- a body without a record;
-- a record without a body;
-- more than one record per article;
-- bodies or records that differ from what the manifest lists;
-- a bodies digest that differs from the one written at acquisition.
-
-**Records**
-
-- a record whose id no longer matches its content (an edited record);
-- a binding to another game or article;
-- a record whose request is not the planned `GET <path>`;
-- a record whose source or policy digest is not the plan's;
-- record times that differ from the exchange's;
-- an exchange that is out of order or earlier than the plan.
-
-**Manifest and outcomes**
-
-- a plan whose id no longer matches its content (an edited plan);
-- outcomes that are not the planned targets in planned order;
-- a recorded outcome that does not name its exact file and record id;
-- a non-recorded outcome that keeps a body;
-- a "not attempted" outcome that has an answer, or that appears before an attempted one;
-- a `requests_sent` count that differs from the attempted targets;
-- targets not attempted although the run says it did not stop;
-- a run status that disagrees with the outcomes.
-
-## 8. Before and after regression evidence
-
-**Before (U6.7):** inspecting a partial or failed run said "no problems found", with exit
-0. `metaspike evidence --wikimedia-replay <recorder dir>` read a recording at any `as_of`,
-including before its responses were received.
-
-**After (U6.7.1),** with mock transports and temporary files only:
-
-| | Test | Result |
+| | Case | Result |
 |---|---|---|
-| A | Reading at the last receipt | Accepted, CLI and library |
-| B | Reading one second before | Refused, exit 5, nothing assessed; unpinned and under a TEST-ONLY pin; library `assess_evidence` raises |
-| C | Legacy fixture | Behaviour unchanged |
-| D | Edited manifest outcome; edited plan; edited record time | Refused |
-| E | Dropped record; duplicated record | Refused |
-| F | Self-consistent record bound to another game | Refused ("binds another game") |
-| G | Self-consistent record with another request; with shifted times | Refused |
-| H | Complete run | `intact` / `complete` / ready; exit 0 |
-| I | Partial run (503 mid-run) | `intact` / `partial` / not ready; exit 3; refused if pinned; readable unpinned as unverified |
-| J | Failed run (transport failure) | `intact` / `failed` / not ready; exit 3; refused if pinned |
-| K | All "no data" | `failed`, 0 bodies, not ready; refused if pinned |
-| — | New recording with `acquisition/` deleted | Refused when pinned; unverified when not |
-| — | History mode | A complete recording is accepted at moments before receipt (retrospective, stated); a partial one is refused |
-| L, M, N and P | Existing replay, unverified-standing, no-network (sockets blocked, live transport replaced), planning, confirmation, policy and budget tests | All pass unchanged |
-| O | U6.5 fingerprint | Unchanged |
+| A | Honest legacy pinned recording with its genuine replay | Accepted, verified, readership counted |
+| B | The pinned Wikimedia digest claimed for the catalogue directory | Refused: "no longer has the claimed pinned content" |
+| C | Valid pinned directory, one value changed in memory | Refused: "not what the pinned recording holds" |
+| D | Game identity changed to an unclaimed id; signal key source changed | Refused |
+| E | Failure error code changed; a failed signal dropped; a signal duplicated | Refused (the duplicate as "more than one entry") |
+| F | Recorder recording, TEST-ONLY pin, read at its last receipt | Accepted, verified |
+| G | The same recording one second before receipt | Refused |
+| — | The same pinned recording with a duplicated signal in memory, after receipt | Refused |
+| H | A pinned partial recorder recording | Refused ("never verified demand evidence") |
+| H | A pinned recorder recording whose body was corrupted, even with the corrupted bytes TEST-ONLY pinned | Refused ("do not hold together") |
+| I | A byte-altered copy (`unverified_files`), and a forged unverified label | Read, never counted as verified readership |
+| J | Synthetic provenance | Read as synthetic, never counted as verified |
+| K and L | U6.5 history, recorded CLI | `ophist_b1d2af287f618f8ab1dbc9634b5b1292`; 546 assessments: 0 / 35 / 511 |
+| M | Opportunity, score v0, resolver golden | Unchanged |
+| N | Network | No traffic, no fallback |
 
-## 9. Full quality-gate results (actual)
+The U6.5, U6.6 and U6.7.1 history-origin regressions also pass with the same messages:
+forged digests, the replay-content mismatch, metadata-only alterations, and partial or
+legacy handling.
+
+## Full quality gates (actual)
 
 | Gate | Result |
 |---|---|
-| `uv run ruff format --check` | exit 0 (267 files) |
+| `uv run ruff format --check` | exit 0 |
 | `uv run ruff check` | exit 0 |
 | `uv run mypy` | exit 0, no issues in 246 files |
 | `uv run metaspike export-schemas --check` | exit 0, up to date |
 | `uv run metaspike evaluate-resolver` | exit 0; golden v3 `c2b3aef7b372`; false AUTO_MATCH merges 0; precision 100.0% (52/52); real-evidence recall 100.0%; NEW_ENTITY 100.0% |
-| Targeted suites (see below) | 232 passed |
-| `uv run pytest` | **1,668 passed, 8 deselected**, exit 0 (previously 1,662) |
+| Targeted suites (see below) | 215 passed |
+| `uv run pytest` | **1,673 passed, 8 deselected**, exit 0 (previously 1,668) |
 
-The targeted suites were recorder, history, readiness, evidence, historical validation,
-opportunity, wikimedia and v0 parity.
+The targeted suites were recorder, history, evidence, opportunity, historical validation,
+readiness and v0 parity.
 
-**Run time.** The full run took 17m40s, against 7m37s for U6.7. The machine was at 5%
-battery and not charging. On the same suite, the code before this change took 53s and the
-code after it took 47s, so the time is the machine's, not the change's.
+**Frontend gates:** not run, because no frontend code or contract changed. No live test
+was run.
 
-**Frontend gates:** not run, because no frontend code or contract changed. No live API
-test exists or was run.
+## Historical fingerprint parity
 
-## 10. Frozen contract parity
+`ophist_b1d2af287f618f8ab1dbc9634b5b1292`: 546 assessments (0 candidate, 35 watchlist,
+511 insufficient), unchanged (tested through the recorded CLI).
+
+## Frozen contract parity
 
 These are unchanged:
 
@@ -214,39 +155,45 @@ These are unchanged:
 - recommendation_snapshot_v2;
 - creator_opportunity_rules_v1.
 
-Also unchanged: source policies, collectors, `PINNED_RECORDINGS`, the public artifact
-contract 1.5.0 and the U6.5 historical result.
+Also unchanged: source policies, `PINNED_RECORDINGS` (`evidence/provenance.py` was not
+modified), the recorder CLI, the public artifact contract 1.5.0 and `main`.
 
-## 11. Git-only C2-F isolation
+## Known limitations
+
+- **Binding is not authentication.** Verified means "equal to bytes this repository
+  reviewed and pinned". The review is what vouches for them.
+- **The check costs one replay** of the pinned directory per verified reading.
+- **Unverified inputs are not content-checked.** They are never counted, so nothing
+  depends on them.
+- **Pageviews only.** No other source family has a pinned recording, so this binding
+  covers pageviews only. Verified context in the history evaluator stays refused, as in
+  U6.6.
+
+## Git-only isolation
 
 C2-F isolation: Git-only verification. No GCP access, no production action.
 
 Verified with Git:
 
 - Only `product/local-ui` changed.
-- `main` is untouched: `origin/main` and the main worktree are both at
-  `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`.
+- `main` is at `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, on both `origin/main` and the
+  main worktree.
 - No changes under `infra/`, `.github/`, `artifacts/`, `schemas/`, `apps/` or
   `tests/fixtures/`.
 - `BROAD_DISCOVERY_ENABLED = False` is unchanged.
-- No deployment and no source call.
 
-A temporary worktree of `9510c95`, used only for the timing comparison, was removed.
+## No live calls
 
-## 12. No live run occurred
+No request was sent to Wikimedia or any source. The recorder was not run live.
+`.metaspike/recordings` does not exist. Nothing new was pinned.
 
-No request was sent to Wikimedia or any source. `cli._live_transport` was replaced in
-every test, and sockets were blocked. `.metaspike/recordings` does not exist. Nothing was
-pinned.
+## No later checkpoint started
 
-## 13. No later checkpoint started
+Nothing beyond U6.7.2 has been started:
 
-Nothing beyond U6.7.1 has been started:
-
-- no U6.8;
 - no live recording;
 - no post-soak acceptance;
 - no pin;
 - no deployment, merge or publication.
 
-Awaiting independent ChatGPT review and explicit owner authorisation.
+Awaiting independent ChatGPT review.
