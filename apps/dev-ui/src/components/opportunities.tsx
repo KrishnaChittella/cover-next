@@ -3,6 +3,14 @@
 import Link from "next/link";
 
 import { type Brief, type BriefItem, buildBrief, briefText, READINESS_WORDS, UNVALIDATED } from "@/private/opportunities/brief";
+import {
+  type Comparison,
+  comparisonText,
+  MAX_GAMES,
+  MIN_GAMES,
+  NO_GENUINE_OPPORTUNITY,
+  ORDER_NOTE,
+} from "@/private/opportunities/compare";
 import type { Loaded, View } from "@/private/opportunities/loader";
 import type {
   MovementNote,
@@ -218,6 +226,13 @@ export function OpportunityBoard({ report, view }: { report: OpportunityReport; 
       >
         <Shortlist report={report} view={view} entries={report.entries} simulated={false} />
       </Section>
+      <Section
+        id="compare"
+        title="Compare games"
+        note={`Choose ${MIN_GAMES} or ${MAX_GAMES} games to see their evidence side by side. The comparison keeps the engine's order and ranks nothing.`}
+      >
+        <CompareSelector report={report} view={view} />
+      </Section>
       {view === "synthetic" ? (
         <Section
           id="simulated"
@@ -356,6 +371,222 @@ export function CreatorBrief({ brief }: { brief: Brief }) {
           {text}
         </pre>
       </details>
+    </div>
+  );
+}
+
+/** A plain form: the server validates whatever it is sent. No script is needed. */
+export function CompareSelector({ report, view }: { report: OpportunityReport; view: View }) {
+  const byId = new Map(report.assessments.map((a) => [a.canonical_game_id, a]));
+  return (
+    <form method="get" action="/opportunities/compare" data-testid="compare-selector">
+      <fieldset>
+        <legend className="text-sm text-ink-soft">Games, in the engine&apos;s verified order</legend>
+        <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2">
+          {report.entries.map((entry) => {
+            const a = byId.get(entry.canonical_game_id);
+            if (!a) return null;
+            return (
+              <label key={entry.slug} className="inline-flex items-center gap-2 text-sm text-ink">
+                <input type="checkbox" name="game" value={entry.slug} /> {a.name}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      {view === "synthetic" ? <input type="hidden" name="view" value="synthetic" /> : null}
+      <button
+        type="submit"
+        className="mt-3 rounded border border-line-strong px-2 py-1 text-xs font-medium text-ink hover:border-signal"
+      >
+        Compare selected
+      </button>
+    </form>
+  );
+}
+
+function Cell({ items, empty }: { items: BriefItem[]; empty: string }) {
+  return <BriefList items={items} empty={empty} />;
+}
+
+/** Two or three games side by side, in the engine's order. Words are each game's brief. */
+export function OpportunityComparison({ comparison, view }: { comparison: Comparison; view: View }) {
+  const c = comparison;
+  const text = comparisonText(c);
+  const rows: { title: string; render: (b: Brief) => React.ReactNode }[] = [
+    {
+      title: "Readiness",
+      render: (b) => (
+        <div className="space-y-1">
+          <ReadinessBadge readiness={b.readiness} simulated={c.synthetic} />
+          {c.synthetic ? (
+            <p className="text-xs text-muted">verified readiness: {READINESS_WORDS[b.verifiedReadiness]}</p>
+          ) : null}
+          <p className="text-sm text-ink-soft">{b.decision}</p>
+        </div>
+      ),
+    },
+    { title: "Why now (counted evidence)", render: (b) => <Cell items={b.whyNow} empty="Nothing counted says “now”." /> },
+    { title: "Leads, not counted", render: (b) => <Cell items={b.notCounted} empty="None." /> },
+    {
+      title: "What changed",
+      render: (b) => <Cell items={b.changed} empty="No demand family has a current measurement." />,
+    },
+    {
+      title: "Video angle",
+      render: (b) => (
+        <div>
+          <p className="text-sm text-ink-soft">{b.angleNote}</p>
+          {b.angles.length ? <Cell items={b.angles} empty="" /> : null}
+        </div>
+      ),
+    },
+    {
+      title: "Creator coverage",
+      render: (b) => (
+        <ul className="space-y-1 text-sm text-ink-soft">
+          {b.creatorSupply.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      ),
+    },
+    {
+      title: "Community",
+      render: (b) => (
+        <ul className="space-y-1 text-sm text-ink-soft">
+          {b.community.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      ),
+    },
+    {
+      title: "Events",
+      render: (b) => (
+        <ul className="space-y-1 text-sm text-ink-soft">
+          {b.events.length === 0 ? <li>No upcoming or active event is known.</li> : null}
+          {b.events.map((e, i) => (
+            <li key={i}>
+              {e.standing !== null && e.standing !== "verified" ? <StandingBadge standing={e.standing} /> : null}{" "}
+              {e.text} {e.counted ? null : <span className="text-xs text-warn">lead, not counted</span>}
+            </li>
+          ))}
+        </ul>
+      ),
+    },
+    { title: "Counterevidence", render: (b) => <Cell items={b.counterevidence} empty="None recorded." /> },
+    {
+      title: "Not known",
+      render: (b) => (
+        <ul className="list-disc pl-5 text-sm text-ink-soft">
+          {b.missing.map((m, i) => (
+            <li key={i}>{m}</li>
+          ))}
+        </ul>
+      ),
+    },
+    {
+      title: "Freshness",
+      render: (b) => (
+        <ul className="space-y-1 text-xs text-ink-soft">
+          {b.freshness.map((f) => (
+            <li key={f.source}>
+              <span className="font-mono">{f.source}</span>: {f.state}; latest {f.latest}{" "}
+              <StandingBadge standing={f.standing} />
+            </li>
+          ))}
+        </ul>
+      ),
+    },
+    {
+      title: "Confirm before acting",
+      render: (b) => (
+        <ul className="list-disc pl-5 text-sm text-ink-soft">
+          {b.confirmFirst.map((q, i) => (
+            <li key={i}>{q}</li>
+          ))}
+        </ul>
+      ),
+    },
+  ];
+  return (
+    <div data-testid="comparison" data-basis={c.basis}>
+      {c.synthetic ? (
+        <p role="alert" className="panel border-bad/60 p-4 text-base font-semibold tracking-wide text-bad" data-testid="comparison-synthetic">
+          {SYNTHETIC_HEADLINE}
+        </p>
+      ) : null}
+      {c.noGenuineOpportunity ? (
+        <p className="panel mt-3 p-4 text-base font-medium text-ink" data-testid="comparison-abstains">
+          {NO_GENUINE_OPPORTUNITY}
+        </p>
+      ) : null}
+      <p className="mt-3 text-sm text-ink-soft">
+        Assessed as of <span className="font-mono text-ink">{moment(c.asOf)}</span> with{" "}
+        <span className="font-mono">{c.rulesVersion}</span>.{" "}
+        {c.synthetic ? "Basis: SIMULATED from synthetic and unverified evidence." : "Basis: verified evidence only."}{" "}
+        {ORDER_NOTE}
+      </p>
+      {c.ties.map((names) => (
+        <p key={names.join()} className="mt-1 text-sm text-warn" data-testid="comparison-tie">
+          Tied in the engine&apos;s order: {names.join(", ")}. They are ordered by id only, which means nothing.
+        </p>
+      ))}
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full table-fixed text-left align-top text-sm" data-testid="comparison-table">
+          <thead>
+            <tr>
+              <th className="w-40 py-2 pr-3 text-xs text-muted">Engine position</th>
+              {c.columns.map((col) => (
+                <th key={col.entry.slug} className="py-2 pr-3 align-top" data-testid="comparison-column">
+                  <span className="font-mono text-muted">{col.entry.position}.</span>{" "}
+                  <Link href={href(col.entry.slug, view)} className="text-ink underline decoration-line-strong">
+                    {col.brief.game}
+                  </Link>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.title} className="border-t border-line align-top">
+                <th scope="row" className="py-2 pr-3 text-xs font-medium text-muted">
+                  {row.title}
+                </th>
+                {c.columns.map((col) => (
+                  <td key={col.entry.slug} className="py-2 pr-3">
+                    {row.render(col.brief)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="mt-4">
+        <p className="eyebrow">Questions to answer before choosing</p>
+        <ul className="mt-1 list-disc pl-5 text-sm text-ink-soft" data-testid="comparison-questions">
+          {c.questions.map((q, i) => (
+            <li key={i}>{q}</li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-muted">{UNVALIDATED}</p>
+      </div>
+      <div className="mt-5">
+        <CopyText text={text} label="Copy comparison as text" />
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm text-ink-soft">Plain-text comparison</summary>
+        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-ink-soft" data-testid="comparison-text">
+          {text}
+        </pre>
+      </details>
+      <p className="mt-8 text-sm">
+        <Link href={view === "synthetic" ? "/opportunities?view=synthetic" : "/opportunities"} className="underline">
+          Back to the shortlist
+        </Link>
+      </p>
     </div>
   );
 }

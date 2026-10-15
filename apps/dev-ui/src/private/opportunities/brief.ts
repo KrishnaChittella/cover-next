@@ -43,6 +43,8 @@ export interface Brief {
   changed: BriefItem[];
   whyNow: BriefItem[];
   notCounted: BriefItem[];
+  // Every known event, counted or not, with its provenance. Shown in comparisons.
+  events: (BriefItem & { counted: boolean })[];
   angles: BriefItem[];
   angleNote: string;
   creatorSupply: string[];
@@ -62,18 +64,59 @@ export const READINESS_WORDS: Record<Readiness, string> = {
   insufficient_evidence: "Insufficient evidence",
 };
 
-const STANDING_LABEL: Record<Standing, string> = {
+export const STANDING_LABEL: Record<Standing, string> = {
   verified: "VERIFIED",
   unverified: "UNVERIFIED",
   synthetic: "SYNTHETIC",
   none: "NO INPUT",
 };
 
-// Local paths never leave the private report, even if one found its way into a string.
-const PATH = /(?:\/(?:Users|home|private|var|tmp|opt|mnt|Volumes)\/[^\s,;)]+|[A-Za-z]:\\[^\s,;)]+)/g;
+// Path hygiene at the copy and display boundary (U6.9).
+//
+// No regular expression can recognise every filesystem path in free text, so this is
+// a conservative policy, not a detector:
+//
+//   free text    each whitespace-separated token that contains a path separator ("/"
+//                or "\\"), starts with "~", or names a drive ("C:") is withheld, unless
+//                it is an http(s) URL with a host, or a plain fraction such as "34/34".
+//                A lone "/" between words is kept. Ordinary words containing a slash
+//                ("and/or") are withheld too: over-removal is the price of not leaking.
+//   references   kept only if they are a plain identifier (letters, digits, "_", "-",
+//                ".", ":", "#", "@") or an http(s) URL; anything else is withheld.
+//
+// URLs are kept whole, whatever words their path contains.
+export const PATH_WITHHELD = "[local path removed]";
+export const REFERENCE_WITHHELD = "[reference withheld]";
+const EDGE = /^[("'[<{]+|[)"'\]>},.;:!?]+$/g;
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9_.:#@-]*$/;
 
-export function scrub(text: string): string {
-  return text.replace(PATH, "[local path removed]");
+function isWebUrl(token: string): boolean {
+  try {
+    const url = new URL(token);
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function pathLike(token: string): boolean {
+  const core = token.replace(EDGE, "");
+  if (core.length === 0 || isWebUrl(core)) return false;
+  if (core === "/" || /^\d+\/\d+$/.test(core)) return false;
+  return /[\\/]/.test(core) || core.startsWith("~") || /^[A-Za-z]:/.test(core);
+}
+
+/** Free text with every path-like token withheld. Whitespace is preserved. */
+export function safeText(text: string): string {
+  return text
+    .split(/(\s+)/)
+    .map((token) => (/^\s*$/.test(token) || !pathLike(token) ? token : PATH_WITHHELD))
+    .join("");
+}
+
+/** A source reference, kept only if it is an identifier or a web URL. */
+export function safeReference(reference: string): string {
+  return IDENTIFIER.test(reference) || isWebUrl(reference) ? reference : REFERENCE_WITHHELD;
 }
 
 export function moment(value: string | null): string {
@@ -82,7 +125,7 @@ export function moment(value: string | null): string {
 }
 
 function item(text: string, standing: Standing | null, references: string[] = []): BriefItem {
-  return { text: scrub(text), standing, references: references.map(scrub) };
+  return { text: safeText(text), standing, references: references.map(safeReference) };
 }
 
 function counts(standing: Standing, basis: Basis): boolean {
@@ -180,7 +223,7 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
       ? "No video angle is established. The candidates below are leads only, not supported angles."
       : "No video angle is established, and no candidate angle exists.";
 
-  const coverage = scrub(a.creator_coverage);
+  const coverage = safeText(a.creator_coverage);
   const creatorSupply = [coverage];
   if (coverage.startsWith("No creator-supply input")) {
     creatorSupply.push("No creator sample was taken. That is not low competition: competition is simply unknown.");
@@ -189,7 +232,7 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
   }
   creatorSupply.push("Even a complete sample is a lower bound: total creator competition is unknown.");
 
-  const communityText = scrub(a.community);
+  const communityText = safeText(a.community);
   const community = [communityText];
   if (communityText.startsWith("No community input")) {
     community.push("No discussion was sampled. That is not low interest: interest is simply unknown.");
@@ -220,7 +263,7 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
         ...whyNow.flatMap((i) => i.references),
         ...angles.flatMap((i) => i.references),
         ...notCounted.flatMap((i) => i.references),
-      ].map(scrub),
+      ].map(safeReference),
     ),
   );
 
@@ -237,7 +280,7 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
   return {
     basis,
     synthetic: basis === "simulated",
-    game: scrub(a.name),
+    game: safeText(a.name),
     slug: a.slug,
     asOf: a.as_of,
     rulesVersion: a.rules_version,
@@ -250,6 +293,14 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
     changed,
     whyNow,
     notCounted,
+    events: a.events.map((e) => ({
+      ...item(
+        `${e.event_type.replaceAll("_", " ")} (${e.phase}), starting ${e.starts_at.slice(0, 10)} (${e.time_precision} precision)`,
+        e.standing,
+        [e.event_id],
+      ),
+      counted: counts(e.standing, basis),
+    })),
     angles,
     angleNote,
     creatorSupply,
@@ -261,15 +312,15 @@ export function buildBrief(report: OpportunityReport, a: OpportunityAssessment, 
       latest: moment(s.latest_observed_at),
       standing: s.standing,
     })),
-    missing: a.missing.map(scrub),
+    missing: a.missing.map(safeText),
     confirmFirst,
     references,
-    uncertainty: scrub(a.uncertainty),
+    uncertainty: safeText(a.uncertainty),
     notices,
   };
 }
 
-function labelled(i: BriefItem): string {
+export function labelled(i: BriefItem): string {
   const label = i.standing === null || i.standing === "verified" ? "" : `[${STANDING_LABEL[i.standing]}] `;
   const refs = i.references.length ? ` (source: ${i.references.join(", ")})` : "";
   return `- ${label}${i.text}${refs}`;

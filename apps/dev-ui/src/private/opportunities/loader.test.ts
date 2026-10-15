@@ -165,7 +165,7 @@ describe("loading a private opportunity report", () => {
         expect(text, file).not.toMatch(/private\/opportunities|components\/opportunities/);
       }
     }
-    const pages = ["page.tsx", path.join("[slug]", "page.tsx")].map((p) =>
+    const pages = ["page.tsx", path.join("[slug]", "page.tsx"), path.join("compare", "page.tsx")].map((p) =>
       readFileSync(path.join(APP, "src", "app", "opportunities", p), "utf-8"),
     );
     for (const page of pages) {

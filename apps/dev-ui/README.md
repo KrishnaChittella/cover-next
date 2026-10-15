@@ -88,6 +88,24 @@ METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
 # http://127.0.0.1:3000/opportunities/dota-2?view=synthetic  SIMULATED candidate
 ```
 
+### Comparing games
+
+The shortlist page has a **Compare games** form. Choose 2 or 3 games and submit it to open
+`/opportunities/compare?game=<slug>&game=<slug>[&game=<slug>][&view=synthetic]`. The games
+appear side by side in the engine's own order and positions, ties are stated as ties, and
+each column is that game's decision brief. The page offers **Copy comparison as text**.
+
+- **Abstention.** When every chosen game is insufficient on verified evidence, the page
+  says so plainly.
+- **Nothing is computed.** No score, winner or new order is computed.
+- **Bad selections are refused** with a message: unknown, duplicate, too few or too many.
+- **The synthetic view's comparison is simulated** and carries the synthetic warning on
+  screen and first and last in its text.
+
+Copied briefs and comparisons pass through a conservative path policy
+(`safeText` and `safeReference` in `src/private/opportunities/brief.ts`). Any token that
+looks like a filesystem path is withheld; web URLs are kept whole.
+
 **How it is loaded.** The pages are server components rendered on request
 (`force-dynamic`), never at build time. `src/private/opportunities/loader.ts` reads one of
 two fixed files chosen by a fixed view name; only the exact word `synthetic` selects the

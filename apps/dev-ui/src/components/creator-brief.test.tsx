@@ -229,12 +229,20 @@ describe("the brief is safe and private", () => {
 
   it("renders report text as text, never as markup", () => {
     const report = variant(recorded, "minecraft", (a) => {
-      a.caveats = ['<script>alert("x")</script><b>bold</b><img src=x onerror=alert(1)>'];
+      a.caveats = [
+        '<script>alert("x")</script><b>bold</b><img src=x onerror=alert(1)>',
+        "<b>bold<b> <img src=x onerror=alert(1)>",
+      ];
     });
     const { container } = render(<CreatorBrief brief={buildBrief(report, game(report, "minecraft"), "verified")} />);
     expect(container.querySelector("script, b, img")).toBeNull();
-    expect(container.textContent).toContain('<script>alert("x")</script>');
-    expect(briefText(buildBrief(report, game(report, "minecraft"), "verified"))).toContain("<b>bold</b>");
+    // Markup without a "/" is shown literally, as text.
+    expect(container.textContent).toContain("<b>bold<b> <img src=x onerror=alert(1)>");
+    const text = briefText(buildBrief(report, game(report, "minecraft"), "verified"));
+    expect(text).toContain("<b>bold<b>");
+    // Markup holding a "/" is withheld whole by the U6.9 path policy: never shown, never run.
+    expect(text).not.toContain("</script>");
+    expect(container.textContent).not.toContain("</script>");
   });
 
   it("stays behind the existing private gates", () => {
