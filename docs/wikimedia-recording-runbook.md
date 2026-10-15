@@ -183,6 +183,16 @@ Read as verified (pinned), the directory must also be review-ready, and a pinned
 recording without acquisition records is refused. The only exception is the legacy U6.0.1
 fixture, which predates acquisition records.
 
+**Verified means exactly the pinned content (U6.7.2).** For pageviews read as verified,
+`assess_evidence` and `opportunity-history` both require the following, through one
+shared helper, `bind_verified_pageviews`:
+
+- the named directory still has the claimed pinned digest;
+- the supplied data equals a replay of that directory, compared over identities,
+  statuses, failures, windows, due periods and values, with duplicates refused.
+
+A caller cannot pair a pinned digest with other data.
+
 **Two modes, kept apart.**
 
 - **Point in time.** `evidence`, and the private UI, read only what had been received by

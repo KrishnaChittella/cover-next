@@ -6,6 +6,7 @@ that builds a network transport is replaced. No value served here is a real page
 """
 
 import json
+import shutil
 import socket
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -22,10 +23,12 @@ from metaspike import cli, pageview_recorder
 from metaspike.catalogue.eligibility import bootstrap_scope
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.domain.games import CanonicalGame, Catalogue, LifecycleState, SourceIdentifier
+from metaspike.domain.signals import CollectionStatus, Signal, SourceErrorCode
 from metaspike.domain.source_policy import Permission
 from metaspike.evidence import provenance
 from metaspike.evidence.acquisition import AcquisitionRecord, acquisition_standing, check_content
-from metaspike.evidence.model import Standing
+from metaspike.evidence.assemble import EvidenceInputs, assess_evidence
+from metaspike.evidence.model import EvidenceReport, InputProvenance, Origin, Standing
 from metaspike.evidence.provenance import recording_digest, recording_provenance
 from metaspike.pageview_recorder import (
     ACQUISITION_DIR,
@@ -41,10 +44,11 @@ from metaspike.pageview_recorder import (
     plan_recording,
     record_pageviews,
 )
-from metaspike.pipeline.collection import collect, window_ending
+from metaspike.pipeline.collection import CollectionReport, collect, window_ending
 from metaspike.sources.registry import default_registry
 from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY
+from tests.test_evidence import REAL_AS_OF, World
 
 # A moment after the soak, as a future owner session might run. Mock time only.
 PLANNED = datetime(2026, 10, 20, 9, 0, tzinfo=UTC)
@@ -913,3 +917,182 @@ def test_history_reconstructs_periods_and_does_not_claim_retrieval(
     assert all(s.as_of < received(tmp_path / "complete") for s in result.snapshots)  # type: ignore[attr-defined]
     with pytest.raises(HistoryRefused, match="intact and complete"):
         evaluate(tmp_path / "partial")
+
+
+# --- U6.7.2: verified pageviews are bound to their pinned directory's content --------------
+
+LEGACY = Path(__file__).parent / "fixtures" / "wikimedia"
+
+
+@pytest.fixture(scope="module")
+def world() -> World:
+    return World()
+
+
+def assess(world: World, inputs: EvidenceInputs, as_of: datetime | None = None) -> EvidenceReport:
+    return assess_evidence(inputs, as_of or REAL_AS_OF, world.scope)
+
+
+Change = Callable[[list[Signal]], list[Signal]]
+
+
+def with_signals(report: CollectionReport, change: Change) -> CollectionReport:
+    runs = tuple(
+        run_.model_copy(update={"outcomes": tuple(change(list(run_.outcomes)))})
+        for run_ in report.runs
+    )
+    return report.model_copy(update={"runs": runs})
+
+
+def test_honest_pinned_pageviews_are_accepted_as_verified(world: World) -> None:
+    """A."""
+    report = assess(world, world.inputs())
+    assert report.inputs["wikimedia_pageviews"].standing is Standing.VERIFIED
+    minecraft = report.game(world.ids["minecraft"])
+    assert "wikimedia_readership" in {f.value for f in minecraft.verified_demand_families}
+
+
+def test_a_pinned_digest_claimed_for_another_directory_is_refused(world: World) -> None:
+    """B."""
+    forged = InputProvenance(
+        origin=Origin.RECORDED_RESPONSE,
+        reference=str(LEGACY.parent / "catalogue"),
+        digests=(recording_digest(LEGACY),),
+    )
+    with pytest.raises(ValueError, match="no longer has the claimed pinned content"):
+        assess(world, world.inputs(wikimedia_provenance=forged))
+
+
+def test_altered_in_memory_pageviews_cannot_claim_verified(world: World) -> None:
+    """C, D and E: values, identity, key, failures, a missing signal, a duplicate."""
+
+    def first(signals: list[Signal], status: CollectionStatus) -> int:
+        return next(i for i, s in enumerate(signals) if s.status is status)
+
+    def value(signals: list[Signal]) -> list[Signal]:
+        i = first(signals, CollectionStatus.COLLECTED)
+        series = signals[i].series
+        assert series is not None
+        points = list(series.points)
+        j = next(k for k, p in enumerate(points) if p.value is not None)
+        old = points[j].value
+        assert old is not None
+        points[j] = points[j].model_copy(update={"value": old + 1})
+        signals[i] = signals[i].model_copy(
+            update={"series": series.model_copy(update={"points": tuple(points)})}
+        )
+        return signals
+
+    def identity(signals: list[Signal]) -> list[Signal]:
+        i = first(signals, CollectionStatus.COLLECTED)
+        stranger = "00000000-0000-4000-8000-0000000000cc"  # a game nothing else claims
+        signals[i] = signals[i].model_copy(update={"canonical_game_id": stranger})
+        return signals
+
+    def key(signals: list[Signal]) -> list[Signal]:
+        i = first(signals, CollectionStatus.COLLECTED)
+        changed = signals[i].key.model_copy(update={"source": "another_source"})
+        signals[i] = signals[i].model_copy(update={"key": changed})
+        return signals
+
+    def failure(signals: list[Signal]) -> list[Signal]:
+        i = first(signals, CollectionStatus.FAILED)
+        signals[i] = signals[i].model_copy(update={"error_code": SourceErrorCode.HTTP_ERROR})
+        return signals
+
+    def missing(signals: list[Signal]) -> list[Signal]:
+        del signals[first(signals, CollectionStatus.FAILED)]
+        return signals
+
+    def duplicate(signals: list[Signal]) -> list[Signal]:
+        return [*signals, signals[first(signals, CollectionStatus.COLLECTED)]]
+
+    for change in (value, identity, key, failure, missing):
+        altered = with_signals(world.pageviews, change)
+        with pytest.raises(ValueError, match="not what the pinned recording holds"):
+            assess(world, world.inputs(wikimedia=altered))
+    with pytest.raises(ValueError, match="more than one entry"):
+        assess(world, world.inputs(wikimedia=with_signals(world.pageviews, duplicate)))
+
+
+def test_a_pinned_recorder_recording_is_bound_and_time_guarded(
+    world: World,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F, G and H at the library boundary, with a TEST-ONLY pin."""
+    run(tmp_path, Source(), name="complete")
+    run(tmp_path, Source({"Escape_from_Tarkov": httpx.Response(503)}), name="partial")
+
+    def inputs_for(
+        directory: Path, as_of: datetime, change: Change | None = None
+    ) -> EvidenceInputs:
+        with replay_client(directory) as client:
+            report = collect(
+                world.state.catalogue,
+                default_registry(client),
+                window_ending(DUE),
+                observed_at=as_of,
+                clock=lambda: as_of,
+            )
+        if change is not None:
+            report = with_signals(report, change)
+        return world.inputs(
+            wikimedia=report, wikimedia_provenance=recording_provenance([directory])
+        )
+
+    complete = tmp_path / "complete"
+    pin_for_this_test(monkeypatch, complete)
+    last = received(complete)
+    # F. After receipt, the genuine replay is verified.
+    report = assess(world, inputs_for(complete, last), last)
+    assert report.inputs["wikimedia_pageviews"].standing is Standing.VERIFIED
+    # G. Before receipt, refused.
+    with pytest.raises(ValueError, match="could not have had them"):
+        assess(world, inputs_for(complete, last), last - timedelta(seconds=1))
+
+    # The same pinned directory with altered in-memory data, after receipt: refused.
+    def bump(signals: list[Signal]) -> list[Signal]:
+        return [*signals, signals[0]]
+
+    with pytest.raises(ValueError, match="more than one entry"):
+        assess(world, inputs_for(complete, last, bump), last)
+    # H. A pinned partial recording, and a pinned corrupted one: refused.
+    partial = tmp_path / "partial"
+    pin_for_this_test(monkeypatch, partial)
+    with pytest.raises(ValueError, match="never verified demand evidence"):
+        assess(world, inputs_for(partial, received(partial)), received(partial))
+    body = complete / "Minecraft.json"
+    original = body.read_bytes()
+    body.write_bytes(original.replace(b"1000", b"1001", 1))
+    pin_for_this_test(monkeypatch, complete)  # pin even the corrupted bytes, in this test
+    with pytest.raises(ValueError, match="do not hold together"):
+        assess(world, inputs_for(complete, last), last)
+
+
+def test_unverified_and_synthetic_pageviews_are_never_counted_as_verified(
+    world: World,
+    tmp_path: Path,
+) -> None:
+    """I and J."""
+    copy = tmp_path / "copy"
+    shutil.copytree(LEGACY, copy)
+    (copy / "Minecraft.json").write_bytes((copy / "Minecraft.json").read_bytes() + b" ")
+    copied = recording_provenance([copy])
+    assert copied.standing is Standing.UNVERIFIED
+    synthetic = InputProvenance(origin=Origin.SYNTHETIC, reference="synthetic")
+    for provenance_ in (
+        copied,
+        synthetic,
+        recording_provenance([LEGACY]).model_copy(
+            update={
+                "origin": Origin.UNVERIFIED_FILES,
+                "standing": Standing.UNVERIFIED,
+                "digests": (),
+            }
+        ),
+    ):
+        report = assess(world, world.inputs(wikimedia_provenance=provenance_))
+        assert report.inputs["wikimedia_pageviews"].standing is provenance_.standing
+        for game in report.games:
+            assert "wikimedia_readership" not in {f.value for f in game.verified_demand_families}

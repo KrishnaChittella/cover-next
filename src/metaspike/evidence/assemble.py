@@ -100,7 +100,7 @@ from metaspike.features.semantics import (
     entity_evidence_v2,
     family_reading_v2,
 )
-from metaspike.pageview_recorder import require_usable_recording
+from metaspike.pageview_recorder import bind_verified_pageviews, require_usable_recording
 from metaspike.pipeline.assess import assess_entity
 from metaspike.pipeline.collection import CollectionReport, window_ending
 from metaspike.pipeline.history import read_entity_history
@@ -1162,6 +1162,10 @@ def assess_evidence(
         # A response received after `as_of` cannot be read at `as_of`, and a recording
         # whose acquisition files do not hold together is not read at all (U6.7.1).
         require_usable_recording(inputs.wikimedia_provenance, as_of)
+        # Verified pageviews must be exactly their pinned directory's content (U6.7.2).
+        bind_verified_pageviews(
+            inputs.state.catalogue, inputs.wikimedia, inputs.wikimedia_provenance, as_of
+        )
     if as_of < inputs.state.generated_at:
         raise ValueError(
             f"as_of ({as_of.isoformat()}) is earlier than the catalogue state "

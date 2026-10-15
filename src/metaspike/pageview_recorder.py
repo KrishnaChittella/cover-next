@@ -66,9 +66,9 @@ from metaspike.evidence.acquisition import (
     record_id_matches,
 )
 from metaspike.evidence.model import InputProvenance, Standing
-from metaspike.evidence.provenance import recording_digest, recording_provenance
+from metaspike.evidence.provenance import recording_digest, recording_provenance, require_honest
 from metaspike.features.attention import HISTORY_DAYS
-from metaspike.pipeline.collection import collect, window_ending
+from metaspike.pipeline.collection import CollectionReport, collect, window_ending
 from metaspike.pipeline.normalize import latest_due_period
 from metaspike.sources.base import SourceError
 from metaspike.sources.http import AttemptBudget, RetryConfig
@@ -838,6 +838,157 @@ def require_usable_recording(provenance: InputProvenance, as_of: datetime) -> No
                 f"{provenance.reference}: a pinned pageview recording made after the legacy "
                 "fixtures must carry its acquisition records"
             )
+
+
+def material_content(recording: CollectionReport) -> tuple[object, ...]:
+    """Everything in a recording that carries historical meaning, in a canonical order.
+
+    Kept: the requested window; which sources ran; for every signal its source, game,
+    signal key, collection status, error code and message; for every series its
+    identity, granularity, window, latest due period and every point's identity,
+    period, status, value and source reference. A recording that lacks a failed signal,
+    or holds one twice, differs.
+
+    Left out, on purpose: when the collection ran (`observed_at`, run start and finish,
+    each point's `observed_at` and the freshness lag computed from it). A replay is run
+    at a moment of its choosing; those stamps describe the replay, not the history.
+
+    Raises RecordingRefused if any signal appears twice for the same source, game and
+    key: a duplicate is never silently collapsed.
+    """
+    seen: set[tuple[str, ...]] = set()
+    entries: list[tuple[object, ...]] = []
+    for run in recording.runs:
+        for signal in run.outcomes:
+            identity = (
+                run.source,
+                signal.canonical_game_id,
+                signal.key.source,
+                signal.key.metric,
+                signal.key.granularity.value,
+            )
+            if identity in seen:
+                raise RecordingRefused(
+                    f"the recording holds more than one entry for {'/'.join(identity)}"
+                )
+            seen.add(identity)
+            series = signal.series
+            entries.append(
+                (
+                    *identity,
+                    signal.status.value,
+                    None if signal.error_code is None else signal.error_code.value,
+                    signal.error_message,
+                    None
+                    if series is None
+                    else (
+                        series.canonical_game_id,
+                        series.source,
+                        series.metric,
+                        series.granularity.value,
+                        series.window_start.isoformat(),
+                        series.window_end.isoformat(),
+                        series.latest_due.isoformat(),
+                        tuple(
+                            (
+                                point.canonical_game_id,
+                                point.source,
+                                point.metric,
+                                point.granularity.value,
+                                point.period_start.isoformat(),
+                                point.status.value,
+                                point.value,
+                                point.reference,
+                                None
+                                if point.source_timestamp is None
+                                else point.source_timestamp.isoformat(),
+                            )
+                            for point in series.points
+                        ),
+                    ),
+                )
+            )
+    return (
+        recording.window.start.isoformat(),
+        recording.window.end.isoformat(),
+        tuple(sorted(run.source for run in recording.runs)),
+        tuple(sorted(entries, key=repr)),
+    )
+
+
+def bind_verified_pageviews(
+    catalogue: Catalogue,
+    recording: CollectionReport,
+    provenance: InputProvenance,
+    as_of: datetime | None,
+) -> None:
+    """Refuse a VERIFIED pageview input that is not exactly its pinned directory's content.
+
+    A verified standing is a claim. It is backed only when all of these hold:
+
+    1. The honesty guard: every claimed digest is pinned (`require_honest`).
+    2. The input names exactly one directory, and that directory's content still has
+       the claimed digest. A pinned digest attached to another directory proves nothing.
+    3. A recorder-made directory is intact, complete and non-empty, and, for a reading
+       at `as_of`, every response in it was received by then. A pinned directory without
+       acquisition records is accepted only if it is a legacy retrospective fixture.
+       `as_of=None` is the retrospective mode of a historical evaluation, which
+       reconstructs source periods and claims nothing about when a response arrived.
+    4. The supplied recording's `material_content` equals that of a replay of the
+       directory: identities, statuses, failures, windows, due periods and values.
+       Only replay-time stamps are ignored.
+
+    Unverified and synthetic inputs are not this function's business: they are read
+    as what they are and counted for nothing. This is a comparison with reviewed
+    bytes, not cryptographic authentication of the source.
+    """
+    if provenance.standing is not Standing.VERIFIED:
+        return
+    try:
+        require_honest(provenance)
+    except ValueError as error:
+        raise RecordingRefused(str(error)) from None
+    directories = [part.strip() for part in provenance.reference.split(",")]
+    if len(directories) != 1 or len(provenance.digests) != 1:
+        raise RecordingRefused(
+            f"{provenance.reference}: verified demand must name exactly one pinned recording"
+        )
+    directory = Path(directories[0])
+    if not directory.is_dir() or recording_digest(directory) != provenance.digests[0]:
+        raise RecordingRefused(
+            f"{provenance.reference}: the directory no longer has the claimed pinned content"
+        )
+    if is_recorder_output(directory):
+        check = check_recording(directory)
+        if check.problems or not check.review_ready:
+            raise RecordingRefused(
+                f"{provenance.reference}: a recording that is not intact and complete is "
+                "never verified demand evidence"
+            )
+        received = check.received_until
+        if as_of is not None and received is not None and as_of < received:
+            raise RecordingRefused(
+                f"{directory}: responses in it were received up to {received.isoformat()}; "
+                f"a reading at {as_of.isoformat()} could not have had them"
+            )
+    elif provenance.digests[0] not in LEGACY_PAGEVIEW_RECORDINGS:
+        raise RecordingRefused(
+            f"{provenance.reference}: a pinned recording made after the legacy fixtures must "
+            "carry its acquisition records"
+        )
+    with replay_client(directory) as client:
+        replayed = collect(
+            catalogue,
+            default_registry(client),
+            recording.window,
+            observed_at=recording.observed_at,
+            clock=lambda: recording.observed_at,
+        )
+    if material_content(replayed) != material_content(recording):
+        raise RecordingRefused(
+            f"{provenance.reference}: the supplied pageviews are not what the pinned "
+            "recording holds, so they cannot be counted as verified"
+        )
 
 
 # --- inspection --------------------------------------------------------------------------

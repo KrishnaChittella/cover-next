@@ -47,7 +47,6 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from enum import StrEnum
-from pathlib import Path
 from typing import Final, Literal
 
 from pydantic import AwareDatetime, Field
@@ -63,7 +62,7 @@ from metaspike.domain.timeseries import start_of_day
 from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY
 from metaspike.evidence.assemble import pageviews_read_at
 from metaspike.evidence.model import InputProvenance, Standing
-from metaspike.evidence.provenance import recording_digest, require_honest
+from metaspike.evidence.provenance import require_honest
 from metaspike.features.semantics import Availability
 from metaspike.opportunity.rules import (
     NOTEWORTHY_ROBUST_Z,
@@ -79,16 +78,10 @@ from metaspike.opportunity.rules import (
     ordering_key,
     readiness,
 )
-from metaspike.pageview_recorder import (
-    LEGACY_PAGEVIEW_RECORDINGS,
-    check_recording,
-    is_recorder_output,
-)
-from metaspike.pipeline.collection import CollectionReport, collect
+from metaspike.pageview_recorder import RecordingRefused, bind_verified_pageviews
+from metaspike.pipeline.collection import CollectionReport
 from metaspike.pipeline.signal_features import wikimedia_family_v2
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
-from metaspike.sources.registry import default_registry
-from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY
 from metaspike.validation.backtest import days_between, prediction_moment
 from metaspike.validation.history import RecordedHistory, latest_due_at
@@ -885,82 +878,6 @@ def _metrics(
 # --- the walk ----------------------------------------------------------------------------
 
 
-def material_content(recording: CollectionReport) -> tuple[object, ...]:
-    """Everything in a recording that carries historical meaning, in a canonical order.
-
-    Kept: the requested window; which sources ran; for every signal its source, game,
-    signal key, collection status, error code and message; for every series its
-    identity, granularity, window, latest due period and every point's identity,
-    period, status, value and source reference. A recording that lacks a failed signal,
-    or holds one twice, differs.
-
-    Left out, on purpose: when the collection ran (`observed_at`, run start and finish,
-    each point's `observed_at` and the freshness lag computed from it). A replay is run
-    at a moment of its choosing; those stamps describe the replay, not the history.
-
-    Raises HistoryRefused if any signal appears twice for the same source, game and
-    key: a duplicate is never silently collapsed.
-    """
-    seen: set[tuple[str, ...]] = set()
-    entries: list[tuple[object, ...]] = []
-    for run in recording.runs:
-        for signal in run.outcomes:
-            identity = (
-                run.source,
-                signal.canonical_game_id,
-                signal.key.source,
-                signal.key.metric,
-                signal.key.granularity.value,
-            )
-            if identity in seen:
-                raise HistoryRefused(
-                    f"the recording holds more than one entry for {'/'.join(identity)}"
-                )
-            seen.add(identity)
-            series = signal.series
-            entries.append(
-                (
-                    *identity,
-                    signal.status.value,
-                    None if signal.error_code is None else signal.error_code.value,
-                    signal.error_message,
-                    None
-                    if series is None
-                    else (
-                        series.canonical_game_id,
-                        series.source,
-                        series.metric,
-                        series.granularity.value,
-                        series.window_start.isoformat(),
-                        series.window_end.isoformat(),
-                        series.latest_due.isoformat(),
-                        tuple(
-                            (
-                                point.canonical_game_id,
-                                point.source,
-                                point.metric,
-                                point.granularity.value,
-                                point.period_start.isoformat(),
-                                point.status.value,
-                                point.value,
-                                point.reference,
-                                None
-                                if point.source_timestamp is None
-                                else point.source_timestamp.isoformat(),
-                            )
-                            for point in series.points
-                        ),
-                    ),
-                )
-            )
-    return (
-        recording.window.start.isoformat(),
-        recording.window.end.isoformat(),
-        tuple(sorted(run.source for run in recording.runs)),
-        tuple(sorted(entries, key=repr)),
-    )
-
-
 def _check_origin(
     catalogue: Catalogue,
     recording: CollectionReport,
@@ -998,48 +915,15 @@ def _check_origin(
                 f"{observation.family.value} ({observation.reference}): no recording of this "
                 "family is pinned, so a verified origin cannot be checked; it is refused"
             )
-    if demand.standing is not Standing.VERIFIED:
-        return
-    directories = [part.strip() for part in demand.reference.split(",")]
-    if len(directories) != 1 or len(demand.digests) != 1:
-        raise HistoryRefused(
-            f"{demand.reference}: verified demand must name exactly one pinned recording"
-        )
-    directory = Path(directories[0])
-    if not directory.is_dir() or recording_digest(directory) != demand.digests[0]:
-        raise HistoryRefused(
-            f"{demand.reference}: the directory no longer has the claimed pinned content"
-        )
-    # A recorder-made recording must hold together and be complete. Its acquisition
-    # times are NOT compared with the simulated moments: a historical evaluation is a
-    # retrospective reconstruction of source periods under the publication lag, not a
-    # claim that a response was retrieved at each moment (U6.7.1). A point-in-time
-    # reading (assess_evidence) does enforce them.
-    if is_recorder_output(directory):
-        check = check_recording(directory)
-        if check.problems or not check.review_ready:
-            raise HistoryRefused(
-                f"{demand.reference}: a recording that is not intact and complete is never "
-                "verified demand evidence"
-            )
-    elif demand.digests[0] not in LEGACY_PAGEVIEW_RECORDINGS:
-        raise HistoryRefused(
-            f"{demand.reference}: a pinned recording made after the legacy fixtures must "
-            "carry its acquisition records"
-        )
-    with replay_client(directory) as client:
-        replayed = collect(
-            catalogue,
-            default_registry(client),
-            recording.window,
-            observed_at=recording.observed_at,
-            clock=lambda: recording.observed_at,
-        )
-    if material_content(replayed) != material_content(recording):
-        raise HistoryRefused(
-            f"{demand.reference}: the supplied pageviews are not what the pinned recording "
-            "holds, so they cannot be counted as verified"
-        )
+    # Verified demand is bound to the content of its pinned directory, by the same
+    # helper the point-in-time reading uses. A recorder recording's acquisition times
+    # are NOT compared with the simulated moments (as_of=None): a historical evaluation
+    # is a retrospective reconstruction of source periods under the publication lag,
+    # not a claim that a response was retrieved at each moment (U6.7.1).
+    try:
+        bind_verified_pageviews(catalogue, recording, demand, as_of=None)
+    except RecordingRefused as error:
+        raise HistoryRefused(str(error)) from None
 
 
 def _check_policy(

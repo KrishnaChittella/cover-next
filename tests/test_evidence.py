@@ -1660,8 +1660,12 @@ def test_pageviews_are_stale_exactly_when_a_due_day_is_missing(
     bootstrap = generate_catalogue()  # exists from 4 October, so that day can be read
     minecraft = world.ids["minecraft"]
 
-    def reading(report: CollectionReport, moment: datetime) -> tuple[GameEvidence, int]:
-        inputs = world.inputs(state=bootstrap, records=[], wikimedia=report)
+    def reading(
+        report: CollectionReport, moment: datetime, provenance: InputProvenance = RECORDED_PAGEVIEWS
+    ) -> tuple[GameEvidence, int]:
+        inputs = world.inputs(
+            state=bootstrap, records=[], wikimedia=report, wikimedia_provenance=provenance
+        )
         game = assess_evidence(inputs, moment, [minecraft]).game(minecraft)
         recorded = report.signals_for(minecraft).get(V0_INPUT_SIGNAL)
         assert recorded is not None
@@ -1747,11 +1751,17 @@ def test_pageviews_are_stale_exactly_when_a_due_day_is_missing(
             observed_at=REAL_AS_OF,
             clock=lambda: REAL_AS_OF,
         )
+    # An altered copy is what it is: unverified files. Claiming the pinned recording's
+    # verified standing for it is refused, because its content is not the pinned content.
+    altered = recording_provenance([short])
+    assert altered.standing is Standing.UNVERIFIED
+    with pytest.raises(ValueError, match="not what the pinned recording holds"):
+        reading(gapped, datetime(2026, 10, 5, 12, tzinfo=UTC))
     for moment, missing in (
         (datetime(2026, 10, 4, 12, tzinfo=UTC), 0),  # the 2nd is the newest due day: held
         (datetime(2026, 10, 5, 12, tzinfo=UTC), 1),  # the 3rd is due, and is not there
     ):
-        game, stale_days = reading(gapped, moment)
+        game, stale_days = reading(gapped, moment, altered)
         assert stale_days == missing
         assert game.source(WIKIMEDIA).state is (
             EvidenceState.AVAILABLE if missing == 0 else EvidenceState.STALE
