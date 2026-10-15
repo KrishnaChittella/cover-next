@@ -1,286 +1,289 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.6: REAL-SOURCE READINESS AND VERIFIED EVIDENCE HANDOFF — CHATGPT REVIEW REQUIRED
+## PRODUCT BUILD U6.7: SUPERVISED WIKIMEDIA RECORDING — CHATGPT REVIEW REQUIRED
 
 This checkpoint was worked on branch `product/local-ui` only, entirely offline:
 
-- no live source call, credential read, cloud access or deployment;
-- no source activation, pull request, merge or publication.
+- no live source request was ever sent;
+- no cloud access, deployment or source activation;
+- no pull request, merge or publication.
 
-**No later checkpoint has been started.**
+**The live recorder has not been executed. No later checkpoint has been started.**
 
 ## Things to review first
 
-1. **Verified demand is now tied to its data, not only to its digest.** Matching a
-   claimed digest proves which directory is meant. It does not prove that the in-memory
-   recording came from it. `evaluate_history` therefore replays the named directory and
-   refuses pageviews that differ. This is a content comparison, not cryptographic
-   authentication. The pinned digest stands for a reviewed recording, and the docs say
-   so.
-2. **A verified *context* claim is refused outright.** No recording of events, creator
-   supply or community is pinned, and nothing could tie an observation to one. This
-   fails closed rather than trusting a caller.
-3. **Acquisition records can never make anything verified.** They check integrity (the
-   bytes are unchanged) and policy at collection time. They do not check origin. The
-   trusted live acquisition step is marked NOT EXECUTED in code and output.
-4. **The genuine Steam recording stays unverified.**
-   `tests/fixtures/steam_players/current_players_730.json` is a real recorded response,
-   but it was never reviewed into `PINNED_RECORDINGS`. The readiness report says exactly
-   that. I did not pin it: pinning grants verified standing, and that is the owner's
-   decision.
-5. **Reddit is "declared cleared" for private development, yet unusable there.** The
-   policy's own `registration_refusal` refuses every stage while approval is pending.
-   Both facts are shown side by side rather than one replacing the other.
-6. **Three import allow-list tests** (`test_evidence`, `test_creator_supply`,
-   `test_community_interest`) now also name `source_readiness.py`. Each allow-list gained
-   one entry, and none was relaxed.
+1. **The live path exists, but it cannot run by accident.** `record-pageviews` only plans
+   by default. Sending requires both `--live` and `--confirm <plan id>`, where the id is
+   the one the preview printed. A changed scope, window, destination or policy changes
+   the id, and the run is refused before any transport is built. The single function that
+   builds a network transport, `cli._live_transport`, was replaced in every test, and
+   sockets were blocked.
+2. **Rate limiting reuses the existing limiter unchanged.** That limiter enforces the
+   policy's documented window (200 requests in 60 seconds), not a fixed gap, so a run of
+   at most 15 requests never waits. What is enforced: strictly sequential requests,
+   concurrency 1, no retry (`max_attempts=1`), and an attempt budget equal to the number
+   of planned requests. The F test checks exactly this. It does not claim any pacing
+   between requests.
+3. **The digest covers the bodies only, as for the existing pinned recording.**
+   Acquisition records and the manifest live in `acquisition/`, outside the digest, and
+   are checked against the bodies by `--inspect`.
+4. **Bindings carry `bound_from = MIGRATED_AT` (2026-10-04).** That is the bootstrap
+   catalogue's binding origin. The seed catalogue holds no later binding time.
 
-## 1. Starting SHA
+## 1. Approved starting SHA
 
-`9a4abcdfde45c402c3a6f805a3349d2d409098d2`. Verified at the start: on
+`bca28c3adfd0c061c93d45ca89cf9670d186e659`. Verified at the start: on
 `product/local-ui`, at that commit, tree clean.
 
 ## 2. Implementation SHA
 
-`7bec09113e30e310a7fe74f857ae2d6f009b17ca`: `feat: prepare verified real-source evidence
-readiness`.
+`824f7f6478a461232dfcf4dbaa58a8c198438fa9`: `feat: prepare supervised Wikimedia recording
+offline`.
 
 ## 3. Exact files changed
 
 | File | Change |
 |---|---|
-| `src/metaspike/opportunity/history.py` | `_check_origin`: honesty guard, no verified context, digest and replay correspondence for verified demand |
-| `src/metaspike/source_readiness.py` | New: per-source readiness, read from policies, code and files |
-| `src/metaspike/evidence/acquisition.py` | New: `acquisition_record_v1` and its integrity, policy and time checks |
-| `src/metaspike/cli.py` | `source-readiness` command |
-| `tests/test_source_readiness.py` | New: 17 tests (readiness, acquisition, rehearsal) |
-| `tests/test_opportunity_history.py` | 5 provenance regressions (A to G) |
-| `tests/test_evidence.py`, `test_creator_supply.py`, `test_community_interest.py` | Allow-lists name `source_readiness.py` |
-| `docs/source-readiness-and-real-data-activation.md` | New |
-| `docs/creator-opportunity-historical-evaluation.md` | Section on what verified origin checks |
-| `docs/multi-source-evidence.md`, `docs/creator-opportunity-intelligence.md` | Links |
+| `src/metaspike/opportunity/history.py` | `material_content` replaces `_demand_values`; duplicates refused |
+| `src/metaspike/pageview_recorder.py` | New: plan, record, inspect, render |
+| `src/metaspike/cli.py` | `record-pageviews` command; `_live_transport`; `_recorder_sleep` |
+| `src/metaspike/source_readiness.py` | Wikimedia `next_step` text names the new command |
+| `tests/test_pageview_recorder.py` | New: 20 tests, mock transports only |
+| `tests/test_opportunity_history.py` | 2 hardening regressions |
+| `tests/test_evidence.py` | Allow-list names `pageview_recorder.py` |
+| `docs/wikimedia-recording-runbook.md` | New: the owner runbook |
+| `docs/source-readiness-and-real-data-activation.md` | Points at the runbook |
 | `docs/handoffs/latest.md` | This handoff (separate commit) |
 
-No frontend file changed.
+No frontend file or contract changed, so the frontend gates were not run.
 
-## 4. Provenance gap correction
+## 4. Historical comparison hardening
 
-`evaluate_history` now runs `_check_origin` after the policy check:
+For verified demand, `evaluate_history` now compares `material_content` of the supplied
+recording with that of the replay of its pinned directory.
 
-1. `require_honest` on the demand origin and on every context origin. A verified origin
-   without digests, or with an unpinned digest, is refused.
-2. Any context observation with verified standing is refused.
-3. Verified demand must name exactly one directory whose `recording_digest` still equals
-   the claimed pinned digest. The supplied recording's demand values must then equal what
-   replaying that directory gives.
+**What is compared:**
 
-Unchanged behaviour:
+- the requested window, and the set of sources run;
+- per signal: run source, game, signal key (source, metric and granularity), collection
+  status, error code and message;
+- per series: identity, granularity, window, `latest_due`;
+- per point: game, source, metric, granularity, period, status, value, reference and
+  source timestamp.
 
-- Synthetic stays synthetic.
-- Local stores and unverified files are read honestly and count nothing.
-- There is no override option.
+Entries are compared in a canonical sorted order, so failed and unmapped signals count. A
+missing failure differs.
 
-Regressions:
+**Duplicates.** A second entry for the same source, game and key is refused ("more than
+one entry"). It is never collapsed by a mapping.
 
-| | Case | Result |
-|---|---|---|
-| A | No digests | Refused |
-| B | Unknown digest | Refused |
-| B | Pinned catalogue digest on the Wikimedia directory | Refused |
-| B | Pinned Wikimedia digest on another directory | Refused |
-| B | Two digests | Refused |
-| B | Pinned and correct, but altered in-memory pageviews | Refused |
-| B | The same altered data labelled unverified | Read; counts nothing |
-| C | Forged verified context, with a pinned digest | Refused |
-| C | Forged verified context, digest-less | Refused |
-| D and G | Recorded CLI | Fingerprint still `ophist_b1d2af287f618f8ab1dbc9634b5b1292`; 546 / 0 / 35 / 511 |
-| E | Synthetic | Stays synthetic; nothing verified |
-| F | Byte-altered copy of the pinned recording | `unverified_files`; every snapshot insufficient; nothing counted |
+**Excluded on purpose:** replay-time stamps (report and run times, each point's
+`observed_at`, and the freshness lag derived from it). The replay is run at the
+recording's own `observed_at`, so `latest_due` is still compared and nothing is backdated.
 
-## 5. New readiness functionality
+**Regressions.** All values were left unchanged in each case.
+
+| Change | Result |
+|---|---|
+| A failure's error code changed | Refused |
+| A failed signal dropped | Refused |
+| A failure turned into "not mapped" | Refused |
+| `latest_due` moved a day earlier | Refused |
+| A point's article reference changed | Refused |
+| A signal duplicated | Refused ("more than one entry") |
+| Only the stamps changed (runs re-stamped, points' `observed_at` moved) | Accepted, same fingerprint |
+
+**The U6.5 result is unchanged.** Fingerprint `ophist_b1d2af287f618f8ab1dbc9634b5b1292`,
+546 assessments: 0 candidate, 35 watchlist, 511 insufficient (tested through the CLI).
+
+## 5. Recorder CLI contract
 
 ```
-uv run metaspike source-readiness [--root DIR] [--json] [--out FILE]
+metaspike record-pageviews (--game SLUG ... | --all-bootstrap) --out DIR [--through DAY] [--json]
+metaspike record-pageviews ... --live --confirm PLAN_ID      # owner only; NOT EXECUTED
+metaspike record-pageviews --inspect DIR [--json]
 ```
 
-For each of the seven source families it reports:
+**Planning**
 
-- each stage's permission, which is the policy's own `registration_refusal` for the
-  source's purpose, with the declared clearance beside it where they differ;
-- the furthest stage reached with every earlier stage permitted;
-- publication status;
-- every permission field, including approval, retention and commercial terms;
-- whether the adapter, offline replay and store exist, checked by import;
-- the credential variables a live run needs, by name only and never read;
-- each committed fixture and default local store, with its standing (verified by pinned
-  digest, synthetic, unverified or absent);
-- blockers, owner actions, the answers needed from third parties, the next step and the
-  integration path.
+- Only explicit targets: bootstrap games with a bound article. That is 14, because FiveM
+  has none. The maximum is 15.
+- No discovery and no default selection.
+- Duplicates are refused, and non-bootstrap games are refused.
 
-The output is deterministic and private; `--out` is refused in `artifacts/` or `public/`.
-Tests show that output is identical whether or not credential variables are set, and that
-their values never appear.
+**Window**
 
-**`acquisition_record_v1`** records, per raw response:
+- One window of exactly 90 days, ending on `--through` or on the latest due day.
+- The latest due day is `latest_due_period(DAILY, now, 24h)`, which is the day before
+  yesterday.
+- A day that is not yet due is refused.
+
+**Destination**
+
+- It must not exist, and neither may its `.incomplete` twin.
+- It is refused under `artifacts/`, `public/`, `fixtures/`, `apps/`, `infra/` or
+  `.github/`.
+
+**Exit codes**
+
+| Code | Meaning |
+|---|---|
+| 0 | Plan printed, or recording complete |
+| 3 | Recording partial or failed |
+| 4 | Inspection found a problem |
+| 5 | Refused |
+
+## 6. Replay and acquisition format
+
+Each 200 response that the adapter parsed is kept, **byte for byte**, as `<article>.json`
+at the top of the directory. That is exactly what `replay_client` serves and
+`recording_digest` hashes.
+
+**`acquisition/records.jsonl`** holds one `acquisition_record_v1` per kept body:
 
 - source, purpose and stage;
-- the policy's review date and a digest of its full content;
-- `requested_at` and `received_at`;
-- a request free of credentials;
-- the SHA-256 and length of the content;
-- native ids and bindings.
+- the policy's review date and digest;
+- `GET <path>`;
+- requested and received times;
+- SHA-256 and length;
+- the article, and its binding to the canonical game.
 
-It is refused in each of these cases:
+**`acquisition/manifest.json`** holds:
 
-- the policy refuses the purpose at the stage;
-- the request carries a credential;
-- the answer predates the request;
-- a binding begins after acquisition;
-- a binding names an id the response did not hold.
+- the plan;
+- run status (`complete`, `partial` or `failed`), and why it stopped;
+- per target: status (`recorded`, `no_data`, `failed` or `not_attempted`), error code,
+  and the exchange (method, path, query, times, HTTP status, kept response headers, body
+  length);
+- requests sent;
+- the bodies' digest, marked NOT pinned;
+- standing `unverified`, with the trust statement.
 
-`check_content` detects altered bytes, and `policy_changed` detects a policy revised since.
-`usable_at` is false before `received_at`. `acquisition_standing` returns UNVERIFIED at
-best, and no field can declare a record verified.
+**Never written:** request headers (so no User-Agent contact), cookies, authorization,
+response headers outside an allowlist (content-type, content-length, date, etag,
+last-modified, cache-control, age, retry-after), environment values or credentials.
 
-## 6. Actual per-source status (command output)
+## 7. Source and rate-limit safeguards
 
-| Family | Furthest permitted stage | Verified evidence | Publishable |
-|---|---|---|---|
-| wikimedia_pageviews (demand) | commercial_production | yes: pinned, 6 articles, 6 July to 3 October | yes |
-| igdb_catalogue (metadata) | private_collection | yes: pinned | no (derived metrics unknown) |
-| steam_app_catalogue (metadata) | private_development | yes: pinned | no |
-| steam_concurrent_players (demand) | private_development | no: a real recording that is not pinned | no |
-| steam_news (events) | private_development | no: fixtures synthetic; local probe store unverified (9 files) | no |
-| youtube_creator_supply | private_development | no | no |
-| reddit_community_interest | none (approval PENDING) | no | no |
+- **Policy.** `registration_refusal(demand_signals, private_development)` runs at plan
+  time and again at record time. If the policy digest changed since planning, the run is
+  refused.
+- **Requests.** The existing `WikimediaPageviewsAdapter` and its limiter are used, with
+  no retry and a one-attempt-per-target budget.
+- **Request identity.** Each request sent must equal the planned method and path, with no
+  query, or the run stops.
+- **When the run stops.** It stops at the first error other than 404: a 429, 401, 403 or
+  5xx, an invalid body, or a network failure or timeout. Later targets become
+  `not_attempted`. A 404 is `no_data`, and the run continues. Nothing is invented for any
+  failure.
+- **Output.** It is written to `.incomplete` and renamed at the end.
 
-The first source for genuine demand evidence is `wikimedia_pageviews`.
+## 8. Origin verification boundaries
 
-## 7. Offline rehearsal results
+- **A new recording is UNVERIFIED.** `recording_provenance` and `--inspect` both say so.
+- **What an acquisition record proves.** It proves integrity and permitted collection.
+  It does not prove that Wikimedia sent the bytes, and it gives no permission for public
+  use.
+- **The only route to verified.** Inspection, then owner review, then owner approval,
+  then the digest pinned in `PINNED_RECORDINGS` in a reviewed commit.
+- **No shortcuts.** There is no auto-pin, no override flag, and no change to
+  `PINNED_RECORDINGS` in U6.7.
 
-All in `tests/test_source_readiness.py`, passing:
+## 9. Offline end-to-end evidence
 
-- **The real recorded Steam response for app 730** was replayed by `metaspike sample` at
-  6 October 01:30, after it was recorded at 01:25:26, so it is not backdated. It was then
-  read with the pinned pageviews by `metaspike evidence --opportunities --json --out`.
-- **Standings stayed honest.**
-  - Pageviews were `verified`.
-  - The counter-strike-2 player sample was `unverified` and absent from why-now.
-  - YouTube and Reddit were `none`, never filled.
-- **Readiness and output stayed private.**
-  - Every entry's readiness equals its assessment's.
-  - The report passes the UI's own `report.schema.json`.
-  - Nothing was written under `artifacts/` or `public/`.
-- **The synthetic scenario stayed simulated.**
-  - Every real entry was `insufficient_evidence`; the simulated entries differ.
-  - Every community angle was `synthetic` and unconfirmed.
-- **Recorded responses stay unverified.** A YouTube-shaped response recorded privately is
-  unverified.
-- **Policy refusal holds.** A Reddit acquisition is refused because approval is pending.
-  A Steam acquisition at private_collection is refused.
-- **Every family has a defined `EvidenceInputs` way in.**
+`test_a_reviewed_and_pinned_mock_recording_reaches_the_opportunity_engine` walks the whole
+path:
 
-## 8. Post-soak first real-data plan
+- **Recording.** An invented Wikimedia response goes through the recorder over a mock
+  transport. The raw bodies, the 14 acquisition records and the manifest are written.
+- **Before the pin.** Inspection passes, with standing `unverified`. Read by `metaspike
+  evidence --opportunities`, the pageviews are `unverified` and every entry is
+  `insufficient_evidence`.
+- **Test-only pin.** `provenance.PINNED_RECORDINGS` is monkeypatched in that test only;
+  the real table is untouched.
+- **After the pin.** The pageviews read as `verified`. The invented Minecraft rise
+  reaches `provisional_watchlist` through the unchanged rubric, in a private,
+  development-only report. Nothing goes under `artifacts/`.
 
-The full plan, with all 15 points, is in
-`docs/source-readiness-and-real-data-activation.md`. In summary:
+The values are invented. Nothing is claimed about any real game.
 
-- **Source:** Wikimedia pageviews, keyless and CC0.
-- **Stage and scope:** read at `private_development` on the owner's machine, never from
-  production. At most the 15 bootstrap entities and one 90-day window. About 15 requests,
-  under the policy's 200 a minute, at concurrency 1.
-- **Reused components:** the existing adapter and limiter.
-- **Recording:** response bodies are written in the replay format with one acquisition
-  record each. The owner reviews them, and the digest is pinned in a reviewed commit.
-  Until then it is unverified.
-- **Entry into evidence:** through `--wikimedia-replay` with no new path.
-- **Checks:** content and digest, policy unchanged, agreement on the overlap with the old
-  recording.
-- **Stop conditions:** a 429 or 403, a parse failure, a mismatch, or any scope breach.
-- **Rollback:** delete the new directory.
-- **Cost:** none in the cloud; anything else NOT VERIFIED.
-- **Not yet built:** a small supervised `record-pageviews` command. That is later work for
-  Claude, once authorised.
+## 10. Tests and quality gates (actual results)
 
-## 9. Owner-action blockers
+**Recorder tests A to W**
 
-**Wikimedia**
+| Test | What it covers |
+|---|---|
+| A | A plan sends and writes nothing |
+| B and C | Targets and bounds |
+| D and E | The 90-day window and the publication lag |
+| F | Sequential requests under the policy limit, with no retry |
+| G, H, I and R | A byte-exact, replayable recording with its records, unverified |
+| J | No cookie, secret header, User-Agent or contact written |
+| K | Deterministic records |
+| L, M and N | No data, and a 503, 429, 403 or two invalid bodies (parametrised) |
+| O and P | Destinations refused |
+| Q | Policy checked, and a change refused |
+| S | Altered or extra content found by inspection |
+| T | A transport failure stops the run, with no network fallback |
+| — | The CLI live path needs the matching plan id (mock transport) |
+| U | End to end |
+| W | No cloud or production path is reachable |
 
-- Authorise the read after C2-F acceptance.
-- Review and approve pinning the new recording.
+V is the U6.5 fingerprint parity check, covered in `tests/test_opportunity_history.py`.
 
-**Steam players and Steam News**
-
-- A privacy and data notice with a Steam Data section.
-- US-only storage (us-central1).
-- A key registration that identifies the application.
-- For Steam News: a decision on keeping titles, and any backfill budget.
-- Valve's position on derived metrics and derived events (UNKNOWN), which blocks any
-  public use.
-
-**IGDB**
-
-- Public use needs attribution, and IGDB's answer on the partnership.
-
-**Steam catalogue**
-
-- A storage region, and a privacy policy naming it.
-
-**YouTube**
-
-- An API project, and acceptance of the API Services Terms.
-- Deletion or refresh within 30 days.
-- YouTube's answer on the aggregation and derived-metrics clauses.
-
-**Reddit**
-
-- Approval under the Responsible Builder Policy. It is PENDING, and the route is
-  reported, NOT VERIFIED.
-- A deletion process, and short retention.
-
-## 10. Real-data verification boundaries
-
-- **Verified** means only a reviewed recording whose content matches a pinned digest.
-- **Unverified** covers local stores, unpinned genuine recordings and acquisition records.
-  So does anything a caller merely claims: a claim is either refused or kept unverified.
-- **Not authentication.** A digest identifies content. It is not proof a source sent it.
-  No signature or attestation exists or is implied.
-- **Not executed.** The trusted live acquisition step was not executed. No policy was
-  revised and no permission was inferred. Statements the policies mark as "reported"
-  remain NOT VERIFIED.
-
-## 11. Full quality-gate results (actual)
-
-**Backend**
+**Backend gates**
 
 | Gate | Result |
 |---|---|
 | `uv run ruff format --check` | exit 0 |
 | `uv run ruff check` | exit 0 |
-| `uv run mypy` | exit 0, no issues in 244 files |
+| `uv run mypy` | exit 0, no issues in 246 files |
 | `uv run metaspike export-schemas --check` | exit 0, up to date |
-| `uv run metaspike evaluate-resolver` | exit 0; golden set v3 `c2b3aef7b372`; false AUTO_MATCH merges 0; precision 100.0% (52/52); real-evidence recall 100.0%; NEW_ENTITY 100.0% |
-| Focused suites (see below) | 262 passed |
-| `uv run pytest` | **1,640 passed, 8 deselected**, exit 0 (previously 1,618) |
+| `uv run metaspike evaluate-resolver` | exit 0; golden v3 `c2b3aef7b372`; false AUTO_MATCH merges 0; precision 100.0% (52/52); real-evidence recall 100.0%; NEW_ENTITY 100.0% |
+| Focused suites (see below) | 226 passed |
+| `uv run pytest` | **1,662 passed, 8 deselected**, exit 0 (previously 1,640) |
 
-The focused suites were readiness, opportunity history, opportunity, historical
-validation, evidence, creator supply, community, Steam players and v0 parity.
+The focused suites were recorder, readiness, history, historical validation, evidence,
+wikimedia, opportunity and v0 parity.
 
-**Frontend**
+**Frontend gates:** not run, because no frontend code or contract changed. No live API
+test exists or was run.
 
-No frontend file changed in this checkpoint, so these gates were not required. They were
-run anyway to confirm the private report schema and the UI are unaffected:
+## 11. Future live command readiness
 
-| Gate | Result |
-|---|---|
-| `contract:check` | exit 0 |
-| `opportunities:schema:check` | exit 0 |
-| `typecheck` | exit 0 |
-| `lint` | exit 0 |
-| `test` | exit 0, 197 passed |
-| `build` | exit 0 |
+The command for an authorised owner session is:
 
-## 12. Frozen-rule parity
+```
+uv run metaspike record-pageviews --all-bootstrap \
+  --out .metaspike/recordings/wikimedia-YYYYMMDD --live --confirm PLAN_ID
+```
+
+It sends 14 requests, one at a time, with no retry. The output is reviewed with
+`--inspect`. The step-by-step runbook is `docs/wikimedia-recording-runbook.md`: preview,
+record, stop conditions, inspection, digest, pinning approval, private evidence, UI
+refresh, stopping and rollback.
+
+## 12. What was explicitly NOT executed
+
+- Any request to Wikimedia or any other source.
+- The live recorder: `cli._live_transport` was never called outside tests, where it was
+  replaced.
+- A real recording. `.metaspike/recordings` does not exist.
+- Any pin.
+- The C2-F acceptance review.
+- Any GCP or production access.
+
+## 13. Owner steps after C2-F acceptance
+
+1. Complete the separate C2-F acceptance review and authorise a live recording session.
+2. Set `METASPIKE_CONTACT`.
+3. Preview the plan, then run it with `--live --confirm`.
+4. Inspect the recording, and review the manifest.
+5. Approve pinning the exact digest. Claude adds it to `PINNED_RECORDINGS` in a reviewed
+   commit.
+6. Generate the private evidence and the opportunity report with `--wikimedia-replay`.
+
+## 14. Frozen-rule parity
 
 These are unchanged:
 
@@ -295,16 +298,13 @@ These are unchanged:
 - recommendation_snapshot_v2;
 - creator_opportunity_rules_v1.
 
-No file changed under `sources/`, `event_sources/`, `creator_sources/`,
-`community_sources/`, `domain/`, `catalogue/`, `validation/`, `scoring/`,
-`opportunity/rules.py` or `evidence/provenance.py`. Source policies, collectors, identity
-mapping and quarantine, `PINNED_RECORDINGS` and the public artifact contract 1.5.0 are
-therefore all unchanged.
+No file changed under `sources/`, `domain/`, `validation/` or `evidence/provenance.py`,
+nor in `opportunity/rules.py`. So the collectors, source policies and `PINNED_RECORDINGS`
+are unchanged, and so is the public artifact contract 1.5.0.
 
-The U6.5 recorded historical metrics and fingerprint are unchanged (tested). The score v0,
-resolver golden and rubric regressions all pass.
+Steam, YouTube, Reddit and event intelligence remain on the roadmap, untouched.
 
-## 13. Git-only C2-F isolation
+## 15. Git-only C2-F isolation
 
 C2-F isolation: Git-only verification. No GCP access, no production action.
 
@@ -313,18 +313,19 @@ Verified with Git:
 - Only `product/local-ui` changed.
 - `main` is untouched: `origin/main` and the main worktree are both at
   `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`.
-- No changes under `infra/`, `.github/`, `artifacts/`, `schemas/` or `apps/`.
+- No changes under `infra/`, `.github/`, `artifacts/`, `schemas/`, `apps/` or
+  `tests/fixtures/`.
 - `BROAD_DISCOVERY_ENABLED = False` is unchanged.
-- No deployment, source API call or source activation.
+- No deployment, source API contact, source activation or publication.
 
-## 14. No later checkpoint started
+## 16. No later checkpoint started
 
-Nothing beyond U6.6 has been started:
+Nothing beyond U6.7 has been started:
 
-- no U6.7;
+- no live recording;
 - no post-soak acceptance;
-- no source activation;
-- no recorder built or run;
-- no deployment or publication.
+- no pin;
+- no deployment or merge;
+- no next checkpoint.
 
 Awaiting independent ChatGPT review and explicit owner authorisation.
