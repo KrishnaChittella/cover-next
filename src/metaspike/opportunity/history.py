@@ -880,17 +880,80 @@ def _metrics(
 # --- the walk ----------------------------------------------------------------------------
 
 
-def _demand_values(recording: CollectionReport) -> dict[tuple[str, datetime], float]:
-    """Every observed demand value in a recording, by game and period."""
-    return {
-        (signal.canonical_game_id, point.period_start): point.value
-        for run in recording.runs
-        if run.source == DEMAND_SOURCE
-        for signal in run.outcomes
-        if signal.series is not None
-        for point in signal.series.points
-        if point.value is not None
-    }
+def material_content(recording: CollectionReport) -> tuple[object, ...]:
+    """Everything in a recording that carries historical meaning, in a canonical order.
+
+    Kept: the requested window; which sources ran; for every signal its source, game,
+    signal key, collection status, error code and message; for every series its
+    identity, granularity, window, latest due period and every point's identity,
+    period, status, value and source reference. A recording that lacks a failed signal,
+    or holds one twice, differs.
+
+    Left out, on purpose: when the collection ran (`observed_at`, run start and finish,
+    each point's `observed_at` and the freshness lag computed from it). A replay is run
+    at a moment of its choosing; those stamps describe the replay, not the history.
+
+    Raises HistoryRefused if any signal appears twice for the same source, game and
+    key: a duplicate is never silently collapsed.
+    """
+    seen: set[tuple[str, ...]] = set()
+    entries: list[tuple[object, ...]] = []
+    for run in recording.runs:
+        for signal in run.outcomes:
+            identity = (
+                run.source,
+                signal.canonical_game_id,
+                signal.key.source,
+                signal.key.metric,
+                signal.key.granularity.value,
+            )
+            if identity in seen:
+                raise HistoryRefused(
+                    f"the recording holds more than one entry for {'/'.join(identity)}"
+                )
+            seen.add(identity)
+            series = signal.series
+            entries.append(
+                (
+                    *identity,
+                    signal.status.value,
+                    None if signal.error_code is None else signal.error_code.value,
+                    signal.error_message,
+                    None
+                    if series is None
+                    else (
+                        series.canonical_game_id,
+                        series.source,
+                        series.metric,
+                        series.granularity.value,
+                        series.window_start.isoformat(),
+                        series.window_end.isoformat(),
+                        series.latest_due.isoformat(),
+                        tuple(
+                            (
+                                point.canonical_game_id,
+                                point.source,
+                                point.metric,
+                                point.granularity.value,
+                                point.period_start.isoformat(),
+                                point.status.value,
+                                point.value,
+                                point.reference,
+                                None
+                                if point.source_timestamp is None
+                                else point.source_timestamp.isoformat(),
+                            )
+                            for point in series.points
+                        ),
+                    ),
+                )
+            )
+    return (
+        recording.window.start.isoformat(),
+        recording.window.end.isoformat(),
+        tuple(sorted(run.source for run in recording.runs)),
+        tuple(sorted(entries, key=repr)),
+    )
 
 
 def _check_origin(
@@ -909,8 +972,9 @@ def _check_origin(
     2. A verified context observation is refused outright. No recording of any context
        family is pinned, and nothing here could tie an in-memory observation to one.
     3. Verified demand must name exactly one recording directory whose content still
-       has the claimed pinned digest, and the supplied recording's demand values must
-       equal what replaying that directory gives. A matching digest alone proves only
+       has the claimed pinned digest, and the supplied recording's material content
+       (`material_content`: identities, statuses, failures, windows, due periods and
+       values) must equal what replaying that directory gives. A matching digest alone proves only
        that the directory is the pinned one; the replay comparison is what ties the
        separately supplied, in-memory data to it.
 
@@ -949,7 +1013,7 @@ def _check_origin(
             observed_at=recording.observed_at,
             clock=lambda: recording.observed_at,
         )
-    if _demand_values(replayed) != _demand_values(recording):
+    if material_content(replayed) != material_content(recording):
         raise HistoryRefused(
             f"{demand.reference}: the supplied pageviews are not what the pinned recording "
             "holds, so they cannot be counted as verified"

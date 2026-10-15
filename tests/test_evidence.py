@@ -1191,6 +1191,8 @@ def test_the_evidence_layer_adds_no_rule_of_its_own() -> None:
         "src/metaspike/opportunity/history_synthetic.py",
         "src/metaspike/opportunity/render.py",
         "src/metaspike/opportunity/rules.py",
+        # U6.7's supervised recorder writes acquisition records and checks digests.
+        "src/metaspike/pageview_recorder.py",
         # U6.6's offline readiness report reads pinned digests and acquisition terms.
         "src/metaspike/source_readiness.py",
     ]

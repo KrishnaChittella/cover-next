@@ -116,8 +116,9 @@ SPECS: Final = (
             "fresh pageviews (a new recording, reviewed and pinned).",
         ),
         third_party_answers=(),
-        next_step="Record fresh pageviews for the bootstrap games under the existing "
-        "adapter, review the recording and pin its digest; nothing else changes.",
+        next_step="After authorisation: `metaspike record-pageviews --all-bootstrap --out "
+        "DIR` to plan, then the same with `--live --confirm PLAN_ID`; inspect with "
+        "`--inspect DIR`; the owner reviews and approves pinning its digest.",
         integration="Already integrated: EvidenceInputs.wikimedia -> demand family -> "
         "creator_opportunity_rules_v1 movement.",
     ),

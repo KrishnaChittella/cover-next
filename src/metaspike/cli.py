@@ -7,6 +7,7 @@ import logging
 import os
 import sys
 import tempfile
+import time as time_module
 import uuid
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -89,6 +90,16 @@ from metaspike.opportunity.history import (
 from metaspike.opportunity.history_synthetic import SYNTHETIC_HISTORY, synthetic_history
 from metaspike.opportunity.render import render_shortlist
 from metaspike.opportunity.rules import shortlist as opportunity_shortlist
+from metaspike.pageview_recorder import (
+    MAX_GAMES,
+    RecorderRefused,
+    inspect_recording,
+    plan_recording,
+    record_pageviews,
+    render_inspection,
+    render_manifest,
+    render_plan,
+)
 from metaspike.pipeline.collection import (
     CollectionReport,
     collect,
@@ -346,6 +357,61 @@ def _parser() -> argparse.ArgumentParser:
         "--out", type=Path, default=None, metavar="FILE", help="also write the JSON locally"
     )
     readiness.set_defaults(handler=_source_readiness)
+
+    recorder = commands.add_parser(
+        "record-pageviews",
+        help="plan (default), or with explicit owner opt-in make, a supervised Wikimedia "
+        "recording; or inspect one",
+        description=(
+            "Supervised and private. By default this only PLANS: it prints the exact "
+            "requests and sends nothing. Sending them needs --live and --confirm with the "
+            "plan's id, and is for an owner authorised to do so. A recording is "
+            "UNVERIFIED until reviewed and pinned; nothing here pins. --inspect reads a "
+            "recording back and checks it."
+        ),
+    )
+    recorder.add_argument(
+        "--game",
+        action="append",
+        default=None,
+        metavar="SLUG",
+        help=f"a bootstrap game to record; repeatable; at most {MAX_GAMES}",
+    )
+    recorder.add_argument(
+        "--all-bootstrap",
+        action="store_true",
+        help="every bootstrap game with a Wikipedia article bound",
+    )
+    recorder.add_argument(
+        "--through",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="the last day of the 90-day window; default: the latest day already published",
+    )
+    recorder.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="a new local directory for the recording; it must not exist",
+    )
+    recorder.add_argument(
+        "--live",
+        action="store_true",
+        help="SEND the planned requests to Wikimedia. Owner use only, with --confirm",
+    )
+    recorder.add_argument(
+        "--confirm",
+        default=None,
+        metavar="PLAN_ID",
+        help="the plan id printed by the plan; --live refuses without the matching id",
+    )
+    recorder.add_argument(
+        "--inspect", type=Path, default=None, metavar="DIR", help="check a recording"
+    )
+    recorder.add_argument("--json", action="store_true", help="print JSON")
+    recorder.set_defaults(handler=_record_pageviews)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -1765,6 +1831,68 @@ def _evidence(args: argparse.Namespace) -> int:
         if args.out is not None:
             print(f"Local JSON: {args.out}")
     return EXIT_OK
+
+
+def _live_transport() -> httpx.BaseTransport:
+    """The only place a recorder transport that reaches the network is built."""
+    return httpx.HTTPTransport()
+
+
+# How the live recorder waits between requests. Replaced in tests, never by a flag.
+_recorder_sleep: Callable[[float], None] = time_module.sleep
+
+
+def _record_pageviews(args: argparse.Namespace) -> int:
+    """Plan a supervised recording; make it only on explicit opt-in; or inspect one."""
+    catalogue = load_seed_catalogue()
+    if args.inspect is not None:
+        if args.live or args.game or args.all_bootstrap or args.out is not None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--inspect takes nothing else")
+        inspection = inspect_recording(args.inspect, catalogue)
+        if args.json:
+            print(inspection.model_dump_json(indent=1))
+        else:
+            print(render_inspection(inspection), end="")
+        return EXIT_OK if not inspection.problems else EXIT_INVALID_OUTPUT
+    if args.game and args.all_bootstrap:
+        return _fail(EXIT_INVALID_CATALOGUE, "--game and --all-bootstrap cannot be combined")
+    if args.out is None:
+        return _fail(EXIT_INVALID_CATALOGUE, "--out names the new recording directory")
+    scope = bootstrap_scope()
+    slugs = args.game or (
+        sorted(
+            game.slug
+            for game in catalogue.games
+            if game.canonical_game_id in scope
+            and any(i.source == WIKIMEDIA_PAGEVIEWS_POLICY.source for i in game.source_identifiers)
+        )
+        if args.all_bootstrap
+        else []
+    )
+    try:
+        plan = plan_recording(catalogue, slugs, _now(), args.out, args.through)
+    except RecorderRefused as error:
+        return _fail(EXIT_SOURCE_POLICY, str(error))
+    if not args.live:
+        if args.confirm is not None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--confirm is only meaningful with --live")
+        print(plan.model_dump_json(indent=1) if args.json else render_plan(plan), end="\n")
+        return EXIT_OK
+    if args.confirm != plan.plan_id:
+        return _fail(
+            EXIT_SOURCE_POLICY,
+            "--live needs --confirm with this plan's id "
+            f"({plan.plan_id}); review the plan first. Nothing was sent.",
+        )
+    try:
+        result = record_pageviews(plan, catalogue, _live_transport(), _now, _recorder_sleep)
+    except RecorderRefused as error:
+        return _fail(EXIT_SOURCE_POLICY, str(error))
+    if args.json:
+        print(result.manifest.model_dump_json(indent=1))
+    else:
+        print(render_manifest(result.manifest, result.directory), end="")
+    return EXIT_OK if result.manifest.status.value == "complete" else EXIT_COLLECTION_FAILED
 
 
 def _source_readiness(args: argparse.Namespace) -> int:

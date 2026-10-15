@@ -273,9 +273,8 @@ this step.
 
 **Later work for Claude, once authorised**
 
-- A small supervised `record-pageviews` command. It writes response bodies and acquisition
-  records through the existing adapter, and refuses any scope beyond the declared one. It
-  does not exist yet, and nothing here contacts a source.
+- ~~A small supervised `record-pageviews` command.~~ Implemented and offline-tested in
+  U6.7; never run live. See [wikimedia-recording-runbook.md](wikimedia-recording-runbook.md).
 - The pinning commit, and regenerated reports.
 
 **The next sources, in order of what the owner alone can unblock:**

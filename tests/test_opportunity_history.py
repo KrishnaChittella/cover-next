@@ -7,7 +7,7 @@ pinned Wikimedia recording and nothing else; no source is contacted.
 
 import json
 import socket
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -16,6 +16,7 @@ import pytest
 from metaspike import cli
 from metaspike.catalogue.seed import load_seed_catalogue
 from metaspike.domain.games import Catalogue
+from metaspike.domain.signals import CollectionStatus, Signal, SourceErrorCode
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.evidence.assemble import assess_evidence
 from metaspike.evidence.model import InputProvenance, Origin
@@ -832,3 +833,109 @@ def test_synthetic_stays_synthetic_and_unverified_files_count_nothing(
     assert result.demand_origin.standing.value == "unverified"
     assert all(s.readiness is Readiness.INSUFFICIENT for s in result.snapshots)
     assert all(s.facts.sources_answering == 0 for s in result.snapshots)
+
+
+# --- U6.7: the comparison covers what a recording means, not only its numbers -------------
+
+
+def altered_signals(
+    report: CollectionReport, change: Callable[[list[Signal]], list[Signal]]
+) -> CollectionReport:
+    runs = tuple(
+        run.model_copy(update={"outcomes": tuple(change(list(run.outcomes)))})
+        for run in report.runs
+    )
+    return report.model_copy(update={"runs": runs})
+
+
+def first_with(signals: list[Signal], status: CollectionStatus) -> int:
+    return next(i for i, s in enumerate(signals) if s.status is status)
+
+
+def test_same_values_with_altered_meaning_are_refused() -> None:
+    _, report, _ = real_recording()
+    honest = recording_provenance([RECORDINGS])
+
+    def recode(signals: list[Signal]) -> list[Signal]:
+        i = first_with(signals, CollectionStatus.FAILED)
+        signals[i] = signals[i].model_copy(update={"error_code": SourceErrorCode.HTTP_ERROR})
+        return signals
+
+    def drop_failure(signals: list[Signal]) -> list[Signal]:
+        del signals[first_with(signals, CollectionStatus.FAILED)]
+        return signals
+
+    def unmap(signals: list[Signal]) -> list[Signal]:
+        i = first_with(signals, CollectionStatus.FAILED)
+        signals[i] = signals[i].model_copy(
+            update={
+                "status": CollectionStatus.NOT_MAPPED,
+                "error_code": None,
+                "error_message": None,
+            }
+        )
+        return signals
+
+    def earlier_due(signals: list[Signal]) -> list[Signal]:
+        i = first_with(signals, CollectionStatus.COLLECTED)
+        series = signals[i].series
+        assert series is not None
+        moved = series.model_copy(update={"latest_due": series.latest_due - timedelta(days=1)})
+        signals[i] = signals[i].model_copy(update={"series": moved})
+        return signals
+
+    def other_article(signals: list[Signal]) -> list[Signal]:
+        i = first_with(signals, CollectionStatus.COLLECTED)
+        series = signals[i].series
+        assert series is not None
+        points = tuple(
+            p.model_copy(update={"reference": "en.wikipedia.org/Other"}) for p in series.points
+        )
+        signals[i] = signals[i].model_copy(
+            update={"series": series.model_copy(update={"points": points})}
+        )
+        return signals
+
+    def duplicate(signals: list[Signal]) -> list[Signal]:
+        return [*signals, signals[first_with(signals, CollectionStatus.COLLECTED)]]
+
+    for change in (recode, drop_failure, unmap, earlier_due, other_article):
+        with pytest.raises(HistoryRefused, match="not what the pinned recording holds"):
+            recorded_run(honest, report=altered_signals(report, change))
+    # A duplicate is refused, never collapsed into one entry by a mapping.
+    with pytest.raises(HistoryRefused, match="more than one entry"):
+        recorded_run(honest, report=altered_signals(report, duplicate))
+
+
+def test_replay_time_stamps_are_not_history() -> None:
+    """When a collection ran is not what it holds: re-stamped runs are still accepted."""
+    _, report, _ = real_recording()
+    later = RUN_TIME + timedelta(days=3)
+
+    def restamp(signals: list[Signal]) -> list[Signal]:
+        out = []
+        for signal in signals:
+            if signal.series is None:
+                out.append(signal)
+                continue
+            points = tuple(
+                p.model_copy(update={"observed_at": later}) for p in signal.series.points
+            )
+            out.append(
+                signal.model_copy(
+                    update={"series": signal.series.model_copy(update={"points": points})}
+                )
+            )
+        return out
+
+    restamped = altered_signals(report, restamp)
+    restamped = restamped.model_copy(
+        update={
+            "runs": tuple(
+                run.model_copy(update={"started_at": later, "finished_at": later})
+                for run in restamped.runs
+            )
+        }
+    )
+    honest = recording_provenance([RECORDINGS])
+    assert recorded_run(honest, report=restamped).fingerprint == recorded_run(honest).fingerprint
