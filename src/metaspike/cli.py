@@ -79,6 +79,14 @@ from metaspike.evidence.synthetic import (
     write_synthetic_pageviews,
 )
 from metaspike.jobs import commands as job_commands
+from metaspike.opportunity.history import (
+    MAX_UNIVERSE,
+    EvaluationMode,
+    HistoryRefused,
+    evaluate_history,
+    render_history,
+)
+from metaspike.opportunity.history_synthetic import SYNTHETIC_HISTORY, synthetic_history
 from metaspike.opportunity.render import render_shortlist
 from metaspike.opportunity.rules import shortlist as opportunity_shortlist
 from metaspike.pipeline.collection import (
@@ -266,6 +274,54 @@ def _parser() -> argparse.ArgumentParser:
     backtest.add_argument("--store-dir", type=Path, default=DEFAULT_VALIDATION_DIR)
     backtest.add_argument("--events-dir", type=Path, default=DEFAULT_EVENTS_DIR)
     backtest.set_defaults(handler=_backtest)
+
+    history = commands.add_parser(
+        "opportunity-history",
+        help="evaluate creator_opportunity_rules_v1 over past moments, offline and private",
+        description=(
+            "Offline and private. Walks forward over declared moments, freezes what the "
+            "opportunity rubric would have said with only what was visible then, and only "
+            "afterwards attaches what attention did next, as an ATTENTION PROXY. Recorded "
+            "mode replays a pageview recording; synthetic mode uses invented games and "
+            "invented evidence, labelled throughout. It never contacts a source."
+        ),
+    )
+    history_mode = history.add_mutually_exclusive_group(required=True)
+    history_mode.add_argument(
+        "--recorded", action="store_true", help="replay a recording (--replay, --recorded-through)"
+    )
+    history_mode.add_argument(
+        "--synthetic", action="store_true", help="invented games and evidence; SYNTHETIC"
+    )
+    history.add_argument("--replay", type=Path, default=None, metavar="DIR")
+    history.add_argument(
+        "--recorded-through", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD"
+    )
+    history.add_argument(
+        "--from",
+        dest="first_day",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="first moment, at 00:00 UTC (required in recorded mode)",
+    )
+    history.add_argument(
+        "--to", dest="last_day", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD"
+    )
+    history.add_argument("--cadence-days", type=int, default=1, metavar="N")
+    history.add_argument(
+        "--game",
+        action="append",
+        default=None,
+        metavar="SLUG",
+        help=f"a game in the universe; repeatable; at most {MAX_UNIVERSE}. Default: every "
+        "game the recording holds a series for",
+    )
+    history.add_argument("--json", action="store_true", help="print the report as JSON")
+    history.add_argument(
+        "--out", type=Path, default=None, metavar="FILE", help="also write the JSON locally"
+    )
+    history.set_defaults(handler=_opportunity_history)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -1682,6 +1738,101 @@ def _evidence(args: argparse.Namespace) -> int:
     else:
         print(render(report, scenario), end="")
         print(f"Not publishable: {publication_refusal(report)}.")
+        if args.out is not None:
+            print(f"Local JSON: {args.out}")
+    return EXIT_OK
+
+
+def _opportunity_history(args: argparse.Namespace) -> int:
+    """The rubric over past moments, then what attention did next. Private; offline."""
+    if args.out is not None and (
+        _inside(args.out, DEFAULT_ARTIFACTS_DIR) or "public" in args.out.resolve().parts
+    ):
+        return _fail(
+            EXIT_SOURCE_POLICY,
+            f"{args.out} is in a published or served directory; a historical opportunity "
+            "evaluation is private and is never written there",
+        )
+    started = _now()
+    if args.synthetic:
+        if args.replay is not None or args.recorded_through is not None:
+            return _fail(
+                EXIT_INVALID_CATALOGUE,
+                "--synthetic takes no recording; synthetic and recorded data are never mixed",
+            )
+        invented = synthetic_history()
+        catalogue, recording, lags = (
+            invented.catalogue,
+            invented.recording,
+            invented.publication_lag,
+        )
+        context, origin, mode = invented.context, SYNTHETIC_HISTORY, EvaluationMode.SYNTHETIC
+        first_day = args.first_day or invented.first_day
+        last_day = args.last_day or invented.last_day
+    else:
+        if args.replay is None or args.recorded_through is None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--recorded needs --replay and --recorded-through")
+        if args.first_day is None or args.last_day is None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--recorded needs an explicit --from and --to")
+        catalogue = load_seed_catalogue()
+        with replay_client(args.replay) as client:
+            registry = default_registry(client)
+            recording = collect(
+                catalogue,
+                registry,
+                window_ending(args.recorded_through),
+                observed_at=started,
+                clock=_now,
+            )
+            lags = {
+                entry.policy.source: entry.policy.operations.expected_publication_lag
+                for entry in registry.entries()
+            }
+        if not recording.any_success:
+            raise CollectionFailedError(f"no recorded response in {args.replay} could be replayed")
+        context, mode = (), EvaluationMode.RECORDED
+        # Verified only if the directory's content matches a pinned recording.
+        origin = recording_provenance(
+            [args.replay], f"recorded through {args.recorded_through.isoformat()}"
+        )
+        first_day, last_day = args.first_day, args.last_day
+    universe = args.game or sorted(
+        game.slug
+        for game in catalogue.games
+        if any(
+            signal.canonical_game_id == game.canonical_game_id and signal.series is not None
+            for run in recording.runs
+            for signal in run.outcomes
+        )
+    )
+    try:
+        report = evaluate_history(
+            catalogue,
+            recording,
+            lags,
+            first_day,
+            last_day,
+            args.cadence_days,
+            universe,
+            origin,
+            mode,
+            created_at=started,
+            context=context,
+        )
+    except HistoryRefused as error:
+        return _fail(EXIT_SOURCE_POLICY, str(error))
+    except ValueError as error:
+        return _fail(EXIT_INVALID_CATALOGUE, str(error))
+    payload = report.model_dump_json(indent=1)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload + "\n", encoding="utf-8")
+    if args.json:
+        print(payload)
+    else:
+        if args.synthetic:
+            print("\n".join(invented.description))
+        print(render_history(report), end="")
         if args.out is not None:
             print(f"Local JSON: {args.out}")
     return EXIT_OK

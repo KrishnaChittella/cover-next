@@ -1183,9 +1183,12 @@ def test_the_evidence_layer_adds_no_rule_of_its_own() -> None:
         for path in (REPO / "src" / "metaspike").rglob("*.py")
         if "metaspike.evidence" in path.read_text() and "evidence" not in path.parts
     ]
-    # U6.3's opportunity rubric reads the evidence reading, and nothing else does.
-    assert users == [
+    # U6.3's opportunity rubric reads the evidence reading, and U6.5's historical
+    # evaluation reads its pageview cut and provenance labels; nothing else does.
+    assert sorted(users) == [
         "src/metaspike/cli.py",
+        "src/metaspike/opportunity/history.py",
+        "src/metaspike/opportunity/history_synthetic.py",
         "src/metaspike/opportunity/render.py",
         "src/metaspike/opportunity/rules.py",
     ]

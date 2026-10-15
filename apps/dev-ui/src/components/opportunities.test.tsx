@@ -2,6 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { OpportunityReport } from "@/private/opportunities/types";
+import { checkReport } from "@/private/opportunities/validate";
 import recordedJson from "@/test/fixtures/opportunities/recorded.json";
 import syntheticJson from "@/test/fixtures/opportunities/synthetic.json";
 
@@ -137,5 +138,17 @@ describe("when nothing can be shown", () => {
     expect(screen.getByTestId("report-unsupported_version")).toHaveTextContent("creator_opportunity_rules_v9");
     rerender(<NotShown loaded={{ kind: "invalid", file: "/x", details: [{ path: "/entries", message: "bad" }] }} />);
     expect(screen.getByTestId("report-invalid")).toHaveTextContent("/entries");
+  });
+
+  it("refuses to render a report with a duplicated game: the page never sees its entries", () => {
+    const broken = structuredClone(syntheticJson);
+    broken.simulated_entries[1]!.canonical_game_id = broken.simulated_entries[0]!.canonical_game_id;
+    const checked = checkReport(broken);
+    expect(checked.kind).toBe("invalid");
+    if (checked.kind !== "invalid") return;
+    render(<NotShown loaded={{ kind: "invalid", file: "/x/synthetic.json", details: checked.details }} />);
+    expect(screen.getByTestId("report-invalid")).toHaveTextContent("names the same game more than once");
+    expect(screen.queryByTestId("shortlist-row")).toBeNull();
+    expect(screen.queryByTestId("simulated-shortlist")).toBeNull();
   });
 });

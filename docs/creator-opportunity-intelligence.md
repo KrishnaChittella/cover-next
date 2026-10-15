@@ -164,6 +164,11 @@ outcome_rules_v1 exist for pageviews only), thresholds chosen from that evidence
 reviewed rule version. Synthetic tests prove the rubric does what it says, not that it
 predicts anything.
 
+U6.5 adds the offline historical evaluation
+([creator-opportunity-historical-evaluation.md](creator-opportunity-historical-evaluation.md)).
+On the recorded data no moment reaches a candidate, so candidate accuracy is NOT ESTIMABLE,
+and creator-video success cannot yet be validated from the recorded data.
+
 ## Before public launch
 
 Verified sources beyond pageviews; their policies cleared for public use (YouTube and

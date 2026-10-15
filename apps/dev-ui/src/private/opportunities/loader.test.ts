@@ -101,6 +101,56 @@ describe("loading a private opportunity report", () => {
     expect(checkReport(leaked).kind).toBe("invalid");
   });
 
+  it("refuses a game assessed twice, listed twice, missing, or at another readiness", () => {
+    type Report = typeof synthetic;
+    const refusal = (mutate: (r: Report) => void) => {
+      const copy = structuredClone(synthetic);
+      mutate(copy);
+      const result = checkReport(copy);
+      expect(result.kind).toBe("invalid");
+      return result.kind === "invalid" ? result.details.map((d) => `${d.path} ${d.message}`).join("; ") : "";
+    };
+    const first = synthetic.assessments[0]!.canonical_game_id;
+    expect(synthetic.assessments.length).toBeGreaterThan(2);
+    // The same game assessed twice.
+    expect(refusal((r) => { r.assessments[1]!.canonical_game_id = first; })).toContain(
+      "/assessments names the same game more than once",
+    );
+    // The same game twice in the verified list: one assessed game is then missing from it.
+    const twiceVerified = refusal((r) => { r.entries[1]!.canonical_game_id = r.entries[0]!.canonical_game_id; });
+    expect(twiceVerified).toContain("/entries names the same game more than once");
+    expect(twiceVerified).toContain("/entries does not list exactly the assessed games");
+    // The same in the simulated list.
+    const twiceSimulated = refusal((r) => {
+      r.simulated_entries[2]!.canonical_game_id = r.simulated_entries[0]!.canonical_game_id;
+    });
+    expect(twiceSimulated).toContain("/simulated_entries names the same game more than once");
+    expect(twiceSimulated).toContain("/simulated_entries does not list exactly the assessed games");
+    // An assessed game missing from either list.
+    expect(refusal((r) => { r.entries.pop(); })).toContain("/entries does not list exactly the assessed games");
+    expect(refusal((r) => { r.simulated_entries.pop(); })).toContain(
+      "/simulated_entries does not list exactly the assessed games",
+    );
+    // A simulated entry whose readiness is not its game's simulated readiness.
+    const other = (value: string) =>
+      value === "insufficient_evidence" ? "provisional_watchlist" : "insufficient_evidence";
+    expect(refusal((r) => { r.simulated_entries[0]!.readiness = other(r.simulated_entries[0]!.readiness); })).toContain(
+      "/simulated_entries/0/readiness differs from the game's simulated readiness",
+    );
+    // Valid reports are still accepted.
+    expect(checkReport(synthetic).kind).toBe("ok");
+    expect(checkReport(recorded).kind).toBe("ok");
+  });
+
+  it("refuses to hand over a report it would have to correct", async () => {
+    const copy = structuredClone(synthetic);
+    copy.simulated_entries[0]!.readiness =
+      copy.simulated_entries[0]!.readiness === "insufficient_evidence" ? "provisional_watchlist" : "insufficient_evidence";
+    const loaded = await loadOpportunityReport("synthetic", ON, reader({ "synthetic.json": JSON.stringify(copy) }), APP);
+    expect(loaded.kind).toBe("invalid");
+    expect(loaded).not.toHaveProperty("report");
+  });
+
   it("never puts a private report where it could be served, and never in a client bundle", () => {
     const publicDir = path.join(APP, "public");
     const files = existsSync(publicDir) ? readdirSync(publicDir, { recursive: true }).map(String) : [];

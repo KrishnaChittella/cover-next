@@ -192,6 +192,17 @@ def _simulated(standing: Standing) -> bool:
     return standing is not Standing.NONE
 
 
+def movement_direction(lift: float | None, z: float | None) -> Direction:
+    """Which way one demand signal moved against its own history, by the rubric's rule."""
+    if lift is None or z is None:
+        return Direction.UNKNOWN
+    if z >= NOTEWORTHY_ROBUST_Z and lift > 0:
+        return Direction.UP
+    if z <= -NOTEWORTHY_ROBUST_Z and lift < 0:
+        return Direction.DOWN
+    return Direction.FLAT
+
+
 def _movements(game: GameEvidence) -> tuple[MovementNote, ...]:
     notes = []
     for reading in game.demand.families:
@@ -200,14 +211,7 @@ def _movements(game: GameEvidence) -> tuple[MovementNote, ...]:
         source = next(s for s in game.sources if s.family is reading.family)
         signal = reading.signals[0].signal
         lift, z = signal.log_lift.value, signal.robust_z.value
-        if lift is None or z is None:
-            direction = Direction.UNKNOWN
-        elif z >= NOTEWORTHY_ROBUST_Z and lift > 0:
-            direction = Direction.UP
-        elif z <= -NOTEWORTHY_ROBUST_Z and lift < 0:
-            direction = Direction.DOWN
-        else:
-            direction = Direction.FLAT
+        direction = movement_direction(lift, z)
         notes.append(
             MovementNote(
                 family=reading.family,
@@ -470,6 +474,14 @@ _STEPS: Final = (
 )
 
 
+def ahead_of_next(mine: tuple[object, ...], theirs: tuple[object, ...]) -> str:
+    """Why an entry with ordering key `mine` is above one with `theirs`, in words."""
+    step = next(i for i in range(len(mine)) if mine[i] != theirs[i])
+    if step < len(_STEPS):
+        return _STEPS[step][1]
+    return "indistinguishable on the evidence; ordered by canonical id only, which means nothing"
+
+
 def ordering_key(readiness_: Readiness, facts: Facts, canonical_game_id: str) -> tuple[object, ...]:
     return (
         _RANK[readiness_],
@@ -520,14 +532,7 @@ def _order(
         if index + 1 == len(ordered):
             reason = "last in the list"
         else:
-            mine, theirs = key(item), key(ordered[index + 1])
-            step = next(i for i in range(len(mine)) if mine[i] != theirs[i])
-            reason = (
-                _STEPS[step][1]
-                if step < len(_STEPS)
-                else "indistinguishable on the evidence; ordered by canonical id only, "
-                "which means nothing"
-            )
+            reason = ahead_of_next(key(item), key(ordered[index + 1]))
         entries.append(
             ShortlistEntry(
                 position=index + 1,

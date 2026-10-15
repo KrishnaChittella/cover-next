@@ -803,8 +803,15 @@ def test_reddit_data_cannot_reach_a_published_artifact() -> None:
         for p in (REPO / "src/metaspike").rglob("*.py")
         if "community_sources" in p.read_text() and "community_sources" not in p.parts
     )
-    # U6.3's opportunity rubric reads community readings.
-    assert users == ["cli.py", "evidence/assemble.py", "evidence/model.py", "opportunity/rules.py"]
+    # U6.3's opportunity rubric reads community readings; U6.5's historical evaluation
+    # checks Reddit's policy (and refuses) before any community observation is used.
+    assert users == [
+        "cli.py",
+        "evidence/assemble.py",
+        "evidence/model.py",
+        "opportunity/history.py",
+        "opportunity/rules.py",
+    ]
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):
         for path in (REPO / "src/metaspike" / area).glob("*.py"):
             assert "reddit" not in path.read_text().lower(), path
