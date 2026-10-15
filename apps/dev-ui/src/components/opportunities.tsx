@@ -2,6 +2,7 @@
 // is computed, ranked, rescored or reclassified here. The order is the engine's.
 import Link from "next/link";
 
+import { type Brief, type BriefItem, buildBrief, briefText, READINESS_WORDS, UNVALIDATED } from "@/private/opportunities/brief";
 import type { Loaded, View } from "@/private/opportunities/loader";
 import type {
   MovementNote,
@@ -12,6 +13,7 @@ import type {
   Standing,
 } from "@/private/opportunities/types";
 
+import { CopyText } from "./copy-text";
 import { Badge, Section } from "./ui";
 
 export const NO_REAL_OPPORTUNITY =
@@ -229,6 +231,135 @@ export function OpportunityBoard({ report, view }: { report: OpportunityReport; 
   );
 }
 
+function BriefList({ items, empty }: { items: BriefItem[]; empty: string }) {
+  if (items.length === 0) return <p className="text-sm text-ink-soft">{empty}</p>;
+  return (
+    <ul className="space-y-1 text-sm text-ink-soft">
+      {items.map((i, n) => (
+        <li key={n}>
+          {i.standing !== null && i.standing !== "verified" ? <StandingBadge standing={i.standing} /> : null}{" "}
+          {i.text}
+          {i.references.length ? <span className="text-xs text-muted"> (source: {i.references.join(", ")})</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function BriefPart({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-4">
+      <p className="eyebrow">{title}</p>
+      <div className="mt-1">{children}</div>
+    </div>
+  );
+}
+
+/** One game's decision brief: the engine's assessment in plain words, and as copyable text. */
+export function CreatorBrief({ brief }: { brief: Brief }) {
+  const text = briefText(brief);
+  return (
+    <div
+      className={`panel p-5 ${brief.synthetic ? "border-bad/60" : ""}`}
+      data-testid="creator-brief"
+      data-basis={brief.basis}
+    >
+      {brief.synthetic ? (
+        <p role="alert" className="mb-3 text-base font-semibold tracking-wide text-bad" data-testid="brief-synthetic">
+          {SYNTHETIC_HEADLINE}
+        </p>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <ReadinessBadge readiness={brief.readiness} simulated={brief.synthetic} />
+        <span className="text-xs text-muted">
+          {brief.synthetic
+            ? `simulated; verified readiness: ${READINESS_WORDS[brief.verifiedReadiness]}`
+            : "verified evidence only"}
+          {" · "}as of {moment(brief.asOf)}
+          {brief.position !== null ? ` · position ${brief.position} in the engine's order` : ""}
+        </span>
+      </div>
+      <p className="mt-3 text-base font-medium text-ink" data-testid="brief-decision">
+        {brief.decision}
+      </p>
+      {brief.decisionDetail.map((d, i) => (
+        <p key={i} className="mt-1 text-sm text-ink-soft">
+          {d}
+        </p>
+      ))}
+      {brief.notices
+        .filter((n) => n !== SYNTHETIC_HEADLINE)
+        .map((n, i) => (
+          <p key={i} className="mt-2 text-sm text-warn">
+            {n}
+          </p>
+        ))}
+
+      <BriefPart title="Rubric conditions (the engine's facts)">
+        <ul className="space-y-1 text-sm text-ink-soft" data-testid="brief-conditions">
+          {brief.conditions.map((c) => (
+            <li key={c.label}>
+              <Badge tone={c.met ? "good" : "neutral"}>{c.met ? "met" : "not met"}</Badge> {c.label}
+            </li>
+          ))}
+        </ul>
+      </BriefPart>
+      <BriefPart title="What changed">
+        <BriefList items={brief.changed} empty="No demand family has a current measurement for this game." />
+      </BriefPart>
+      <BriefPart title={brief.synthetic ? "Why now (simulated)" : "Why now (verified)"}>
+        <BriefList items={brief.whyNow} empty="Nothing counted says “now”." />
+      </BriefPart>
+      {brief.notCounted.length ? (
+        <BriefPart title="Pointing somewhere, but not counted">
+          <BriefList items={brief.notCounted} empty="" />
+        </BriefPart>
+      ) : null}
+      <BriefPart title="Video angle">
+        <p className="text-sm text-ink-soft" data-testid="brief-angle-note">
+          {brief.angleNote}
+        </p>
+        {brief.angles.length ? <BriefList items={brief.angles} empty="" /> : null}
+      </BriefPart>
+      <BriefPart title="Creator supply">
+        <ul className="space-y-1 text-sm text-ink-soft" data-testid="brief-supply">
+          {brief.creatorSupply.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      </BriefPart>
+      <BriefPart title="Community">
+        <ul className="space-y-1 text-sm text-ink-soft">
+          {brief.community.map((t, i) => (
+            <li key={i}>{t}</li>
+          ))}
+        </ul>
+      </BriefPart>
+      <BriefPart title="Counterevidence and caveats">
+        <BriefList items={brief.counterevidence} empty="None recorded." />
+      </BriefPart>
+      <BriefPart title="Confirm before acting">
+        <ul className="list-disc pl-5 text-sm text-ink-soft" data-testid="brief-confirm">
+          {brief.confirmFirst.map((c, i) => (
+            <li key={i}>{c}</li>
+          ))}
+        </ul>
+        <p className="mt-2 text-xs text-muted">{UNVALIDATED}</p>
+      </BriefPart>
+
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <CopyText text={text} label="Copy brief as text" />
+      </div>
+      <details className="mt-3">
+        <summary className="cursor-pointer text-sm text-ink-soft">Plain-text brief</summary>
+        <pre className="mt-2 whitespace-pre-wrap font-mono text-xs text-ink-soft" data-testid="brief-text">
+          {text}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 export function OpportunityDetail({
   report,
   slug,
@@ -264,6 +395,14 @@ export function OpportunityDetail({
         </div>
         {entry ? <p className="mt-2 text-sm text-muted">Position {entry.position} on the verified shortlist.</p> : null}
       </header>
+
+      <Section
+        id="brief"
+        title="Creator decision brief"
+        note="The engine's assessment of this game, said plainly: whether to act, why, what is missing and what to check first. It decides nothing the engine did not."
+      >
+        <CreatorBrief brief={buildBrief(report, a, view)} />
+      </Section>
 
       <Section id="why-now" title="Why now?">
         {a.why_now.length > 0 ? (

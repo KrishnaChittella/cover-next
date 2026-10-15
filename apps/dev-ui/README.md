@@ -59,6 +59,35 @@ Both generators run `uv run metaspike evidence ... --opportunities --json --out 
 and write to `<repo>/.metaspike/private/opportunities/{verified,synthetic}.json`, which is
 git-ignored and not under any served directory.
 
+### Creator decision brief
+
+Each game's page (`/opportunities/<slug>`) opens with a **creator decision brief**. It
+restates the engine's assessment in plain words:
+
+- whether to act: candidate, watchlist, or abstain;
+- the rubric's conditions as met or not met;
+- what changed and why it is timely;
+- the angle, creator supply and community;
+- counterevidence, freshness, what is not known, and what to confirm first.
+
+The brief comes with a **Copy brief as text** button and a plain-text view.
+It is built server-side from the validated report (`src/private/opportunities/brief.ts`);
+the copy button receives only the finished text.
+
+- **Nothing is computed in the interface.** Readiness, facts and order are the engine's.
+  Missing evidence stays missing, and an empty or partial creator sample is never read as
+  low competition.
+- **The synthetic view's brief is simulated.** It opens and closes, on screen and in
+  copied text, with "SYNTHETIC DEMONSTRATION — NOT A REAL RECOMMENDATION", and labels
+  every invented or unverified item.
+
+```
+npm run opportunities:recorded && npm run opportunities:synthetic
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
+# http://127.0.0.1:3000/opportunities/minecraft              verified: abstains
+# http://127.0.0.1:3000/opportunities/dota-2?view=synthetic  SIMULATED candidate
+```
+
 **How it is loaded.** The pages are server components rendered on request
 (`force-dynamic`), never at build time. `src/private/opportunities/loader.ts` reads one of
 two fixed files chosen by a fixed view name; only the exact word `synthetic` selects the
