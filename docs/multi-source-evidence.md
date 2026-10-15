@@ -374,3 +374,9 @@ closes and its evidence is reviewed. Then, separately and each under its own rev
 whether Steam sampling runs in private collection (its policy clears private
 development only today); the policy answers listed above; and only after those, any
 public contract carrying more than pageviews.
+
+## Source readiness (U6.6)
+
+What each source can contribute today, and what stops it, is reported offline by
+`metaspike source-readiness`. The acquisition-record contract for future real collection
+is in [source-readiness-and-real-data-activation.md](source-readiness-and-real-data-activation.md).

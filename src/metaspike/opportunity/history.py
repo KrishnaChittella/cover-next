@@ -47,6 +47,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from pathlib import Path
 from typing import Final, Literal
 
 from pydantic import AwareDatetime, Field
@@ -62,6 +63,7 @@ from metaspike.domain.timeseries import start_of_day
 from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY
 from metaspike.evidence.assemble import pageviews_read_at
 from metaspike.evidence.model import InputProvenance, Standing
+from metaspike.evidence.provenance import recording_digest, require_honest
 from metaspike.features.semantics import Availability
 from metaspike.opportunity.rules import (
     NOTEWORTHY_ROBUST_Z,
@@ -77,9 +79,11 @@ from metaspike.opportunity.rules import (
     ordering_key,
     readiness,
 )
-from metaspike.pipeline.collection import CollectionReport
+from metaspike.pipeline.collection import CollectionReport, collect
 from metaspike.pipeline.signal_features import wikimedia_family_v2
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
+from metaspike.sources.registry import default_registry
+from metaspike.sources.replay import replay_client
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY
 from metaspike.validation.backtest import days_between, prediction_moment
 from metaspike.validation.history import RecordedHistory, latest_due_at
@@ -876,6 +880,82 @@ def _metrics(
 # --- the walk ----------------------------------------------------------------------------
 
 
+def _demand_values(recording: CollectionReport) -> dict[tuple[str, datetime], float]:
+    """Every observed demand value in a recording, by game and period."""
+    return {
+        (signal.canonical_game_id, point.period_start): point.value
+        for run in recording.runs
+        if run.source == DEMAND_SOURCE
+        for signal in run.outcomes
+        if signal.series is not None
+        for point in signal.series.points
+        if point.value is not None
+    }
+
+
+def _check_origin(
+    catalogue: Catalogue,
+    recording: CollectionReport,
+    demand: InputProvenance,
+    context: Iterable[ContextObservation],
+) -> None:
+    """Refuse any claim of a verified origin that the evaluator cannot back.
+
+    A verified standing is a claim about where data came from, and a provenance record
+    is only a claim. Three checks, all failing closed:
+
+    1. The existing honesty guard: a verified origin must carry digests, and every one
+       must be pinned (`require_honest`).
+    2. A verified context observation is refused outright. No recording of any context
+       family is pinned, and nothing here could tie an in-memory observation to one.
+    3. Verified demand must name exactly one recording directory whose content still
+       has the claimed pinned digest, and the supplied recording's demand values must
+       equal what replaying that directory gives. A matching digest alone proves only
+       that the directory is the pinned one; the replay comparison is what ties the
+       separately supplied, in-memory data to it.
+
+    None of this is cryptographic authentication of the source. A pinned digest says
+    the bytes are the ones this repository reviewed as a recording of the source;
+    the review, not the hash, is what vouches for them.
+    """
+    for provenance in (demand, *(o.provenance for o in context)):
+        try:
+            require_honest(provenance)
+        except ValueError as error:
+            raise HistoryRefused(str(error)) from None
+    for observation in context:
+        if observation.provenance.standing is Standing.VERIFIED:
+            raise HistoryRefused(
+                f"{observation.family.value} ({observation.reference}): no recording of this "
+                "family is pinned, so a verified origin cannot be checked; it is refused"
+            )
+    if demand.standing is not Standing.VERIFIED:
+        return
+    directories = [part.strip() for part in demand.reference.split(",")]
+    if len(directories) != 1 or len(demand.digests) != 1:
+        raise HistoryRefused(
+            f"{demand.reference}: verified demand must name exactly one pinned recording"
+        )
+    directory = Path(directories[0])
+    if not directory.is_dir() or recording_digest(directory) != demand.digests[0]:
+        raise HistoryRefused(
+            f"{demand.reference}: the directory no longer has the claimed pinned content"
+        )
+    with replay_client(directory) as client:
+        replayed = collect(
+            catalogue,
+            default_registry(client),
+            recording.window,
+            observed_at=recording.observed_at,
+            clock=lambda: recording.observed_at,
+        )
+    if _demand_values(replayed) != _demand_values(recording):
+        raise HistoryRefused(
+            f"{demand.reference}: the supplied pageviews are not what the pinned recording "
+            "holds, so they cannot be counted as verified"
+        )
+
+
 def _check_policy(
     mode: EvaluationMode,
     stage: DeploymentStage,
@@ -950,6 +1030,7 @@ def evaluate_history(
     if DEMAND_SOURCE not in publication_lag:
         raise ValueError(f"no publication lag is known for {DEMAND_SOURCE}")
     _check_policy(mode, stage, demand_origin, context)
+    _check_origin(catalogue, recording, demand_origin, context)
     counting = (
         Counting.VERIFIED_ONLY
         if mode is EvaluationMode.RECORDED

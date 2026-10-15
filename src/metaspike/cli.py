@@ -116,6 +116,7 @@ from metaspike.resolution.evaluate import evaluate
 from metaspike.resolution.golden import load_golden_set
 from metaspike.resolution.recorded import load_recorded_catalogue
 from metaspike.scoring.v0 import ScoreInvariantError
+from metaspike.source_readiness import assess_readiness, render_readiness
 from metaspike.sources.base import SourceError
 from metaspike.sources.catalogue_sources import (
     CATALOGUE_SOURCE_POLICIES,
@@ -322,6 +323,29 @@ def _parser() -> argparse.ArgumentParser:
         "--out", type=Path, default=None, metavar="FILE", help="also write the JSON locally"
     )
     history.set_defaults(handler=_opportunity_history)
+
+    readiness = commands.add_parser(
+        "source-readiness",
+        help="what each source can contribute today and what stops it; offline",
+        description=(
+            "Offline and private. Reads every source's declared policy, checks which "
+            "adapters, replays and stores exist, and gives the standing of the committed "
+            "recordings and default local stores. It contacts no source, reads no "
+            "credential (variables are named, never read) and queries no cloud."
+        ),
+    )
+    readiness.add_argument(
+        "--root",
+        type=Path,
+        default=Path(),
+        metavar="DIR",
+        help="the repository root whose fixtures and local stores are read",
+    )
+    readiness.add_argument("--json", action="store_true", help="print the report as JSON")
+    readiness.add_argument(
+        "--out", type=Path, default=None, metavar="FILE", help="also write the JSON locally"
+    )
+    readiness.set_defaults(handler=_source_readiness)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -1738,6 +1762,30 @@ def _evidence(args: argparse.Namespace) -> int:
     else:
         print(render(report, scenario), end="")
         print(f"Not publishable: {publication_refusal(report)}.")
+        if args.out is not None:
+            print(f"Local JSON: {args.out}")
+    return EXIT_OK
+
+
+def _source_readiness(args: argparse.Namespace) -> int:
+    """Each source's readiness, read offline. Private: never written where it is served."""
+    if args.out is not None and (
+        _inside(args.out, DEFAULT_ARTIFACTS_DIR) or "public" in args.out.resolve().parts
+    ):
+        return _fail(
+            EXIT_SOURCE_POLICY,
+            f"{args.out} is in a published or served directory; a readiness report is "
+            "private and is never written there",
+        )
+    report = assess_readiness(args.root)
+    payload = report.model_dump_json(indent=1)
+    if args.out is not None:
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        args.out.write_text(payload + "\n", encoding="utf-8")
+    if args.json:
+        print(payload)
+    else:
+        print(render_readiness(report), end="")
         if args.out is not None:
             print(f"Local JSON: {args.out}")
     return EXIT_OK

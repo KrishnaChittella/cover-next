@@ -1290,6 +1290,7 @@ def test_youtube_data_cannot_reach_a_published_artifact() -> None:
         "opportunity/history.py",  # U6.5 checks YouTube's policy before using any sample
         "opportunity/history_synthetic.py",  # U6.5's invented samples keep its retention
         "opportunity/rules.py",  # U6.3 reads creator-supply readings
+        "source_readiness.py",  # U6.6 reads YouTube's policy, offline, to report it
     ]
     # No job, schedule or warehouse table collects it.
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):

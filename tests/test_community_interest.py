@@ -811,6 +811,7 @@ def test_reddit_data_cannot_reach_a_published_artifact() -> None:
         "evidence/model.py",
         "opportunity/history.py",
         "opportunity/rules.py",
+        "source_readiness.py",  # U6.6 reads Reddit's policy, offline, to report it
     ]
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):
         for path in (REPO / "src/metaspike" / area).glob("*.py"):

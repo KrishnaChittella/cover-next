@@ -168,6 +168,8 @@ U6.5 adds the offline historical evaluation
 ([creator-opportunity-historical-evaluation.md](creator-opportunity-historical-evaluation.md)).
 On the recorded data no moment reaches a candidate, so candidate accuracy is NOT ESTIMABLE,
 and creator-video success cannot yet be validated from the recorded data.
+What each source needs before it can supply verified evidence is in
+[source-readiness-and-real-data-activation.md](source-readiness-and-real-data-activation.md).
 
 ## Before public launch
 

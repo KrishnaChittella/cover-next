@@ -301,3 +301,23 @@ Beyond those inputs, a calibrated ranking would also need:
   on another, under a new rubric version.
 
 None of these inputs exists today, and none is collected by this work.
+
+## Verified origin: what is checked (U6.6)
+
+A direct caller of `evaluate_history` cannot obtain a verified standing by claiming one:
+
+- **The honesty guard.** Every origin passes through `require_honest`: no digests, or an
+  unpinned digest, is refused.
+- **No verified context.** A verified context observation is refused, because no context
+  recording is pinned.
+- **Verified demand is checked against its directory.** It must name one directory whose
+  content still has the claimed pinned digest.
+
+**A digest identifies a directory. It does not prove that separately supplied, in-memory
+data came from it.** So the evaluator replays that directory and refuses pageviews that
+differ from it.
+
+None of this is cryptographic authentication of the source. The pinned digest stands for
+a reviewed recording, and the review is what vouches for it. The recorded CLI result is
+unchanged. See
+[source-readiness-and-real-data-activation.md](source-readiness-and-real-data-activation.md).

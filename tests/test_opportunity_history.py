@@ -694,3 +694,141 @@ def test_exploratory_sensitivity_is_labelled_and_decides_nothing(
         recorded.metrics.candidates,
         recorded.metrics.watchlist,
     )
+
+
+# --- U6.6: a verified origin must be backed, not merely claimed -----------------------------
+
+PINNED_WIKIMEDIA = "260d787eda9046d7a07fbc9765309ebc1e2a95041ce8a5a51f0524c0c593b098"
+PINNED_CATALOGUE = "a23a6d22394b66674fb4ef943eaadbda581434690d4144ad8b85155cadbe6533"
+# The recorded CLI's published result (U6.5 handoff), which must not move.
+RECORDED_FINGERPRINT = "ophist_b1d2af287f618f8ab1dbc9634b5b1292"
+
+
+def recorded_run(
+    demand: InputProvenance,
+    report: CollectionReport | None = None,
+    context: Sequence[ContextObservation] = (),
+) -> OpportunityHistoryReport:
+    catalogue, recorded_report, lags = real_recording()
+    return evaluate_history(
+        catalogue,
+        recorded_report if report is None else report,
+        lags,
+        date(2026, 9, 30),
+        date(2026, 10, 5),
+        1,
+        recorded_universe(catalogue, recorded_report),
+        demand,
+        EvaluationMode.RECORDED,
+        RUN_TIME,
+        context=context,
+    )
+
+
+def claimed(digests: tuple[str, ...], reference: str = str(RECORDINGS)) -> InputProvenance:
+    return InputProvenance(origin=Origin.RECORDED_RESPONSE, reference=reference, digests=digests)
+
+
+def test_a_verified_claim_without_pinned_digests_is_refused() -> None:
+    """A. Missing digests, and B. a digest that is pinned for nothing."""
+    with pytest.raises(HistoryRefused, match="pinned recording"):
+        recorded_run(claimed(()))
+    with pytest.raises(HistoryRefused, match="pinned recording"):
+        recorded_run(claimed(("0" * 64,)))
+    # A digest pinned for another recording does not describe this directory.
+    with pytest.raises(HistoryRefused, match="no longer has the claimed pinned content"):
+        recorded_run(claimed((PINNED_CATALOGUE,)))
+    # A pinned digest attached to a renamed or arbitrary directory proves nothing.
+    with pytest.raises(HistoryRefused, match="no longer has the claimed pinned content"):
+        recorded_run(claimed((PINNED_WIKIMEDIA,), reference=str(RECORDINGS.parent / "catalogue")))
+    with pytest.raises(HistoryRefused, match="exactly one pinned recording"):
+        recorded_run(claimed((PINNED_WIKIMEDIA, PINNED_WIKIMEDIA), f"{RECORDINGS}, {RECORDINGS}"))
+
+
+def test_supplied_pageviews_must_be_what_the_pinned_recording_holds() -> None:
+    """The digest names a directory; the replay comparison ties the data to it."""
+    _, report, lags = real_recording()
+    honest = recording_provenance([RECORDINGS])
+    altered = perturb_unavailable(report, prediction_moment(date(2026, 9, 1)), lags, 1.5)
+    with pytest.raises(HistoryRefused, match="not what the pinned recording holds"):
+        recorded_run(honest, report=altered)
+    # The same altered data under an honest unverified label is read, and counts nothing.
+    unverified = InputProvenance(origin=Origin.UNVERIFIED_FILES, reference="altered copy")
+    result = recorded_run(unverified, report=altered)
+    assert all(s.verified_families == () and s.counted_families == () for s in result.snapshots)
+
+
+def test_a_forged_verified_context_origin_is_refused() -> None:
+    """C. Context provenance claiming a pinned digest is still refused."""
+    catalogue, _, _ = real_recording()
+    game_id = next(g.canonical_game_id for g in catalogue.games if g.slug == "minecraft")
+    forged = ContextObservation(
+        canonical_game_id=game_id,
+        family=ContextFamily.CREATOR_SUPPLY,
+        reference="a sample said to be real",
+        retrieved_at=datetime(2026, 9, 29, tzinfo=UTC),
+        timely_from=datetime(2026, 9, 29, tzinfo=UTC),
+        timely_until=datetime(2026, 10, 29, tzinfo=UTC),
+        provenance=claimed((PINNED_WIKIMEDIA,)),
+    )
+    with pytest.raises(HistoryRefused, match="cannot be checked"):
+        recorded_run(recording_provenance([RECORDINGS]), context=[forged])
+    with pytest.raises(HistoryRefused, match="pinned recording"):
+        recorded_run(
+            recording_provenance([RECORDINGS]),
+            context=[forged.model_copy(update={"provenance": claimed(())})],
+        )
+
+
+def test_the_recorded_command_result_is_unchanged(
+    capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D and G. The honest recorded path still runs, with the same fingerprint and metrics."""
+    monkeypatch.chdir(Path(__file__).parent.parent)
+    code = cli.main(
+        [
+            "opportunity-history",
+            "--recorded",
+            "--replay",
+            "tests/fixtures/wikimedia",
+            "--recorded-through",
+            "2026-10-03",
+            "--from",
+            "2026-07-05",
+            "--to",
+            "2026-10-07",
+            "--json",
+        ]
+    )
+    assert code == cli.EXIT_OK
+    report = OpportunityHistoryReport.model_validate_json(capsys.readouterr().out)
+    assert report.fingerprint == RECORDED_FINGERPRINT
+    metrics = report.metrics
+    assert (metrics.assessments, metrics.candidates, metrics.watchlist, metrics.insufficient) == (
+        546,
+        0,
+        35,
+        511,
+    )
+    assert report.demand_origin.standing.value == "verified"
+
+
+def test_synthetic_stays_synthetic_and_unverified_files_count_nothing(
+    synthetic: OpportunityHistoryReport, tmp_path: Path
+) -> None:
+    """E and F."""
+    assert synthetic.demand_origin.standing.value == "synthetic"
+    assert all(s.verified_families == () for s in synthetic.snapshots)
+    # A byte-altered copy of the pinned recording is unverified files, never verified.
+    copy = tmp_path / "wikimedia"
+    copy.mkdir()
+    for path in RECORDINGS.glob("*.json"):
+        (copy / path.name).write_bytes(path.read_bytes())
+    first = sorted(copy.glob("*.json"))[0]
+    first.write_bytes(first.read_bytes() + b" ")
+    unverified = recording_provenance([copy])
+    assert unverified.origin is Origin.UNVERIFIED_FILES
+    result = recorded_run(unverified)
+    assert result.demand_origin.standing.value == "unverified"
+    assert all(s.readiness is Readiness.INSUFFICIENT for s in result.snapshots)
+    assert all(s.facts.sources_answering == 0 for s in result.snapshots)
