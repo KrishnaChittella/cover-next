@@ -159,6 +159,11 @@ def record_acquisition(
     return draft.model_copy(update={"record_id": _record_id(payload)})
 
 
+def record_id_matches(record: AcquisitionRecord) -> bool:
+    """Whether a record's id is still the digest of its own content: it was not edited."""
+    return record.record_id == _record_id(record.model_dump(mode="json", exclude={"record_id"}))
+
+
 def check_content(record: AcquisitionRecord, raw: bytes) -> None:
     """Refuse bytes that are not the ones the record was made over. Integrity only."""
     if len(raw) != record.content_bytes or hashlib.sha256(raw).hexdigest() != (

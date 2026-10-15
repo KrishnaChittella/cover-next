@@ -57,6 +57,13 @@ WITH_ARTICLES = sorted(
     and any(i.source == "wikimedia_pageviews" for i in g.source_identifiers)
 )
 CONTACT = "owner-contact-CANARY@example.invalid"
+ARTICLES = sorted(
+    i.value
+    for g in CATALOGUE.games
+    if g.slug in WITH_ARTICLES
+    for i in g.source_identifiers
+    if i.source == "wikimedia_pageviews"
+)
 
 
 @pytest.fixture(autouse=True)
@@ -419,7 +426,11 @@ def test_a_failure_stops_the_run_and_keeps_only_what_succeeded(
     assert result.manifest.requests_sent == outcomes.index(failed) + 1
     assert result.manifest.status is RunStatus.PARTIAL
     assert result.manifest.stopped_because is not None
-    assert inspect_recording(tmp_path / "recording", CATALOGUE).problems == ()
+    # I. Intact bytes and records, inspectable for diagnosis, and never pin-ready.
+    inspection = inspect_recording(tmp_path / "recording", CATALOGUE)
+    assert inspection.problems == () and inspection.integrity == "intact"
+    assert inspection.run_status == "partial" and not inspection.review_ready
+    assert "PARTIAL" in inspection.verdict and "NOT ready for pinning" in inspection.verdict
 
 
 def test_a_transport_failure_never_falls_back_to_the_network(tmp_path: Path) -> None:
@@ -552,3 +563,353 @@ def test_a_reviewed_and_pinned_mock_recording_reaches_the_opportunity_engine(
     assert minecraft["readiness"] == "provisional_watchlist"
     assert after["distribution"] == "private_development_only"
     assert not (tmp_path / "artifacts").exists()
+
+
+# --- U6.7.1: acquisition time is enforced; integrity, completeness and readiness differ -------
+
+
+def pin_for_this_test(monkeypatch: pytest.MonkeyPatch, directory: Path) -> None:
+    """A TEST-ONLY trust table. The real PINNED_RECORDINGS is never changed."""
+    digest = recording_digest(directory)
+    pinned = MappingProxyType({**provenance.PINNED_RECORDINGS, digest: "TEST-ONLY"})
+    monkeypatch.setattr(provenance, "PINNED_RECORDINGS", pinned)
+
+
+def evidence_at(
+    as_of: datetime, directory: Path, capsys: pytest.CaptureFixture[str]
+) -> tuple[int, str]:
+    code = cli.main(
+        [
+            "evidence",
+            "--as-of",
+            as_of.isoformat(),
+            "--wikimedia-replay",
+            str(directory),
+            "--recorded-through",
+            DUE.isoformat(),
+            "--opportunities",
+            "--json",
+        ]
+    )
+    captured = capsys.readouterr()
+    return code, captured.out + captured.err
+
+
+def received(directory: Path) -> datetime:
+    check = pageview_recorder.check_recording(directory)
+    assert check.received_until is not None
+    return check.received_until
+
+
+def test_a_response_is_usable_only_after_it_was_received(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A and B, at the command line and at the library boundary, pinned or not."""
+    run(tmp_path, Source())
+    directory = tmp_path / "recording"
+    last = received(directory)
+    for pinned in (False, True):
+        if pinned:
+            pin_for_this_test(monkeypatch, directory)
+        # A. At or after the last receipt: read.
+        code, _ = evidence_at(last, directory, capsys)
+        assert code == cli.EXIT_OK
+        # B. One second before it: refused, and nothing is assessed.
+        code, text = evidence_at(last - timedelta(seconds=1), directory, capsys)
+        assert code == cli.EXIT_SOURCE_POLICY
+        assert "could not have had them" in text and '"assessments"' not in text
+
+    from metaspike.evidence.assemble import assess_evidence
+    from tests.test_evidence import World
+
+    world = World()
+    with replay_client(directory) as client:
+        report = collect(
+            world.state.catalogue,
+            default_registry(client),
+            window_ending(DUE),
+            observed_at=last,
+            clock=lambda: last,
+        )
+    inputs = world.inputs(wikimedia=report, wikimedia_provenance=recording_provenance([directory]))
+    assert inputs.wikimedia_provenance.standing is Standing.VERIFIED  # the test-only pin
+    with pytest.raises(pageview_recorder.RecordingRefused, match="could not have had them"):
+        assess_evidence(inputs, last - timedelta(seconds=1), world.scope)
+    assert assess_evidence(inputs, last, world.scope).as_of == last
+
+
+def test_the_legacy_pinned_fixture_keeps_its_approved_behaviour() -> None:
+    """C. The U6.0.1 pageview fixture has no acquisition records and is not one."""
+    from metaspike.evidence.assemble import assess_evidence
+    from tests.test_evidence import REAL_AS_OF, World
+
+    legacy = Path(__file__).parent / "fixtures" / "wikimedia"
+    honest = recording_provenance([legacy])
+    assert honest.standing is Standing.VERIFIED
+    assert recording_digest(legacy) in pageview_recorder.LEGACY_PAGEVIEW_RECORDINGS
+    assert not pageview_recorder.is_recorder_output(legacy)
+    pageview_recorder.require_usable_recording(honest, REAL_AS_OF)
+    world = World()
+    report = assess_evidence(world.inputs(), REAL_AS_OF, world.scope)
+    assert report.inputs["wikimedia_pageviews"].standing is Standing.VERIFIED
+
+
+def rewrite_records(
+    directory: Path, change: Callable[[list[AcquisitionRecord]], list[str]]
+) -> None:
+    path = directory / ACQUISITION_DIR / RECORDS
+    records = [
+        AcquisitionRecord.model_validate_json(line) for line in path.read_text().splitlines()
+    ]
+    path.write_text("".join(line + "\n" for line in change(records)))
+
+
+def sync_record_ids(directory: Path) -> None:
+    """Point the manifest at the records as they now are, so deeper checks are reached."""
+    records = {
+        AcquisitionRecord.model_validate_json(line).native_ids[0]: line
+        for line in (directory / ACQUISITION_DIR / RECORDS).read_text().splitlines()
+    }
+    path = directory / ACQUISITION_DIR / MANIFEST
+    data = json.loads(path.read_text())
+    for outcome in data["outcomes"]:
+        if outcome["article"] in records:
+            outcome["record_id"] = json.loads(records[outcome["article"]])["record_id"]
+    path.write_text(json.dumps(data))
+
+
+def remade(record: AcquisitionRecord, directory: Path, **changes: object) -> str:
+    """A self-consistent record (its id matches its content) that differs as asked."""
+    from metaspike.domain.source_policy import DeploymentStage, SourcePurpose
+    from metaspike.evidence.acquisition import record_acquisition
+
+    arguments: dict[str, object] = {
+        "policy": WIKIMEDIA_PAGEVIEWS_POLICY,
+        "purpose": SourcePurpose.DEMAND_SIGNALS,
+        "stage": DeploymentStage.PRIVATE_DEVELOPMENT,
+        "request": record.request,
+        "raw": (directory / f"{record.native_ids[0]}.json").read_bytes(),
+        "requested_at": record.requested_at,
+        "received_at": record.received_at,
+        "native_ids": record.native_ids,
+        "bindings": record.bindings,
+    }
+    arguments.update(changes)
+    return record_acquisition(**arguments).model_dump_json()  # type: ignore[arg-type]
+
+
+def problems_after(tmp_path: Path, change: Callable[[Path], None], name: str) -> str:
+    run(tmp_path, Source(), name=name)
+    directory = tmp_path / name
+    change(directory)
+    check = pageview_recorder.check_recording(directory)
+    assert not check.intact and not check.review_ready
+    with pytest.raises(pageview_recorder.RecordingRefused, match="do not hold together"):
+        pageview_recorder.require_usable_recording(
+            recording_provenance([directory]), PLANNED + timedelta(days=1)
+        )
+    return " | ".join(check.problems)
+
+
+def test_altered_missing_duplicate_or_misattributed_records_are_refused(tmp_path: Path) -> None:
+    """D, E, F and G."""
+
+    def edit_manifest(directory: Path) -> None:
+        path = directory / ACQUISITION_DIR / MANIFEST
+        data = json.loads(path.read_text())
+        data["outcomes"][0]["status"] = "no_data"
+        path.write_text(json.dumps(data))
+
+    def edit_plan(directory: Path) -> None:
+        path = directory / ACQUISITION_DIR / MANIFEST
+        data = json.loads(path.read_text())
+        data["plan"]["window_start"] = "2026-07-01"
+        path.write_text(json.dumps(data))
+
+    def edit_record_time(directory: Path) -> None:
+        rewrite_records(
+            directory,
+            lambda records: [
+                r.model_dump_json().replace(
+                    r.received_at.isoformat().replace("+00:00", "Z"), "2026-10-21T00:00:00Z"
+                )
+                if i == 0
+                else r.model_dump_json()
+                for i, r in enumerate(records)
+            ],
+        )
+
+    def drop_record(directory: Path) -> None:
+        rewrite_records(directory, lambda records: [r.model_dump_json() for r in records[1:]])
+
+    def duplicate_record(directory: Path) -> None:
+        rewrite_records(
+            directory, lambda records: [r.model_dump_json() for r in [*records, records[0]]]
+        )
+
+    def wrong_game(directory: Path) -> None:
+        def change(records: list[AcquisitionRecord]) -> list[str]:
+            first = records[0]
+            binding = first.bindings[0].model_copy(
+                update={"canonical_game_id": "00000000-0000-4000-8000-0000000000bb"}
+            )
+            return [remade(first, directory, bindings=(binding,))] + [
+                r.model_dump_json() for r in records[1:]
+            ]
+
+        rewrite_records(directory, change)
+        sync_record_ids(directory)
+
+    def wrong_request(directory: Path) -> None:
+        def change(records: list[AcquisitionRecord]) -> list[str]:
+            first = records[0]
+            return [remade(first, directory, request=first.request + "x")] + [
+                r.model_dump_json() for r in records[1:]
+            ]
+
+        rewrite_records(directory, change)
+        sync_record_ids(directory)
+
+    def wrong_times(directory: Path) -> None:
+        def change(records: list[AcquisitionRecord]) -> list[str]:
+            first = records[0]
+            return [
+                remade(
+                    first,
+                    directory,
+                    requested_at=first.requested_at - timedelta(hours=1),
+                    received_at=first.received_at - timedelta(hours=1),
+                )
+            ] + [r.model_dump_json() for r in records[1:]]
+
+        rewrite_records(directory, change)
+        sync_record_ids(directory)
+
+    def extra_file(directory: Path) -> None:
+        (directory / "notes.txt").write_text("hello")
+
+    expected = {
+        "manifest": (edit_manifest, "yet a body is kept"),
+        "plan": (edit_plan, "plan was edited"),
+        "record-time": (edit_record_time, "edited after it was made"),
+        "drop": (drop_record, "no acquisition record"),
+        "duplicate": (duplicate_record, "more than one acquisition record"),
+        "game": (wrong_game, "binds another game"),
+        "request": (wrong_request, "not the planned request"),
+        "times": (wrong_times, "times are not the request's"),
+        "extra": (extra_file, "unexpected file notes.txt"),
+    }
+    for name, (change, message) in expected.items():
+        assert message in problems_after(tmp_path, change, name), name
+
+
+def test_completeness_and_readiness_are_reported_apart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """H, I, J and K, and the exit codes that say them."""
+    run(tmp_path, Source(), name="complete")
+    run(tmp_path, Source({"Escape_from_Tarkov": httpx.Response(503)}), name="partial")
+    missing = httpx.Response(404, json={"status": 404})
+    run(tmp_path, Source(dict.fromkeys(ARTICLES, missing)), name="empty")
+
+    def unreachable(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("mock: unreachable", request=request)
+
+    plan = plan_recording(CATALOGUE, WITH_ARTICLES, PLANNED, tmp_path / "failed")
+    record_pageviews(plan, CATALOGUE, httpx.MockTransport(unreachable), ticking(), lambda s: None)
+
+    expectations = {
+        "complete": ("complete", True, cli.EXIT_OK, "INTACT AND COMPLETE"),
+        "partial": ("partial", False, cli.EXIT_COLLECTION_FAILED, "INTACT BUT PARTIAL"),
+        "empty": ("failed", False, cli.EXIT_COLLECTION_FAILED, "INTACT BUT FAILED"),
+        "failed": ("failed", False, cli.EXIT_COLLECTION_FAILED, "INTACT BUT FAILED"),
+    }
+    for name, (status, ready, code, verdict) in expectations.items():
+        directory = tmp_path / name
+        inspection = inspect_recording(directory, CATALOGUE)
+        assert inspection.integrity == "intact", name
+        assert (inspection.run_status, inspection.review_ready) == (status, ready), name
+        assert verdict in inspection.verdict
+        assert cli.main(["record-pageviews", "--inspect", str(directory)]) == code
+        assert verdict in capsys.readouterr().out
+    # K. Every target answered "no data": complete in effect, but nothing to stand on.
+    assert inspect_recording(tmp_path / "empty", CATALOGUE).bodies == 0
+    # Unpinned, a partial run may be read privately as unverified: diagnostic, counted
+    # for nothing.
+    pageview_recorder.require_usable_recording(
+        recording_provenance([tmp_path / "partial"]), PLANNED + timedelta(days=1)
+    )
+    # Pinned in a test-only table, a partial, failed or empty run is still refused.
+    for name in ("partial", "empty", "failed"):
+        directory = tmp_path / name
+        pin_for_this_test(monkeypatch, directory)
+        with pytest.raises(pageview_recorder.RecordingRefused, match="never verified demand"):
+            pageview_recorder.require_usable_recording(
+                recording_provenance([directory]), PLANNED + timedelta(days=1)
+            )
+
+
+def test_a_pinned_recording_without_acquisition_records_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deleting the acquisition files never turns a new recording into a legacy one."""
+    pageview_recorder_pins = provenance.PINNED_RECORDINGS
+    run(tmp_path, Source())
+    directory = tmp_path / "recording"
+    for path in (directory / ACQUISITION_DIR).iterdir():
+        path.unlink()
+    (directory / ACQUISITION_DIR).rmdir()
+    pin_for_this_test(monkeypatch, directory)
+    with pytest.raises(pageview_recorder.RecordingRefused, match="must carry its acquisition"):
+        pageview_recorder.require_usable_recording(
+            recording_provenance([directory]), PLANNED + timedelta(days=1)
+        )
+    # Unpinned, it is simply unverified files: read, and counted for nothing.
+    monkeypatch.setattr(provenance, "PINNED_RECORDINGS", pageview_recorder_pins)
+    assert recording_provenance([directory]).standing is Standing.UNVERIFIED
+
+
+def test_history_reconstructs_periods_and_does_not_claim_retrieval(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The two modes, stated and tested.
+
+    A point-in-time reading refuses a moment before receipt (above). A historical
+    evaluation is a retrospective reconstruction of source periods under the
+    publication lag: its moments may precede retrieval, as validation_protocol_v1
+    allows, provided the recording is intact and complete. A partial one is refused.
+    """
+    from metaspike.opportunity.history import EvaluationMode, HistoryRefused, evaluate_history
+
+    run(tmp_path, Source(), name="complete")
+    run(tmp_path, Source({"Escape_from_Tarkov": httpx.Response(503)}), name="partial")
+    lags = {"wikimedia_pageviews": timedelta(days=1)}
+
+    def evaluate(directory: Path) -> object:
+        pin_for_this_test(monkeypatch, directory)
+        with replay_client(directory) as client:
+            report = collect(
+                CATALOGUE,
+                default_registry(client),
+                window_ending(DUE),
+                observed_at=received(directory),
+                clock=lambda: received(directory),
+            )
+        return evaluate_history(
+            CATALOGUE,
+            report,
+            lags,
+            date(2026, 10, 1),
+            date(2026, 10, 3),
+            1,
+            ["minecraft", "gta-v"],
+            recording_provenance([directory]),
+            EvaluationMode.RECORDED,
+            PLANNED,
+        )
+
+    result = evaluate(tmp_path / "complete")
+    assert result.demand_origin.standing is Standing.VERIFIED  # type: ignore[attr-defined]
+    assert all(s.as_of < received(tmp_path / "complete") for s in result.snapshots)  # type: ignore[attr-defined]
+    with pytest.raises(HistoryRefused, match="intact and complete"):
+        evaluate(tmp_path / "partial")

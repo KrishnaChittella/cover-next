@@ -54,6 +54,7 @@ from metaspike.domain.model import FrozenModel
 from metaspike.domain.signals import SourceErrorCode
 from metaspike.domain.source_policy import DeploymentStage, SourcePurpose
 from metaspike.domain.timeseries import Granularity
+from metaspike.evidence import provenance as provenance_module
 from metaspike.evidence.acquisition import (
     AcquisitionRecord,
     ContentMismatch,
@@ -62,8 +63,10 @@ from metaspike.evidence.acquisition import (
     policy_changed,
     policy_digest,
     record_acquisition,
+    record_id_matches,
 )
-from metaspike.evidence.provenance import PINNED_RECORDINGS, recording_digest, recording_provenance
+from metaspike.evidence.model import InputProvenance, Standing
+from metaspike.evidence.provenance import recording_digest, recording_provenance
 from metaspike.features.attention import HISTORY_DAYS
 from metaspike.pipeline.collection import collect, window_ending
 from metaspike.pipeline.normalize import latest_due_period
@@ -550,14 +553,309 @@ def record_pageviews(
     return RecordingResult(destination, manifest, tuple(records))
 
 
+# --- checking a recording ----------------------------------------------------------------
+
+# Pageview recordings pinned before acquisition records existed (U6.0.1). They are
+# retrospective fixtures: when each response was retrieved is not recorded, so they are
+# read under the backtest's publication-lag assumptions and never as a point-in-time
+# acquisition. Every recording pinned after them must carry valid acquisition records.
+LEGACY_PAGEVIEW_RECORDINGS: Final = frozenset(
+    {"260d787eda9046d7a07fbc9765309ebc1e2a95041ce8a5a51f0524c0c593b098"}
+)
+_ACQUISITION_FILES: Final = frozenset({MANIFEST, RECORDS})
+
+
+class RecordingRefused(ValueError):
+    """A recording that must not be read as it was asked to be."""
+
+
+@dataclass(frozen=True)
+class RecordingCheck:
+    """What the files of a recorder-made directory establish, and what they do not.
+
+    Three separate answers:
+
+        integrity     the manifest, records and bodies agree with each other and with
+                      the plan, and nothing was added or changed (`problems` is empty)
+        completeness  the run itself: complete, partial or failed
+        review_ready  intact AND complete AND at least one body kept: the only state an
+                      owner may take into the normal review-and-pin process
+
+    None of them is verified provenance. Only an owner's approval of a reviewed
+    recording, and a pinned digest, is that.
+    """
+
+    directory: Path
+    problems: tuple[str, ...]
+    manifest: Manifest | None
+    records: tuple[AcquisitionRecord, ...]
+    bodies: tuple[Path, ...]
+
+    @property
+    def intact(self) -> bool:
+        return not self.problems
+
+    @property
+    def run_status(self) -> RunStatus | None:
+        return None if self.manifest is None else self.manifest.status
+
+    @property
+    def recorded(self) -> int:
+        if self.manifest is None:
+            return 0
+        return sum(o.status is TargetStatus.RECORDED for o in self.manifest.outcomes)
+
+    @property
+    def review_ready(self) -> bool:
+        return self.intact and self.run_status is RunStatus.COMPLETE and self.recorded > 0
+
+    @property
+    def received_until(self) -> datetime | None:
+        """The latest moment any kept response arrived. Nothing is usable before it."""
+        return max((r.received_at for r in self.records), default=None)
+
+
+def is_recorder_output(directory: Path) -> bool:
+    """Whether a directory says it was made by this recorder (it has acquisition files)."""
+    return (directory / ACQUISITION_DIR).exists()
+
+
+def _plan_id_matches(plan: RecordingPlan) -> bool:
+    identity = plan.model_dump(mode="json", exclude={"plan_id", "planned_at", "latest_due_day"})
+    return plan.plan_id == content_id("plan", identity)
+
+
+def check_recording(directory: Path) -> RecordingCheck:
+    """Validate a recorder-made directory against itself. Reads; changes nothing."""
+    problems: list[str] = []
+    acquisition = directory / ACQUISITION_DIR
+    manifest: Manifest | None = None
+    records: list[AcquisitionRecord] = []
+    try:
+        manifest = Manifest.model_validate_json((acquisition / MANIFEST).read_text("utf-8"))
+    except FileNotFoundError:
+        problems.append("no acquisition manifest")
+    except ValueError as error:
+        problems.append(f"the acquisition manifest is not valid ({type(error).__name__})")
+    try:
+        for number, line in enumerate(
+            (acquisition / RECORDS).read_text("utf-8").splitlines(), start=1
+        ):
+            if line.strip():
+                try:
+                    records.append(AcquisitionRecord.model_validate_json(line))
+                except ValueError:
+                    problems.append(f"acquisition record {number} is not valid")
+    except FileNotFoundError:
+        problems.append("no acquisition records file")
+
+    # Nothing but bodies at the top, and nothing but the two acquisition files beside them.
+    bodies = tuple(sorted(p for p in directory.iterdir() if p.is_file() and p.suffix == ".json"))
+    for path in sorted(directory.iterdir()):
+        if path.is_dir() and path.name != ACQUISITION_DIR:
+            problems.append(f"unexpected directory {path.name}/")
+        elif path.is_file() and path.suffix != ".json":
+            problems.append(f"unexpected file {path.name}")
+    if acquisition.is_dir():
+        for path in sorted(acquisition.iterdir()):
+            if path.name not in _ACQUISITION_FILES:
+                problems.append(f"unexpected file {ACQUISITION_DIR}/{path.name}")
+
+    by_article: dict[str, AcquisitionRecord] = {}
+    for record in records:
+        if not record_id_matches(record):
+            problems.append(f"{record.record_id}: the record was edited after it was made")
+        if len(record.native_ids) != 1:
+            problems.append(f"{record.record_id}: a record names exactly one article")
+            continue
+        article = record.native_ids[0]
+        if article in by_article:
+            problems.append(f"{article}: more than one acquisition record")
+        by_article[article] = record
+        if record.requested_at > record.received_at:
+            problems.append(f"{article}: received before it was requested")
+
+    for path in bodies:
+        held = by_article.get(path.stem)
+        if held is None:
+            problems.append(f"{path.name}: no acquisition record")
+            continue
+        try:
+            check_content(held, path.read_bytes())
+        except ContentMismatch as mismatch:
+            problems.append(f"{path.name}: {mismatch}")
+        if policy_changed(held, WIKIMEDIA_PAGEVIEWS_POLICY):
+            problems.append(f"{path.name}: the source policy changed since acquisition")
+    for article in sorted(set(by_article) - {p.stem for p in bodies}):
+        problems.append(f"{article}.json: has a record but no body")
+
+    if manifest is not None:
+        problems += _manifest_problems(manifest, by_article, bodies, directory)
+    return RecordingCheck(directory, tuple(problems), manifest, tuple(records), bodies)
+
+
+def _manifest_problems(
+    manifest: Manifest,
+    by_article: dict[str, AcquisitionRecord],
+    bodies: tuple[Path, ...],
+    directory: Path,
+) -> list[str]:
+    problems: list[str] = []
+    plan = manifest.plan
+    if not _plan_id_matches(plan):
+        problems.append("the manifest's plan was edited after it was made")
+    planned = {r.slug: r for r in plan.requests}
+    targets = {t.slug: t for t in plan.targets}
+    if [o.slug for o in manifest.outcomes] != [r.slug for r in plan.requests]:
+        problems.append("the outcomes are not the planned targets in planned order")
+    kept: set[str] = set()
+    attempted = 0
+    seen_not_attempted = False
+    for outcome in manifest.outcomes:
+        request, target = planned.get(outcome.slug), targets.get(outcome.slug)
+        if request is None or target is None or outcome.article != target.article:
+            problems.append(f"{outcome.slug}: not a planned target and article")
+            continue
+        if outcome.status is TargetStatus.NOT_ATTEMPTED:
+            seen_not_attempted = True
+            if outcome.exchange is not None or outcome.file is not None:
+                problems.append(f"{outcome.slug}: not attempted, yet has an answer or a file")
+            continue
+        if seen_not_attempted:
+            problems.append(f"{outcome.slug}: attempted after the run had stopped")
+        attempted += 1
+        exchange = outcome.exchange
+        if exchange is not None and (
+            exchange.method != request.method or exchange.path != request.path or exchange.query
+        ):
+            problems.append(f"{outcome.slug}: the request sent was not the planned request")
+        if exchange is not None and not (
+            plan.planned_at <= exchange.requested_at <= exchange.received_at
+        ):
+            problems.append(f"{outcome.slug}: request times are out of order")
+        if outcome.status is not TargetStatus.RECORDED:
+            if outcome.file is not None or outcome.record_id is not None:
+                problems.append(f"{outcome.slug}: {outcome.status.value}, yet a body is kept")
+            continue
+        name = f"{target.article}.json"
+        record = by_article.get(target.article)
+        if outcome.file != name or record is None or outcome.record_id != record.record_id:
+            problems.append(f"{outcome.slug}: the outcome does not name its body and record")
+            continue
+        kept.add(name)
+        binding = record.bindings[0] if len(record.bindings) == 1 else None
+        if (
+            binding is None
+            or binding.native_id != target.article
+            or binding.canonical_game_id != target.canonical_game_id
+            or binding.bound_from != target.bound_from
+        ):
+            problems.append(f"{outcome.slug}: the record binds another game or article")
+        if record.request != f"{request.method} {request.path}":
+            problems.append(f"{outcome.slug}: the record's request is not the planned request")
+        if record.policy_digest != plan.policy_digest or record.source != plan.source:
+            problems.append(f"{outcome.slug}: the record's source or policy is not the plan's")
+        if exchange is None or (
+            record.requested_at != exchange.requested_at
+            or record.received_at != exchange.received_at
+        ):
+            problems.append(f"{outcome.slug}: the record's times are not the request's")
+    if kept != {p.name for p in bodies}:
+        problems.append("the bodies on disk are not the bodies the manifest lists")
+    if set(by_article) != {Path(name).stem for name in kept}:
+        problems.append("the records are not the records the manifest lists")
+    if manifest.requests_sent != attempted:
+        problems.append(
+            f"the manifest says {manifest.requests_sent} requests were sent, but "
+            f"{attempted} targets were attempted"
+        )
+    if seen_not_attempted and manifest.stopped_because is None:
+        problems.append("targets were not attempted, yet the run says it did not stop")
+    if manifest.bodies_digest != recording_digest(directory):
+        problems.append("the bodies' digest is not the one written at acquisition")
+    recorded = len(kept)
+    answered = all(
+        o.status in (TargetStatus.RECORDED, TargetStatus.NO_DATA) for o in manifest.outcomes
+    )
+    expected = (
+        RunStatus.COMPLETE
+        if answered and recorded
+        else RunStatus.PARTIAL
+        if recorded
+        else RunStatus.FAILED
+    )
+    if manifest.status is not expected:
+        problems.append(
+            f"the run status says {manifest.status.value}, the outcomes say {expected.value}"
+        )
+    return problems
+
+
+def require_usable_recording(provenance: InputProvenance, as_of: datetime) -> None:
+    """Refuse a point-in-time reading that would use a response before it was received.
+
+    For every directory a pageview input names: a recorder-made recording must be
+    intact, and no response in it may have been received after `as_of`; read as
+    verified, it must also be review-ready. A verified (pinned) recording without
+    acquisition records is accepted only if it is a legacy retrospective fixture.
+    Raises RecordingRefused; changes nothing.
+    """
+    verified = provenance.standing is Standing.VERIFIED
+    for reference in (part.strip() for part in provenance.reference.split(",")):
+        directory = Path(reference)
+        if not reference or not directory.is_dir() or not is_recorder_output(directory):
+            continue
+        check = check_recording(directory)
+        if check.problems:
+            raise RecordingRefused(
+                f"{directory}: the recording's acquisition files do not hold together "
+                f"({check.problems[0]}{'; ...' if len(check.problems) > 1 else ''})"
+            )
+        received = check.received_until
+        if received is not None and as_of < received:
+            raise RecordingRefused(
+                f"{directory}: responses in it were received up to {received.isoformat()}; "
+                f"a reading at {as_of.isoformat()} could not have had them"
+            )
+        if verified and not check.review_ready:
+            raise RecordingRefused(
+                f"{directory}: a {check.run_status.value if check.run_status else 'broken'} "
+                "recording is never verified demand evidence"
+            )
+    if verified:
+        unaccounted = [
+            digest
+            for digest, reference in zip(
+                provenance.digests,
+                (part.strip() for part in provenance.reference.split(",")),
+                strict=False,
+            )
+            if digest not in LEGACY_PAGEVIEW_RECORDINGS
+            and not (Path(reference).is_dir() and is_recorder_output(Path(reference)))
+        ]
+        if unaccounted or len(provenance.digests) != len(provenance.reference.split(",")):
+            raise RecordingRefused(
+                f"{provenance.reference}: a pinned pageview recording made after the legacy "
+                "fixtures must carry its acquisition records"
+            )
+
+
 # --- inspection --------------------------------------------------------------------------
 
 
 class Inspection(FrozenModel):
     directory: str
-    status: str
+    # Integrity of the files: manifest, records and bodies agree, nothing changed or added.
+    integrity: Literal["intact", "problems found"]
+    # What the run did: complete, partial or failed.
+    run_status: str
+    # Only an intact, complete run with at least one body may be taken to review and
+    # pinning. Integrity is never provenance: this says nothing about who sent the bytes.
+    review_ready: bool
+    verdict: str
     bodies: int
     records: int
+    recorded: int
     problems: tuple[str, ...]
     digest: str
     pinned: bool
@@ -570,44 +868,14 @@ class Inspection(FrozenModel):
 
 
 def inspect_recording(directory: Path, catalogue: Catalogue) -> Inspection:
-    """Everything a reviewer checks before approving a pin. Reads; changes nothing."""
-    problems: list[str] = []
-    manifest_path = directory / ACQUISITION_DIR / MANIFEST
-    records_path = directory / ACQUISITION_DIR / RECORDS
-    manifest: Manifest | None = None
-    records: list[AcquisitionRecord] = []
-    if not manifest_path.is_file() or not records_path.is_file():
-        problems.append("no acquisition manifest or records: not a recording made here")
-    else:
-        manifest = Manifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
-        records = [
-            AcquisitionRecord.model_validate_json(line)
-            for line in records_path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
-    bodies = sorted(p for p in directory.glob("*.json") if p.is_file())
-    by_article = {r.native_ids[0]: r for r in records}
-    if len(by_article) != len(records):
-        problems.append("more than one acquisition record for the same article")
-    for path in bodies:
-        record = by_article.get(path.stem)
-        if record is None:
-            problems.append(f"{path.name}: no acquisition record")
-            continue
-        try:
-            check_content(record, path.read_bytes())
-        except ContentMismatch as mismatch:
-            problems.append(f"{path.name}: {mismatch}")
-        if policy_changed(record, WIKIMEDIA_PAGEVIEWS_POLICY):
-            problems.append(f"{path.name}: the source policy changed since acquisition")
-    for article in set(by_article) - {p.stem for p in bodies}:
-        problems.append(f"{article}.json: recorded in the manifest, missing on disk")
-    if manifest is not None:
-        kept = {o.file for o in manifest.outcomes if o.file is not None}
-        if kept != {p.name for p in bodies}:
-            problems.append("the files on disk are not the files the manifest lists")
-        if manifest.bodies_digest != recording_digest(directory):
-            problems.append("the bodies' digest is not the one written at acquisition")
+    """Everything a reviewer checks before approving a pin. Reads; changes nothing.
+
+    A partial or failed run is still inspected in full, for diagnosis, and reported as
+    such: it is never described as ready for the normal pinning process.
+    """
+    check = check_recording(directory)
+    problems = list(check.problems)
+    manifest, records, bodies = check.manifest, check.records, check.bodies
     replayed = 0
     if manifest is not None and bodies:
         with replay_client(directory) as client:
@@ -615,28 +883,42 @@ def inspect_recording(directory: Path, catalogue: Catalogue) -> Inspection:
                 catalogue,
                 default_registry(client),
                 window_ending(manifest.plan.window_end),
-                observed_at=max(r.received_at for r in records) if records else MIGRATED_AT,
-                clock=lambda: MIGRATED_AT,
+                observed_at=check.received_until or manifest.plan.planned_at,
+                clock=lambda: manifest.plan.planned_at,
             )
         replayed = sum(1 for run in report.runs for s in run.outcomes if s.series is not None)
         if replayed != len(bodies):
             problems.append(f"{len(bodies)} bodies, but {replayed} replayed as a series")
     digest = recording_digest(directory)
-    provenance = recording_provenance([directory])
+    status = "unknown" if check.run_status is None else check.run_status.value
+    intact = not problems
+    ready = intact and check.review_ready
+    if not intact:
+        verdict = "PROBLEMS FOUND: not a usable recording"
+    elif ready:
+        verdict = "INTACT AND COMPLETE: ready for owner review (still UNVERIFIED)"
+    elif check.run_status is RunStatus.PARTIAL:
+        verdict = "INTACT BUT PARTIAL: diagnostic only, NOT ready for pinning"
+    else:
+        verdict = "INTACT BUT FAILED: nothing usable was recorded, NOT ready for pinning"
     return Inspection(
         directory=str(directory),
-        status="no problems found" if not problems else f"{len(problems)} problem(s)",
+        integrity="intact" if intact else "problems found",
+        run_status=status,
+        review_ready=ready,
+        verdict=verdict,
         bodies=len(bodies),
         records=len(records),
+        recorded=check.recorded,
         problems=tuple(problems),
         digest=digest,
-        pinned=digest in PINNED_RECORDINGS,
-        standing=provenance.standing.value,
+        pinned=digest in provenance_module.PINNED_RECORDINGS,
+        standing=recording_provenance([directory]).standing.value,
         replayed_series=replayed,
         window_start=None if manifest is None else manifest.plan.window_start,
         window_end=None if manifest is None else manifest.plan.window_end,
         acquired_from=min((r.requested_at for r in records), default=None),
-        acquired_until=max((r.received_at for r in records), default=None),
+        acquired_until=check.received_until,
     )
 
 
@@ -685,14 +967,18 @@ def render_manifest(manifest: Manifest, directory: Path) -> str:
 
 def render_inspection(inspection: Inspection) -> str:
     lines = [
-        f"RECORDING INSPECTION: {inspection.status}",
+        f"RECORDING INSPECTION: {inspection.verdict}",
         f"  directory: {inspection.directory}",
+        f"  integrity: {inspection.integrity}; run: {inspection.run_status}; "
+        f"review-ready: {'yes' if inspection.review_ready else 'NO'}",
         f"  bodies {inspection.bodies}, acquisition records {inspection.records}, "
-        f"replayed series {inspection.replayed_series}",
+        f"recorded targets {inspection.recorded}, replayed series {inspection.replayed_series}",
         f"  window {inspection.window_start} to {inspection.window_end}; acquired "
         f"{inspection.acquired_from} to {inspection.acquired_until}",
         f"  digest: {inspection.digest}",
         f"  pinned: {'yes' if inspection.pinned else 'no'}; standing: {inspection.standing}",
+        "  Integrity is not provenance: only an owner's approval of a reviewed recording, "
+        "and a pinned digest, makes it verified.",
     ]
     lines += [f"  PROBLEM: {p}" for p in inspection.problems]
     lines.append("")

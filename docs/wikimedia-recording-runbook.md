@@ -106,17 +106,33 @@ mistaken for a recording. Delete it.
 uv run metaspike record-pageviews --inspect .metaspike/recordings/wikimedia-YYYYMMDD
 ```
 
-It checks:
+It checks **integrity**, meaning that the files hold together and nothing changed or
+was added:
 
 - every body against its acquisition record (SHA-256 and length);
-- that every file has a record, and every record a file;
-- that the files are exactly those the manifest lists;
+- that each record's id is still the digest of its own content;
+- that each kept body has exactly one record, and each record a body;
+- that each recorded outcome names its file and record id;
+- that each record's article and game binding are the plan's;
+- that each record's request is the planned `GET <path>`;
+- that each record's times equal its request's, all after the plan;
+- that statuses and the request count agree;
+- that the plan's id still matches its content;
+- that there is no other file or directory;
 - that the bodies' digest equals the one written at acquisition;
 - that the source policy is unchanged since acquisition;
 - that every body replays through the existing `replay_client` as a series.
 
-It also prints the window, the acquisition times, the digest, whether it is pinned, and
-the standing, which is **unverified** until pinned. Any problem gives exit code 4.
+It reports three things separately: **integrity**, **run status** (complete, partial or
+failed) and **review-ready**.
+
+| Verdict | Exit code | Meaning |
+|---|---|---|
+| `INTACT AND COMPLETE: ready for owner review` | 0 | Integrity holds, the run is complete, and at least one body was kept. Only this state goes to review. |
+| `INTACT BUT PARTIAL` or `INTACT BUT FAILED` | 3 | Fully inspectable for diagnosis, and NOT ready for pinning. "Failed" includes a run in which every target answered "no data". |
+| `PROBLEMS FOUND` | 4 | Not a usable recording. |
+
+Integrity is not provenance: even a ready recording is **unverified** until it is pinned.
 
 A reviewer also reads `acquisition/manifest.json` directly. It holds, per request:
 
@@ -157,10 +173,25 @@ To refresh the private UI report, run the same command with `--json --out
 .metaspike/private/opportunities/verified.json`, then open `/opportunities` with
 `METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev` in `apps/dev-ui`.
 
-The `--as-of` moment must not precede the recording's received times. A recording made
-today is not evidence of what was visible at an earlier moment. Its values are used under
-the existing backtest assumptions, and a revision the source made earlier cannot be seen
-in it.
+**Enforced: no reading before receipt.** For any directory with acquisition files, a
+point-in-time reading at an `--as-of` earlier than the last `received_at` is refused, with
+exit code 5 and nothing assessed. The refusal happens at the command line and inside
+`assess_evidence`, so a library caller is held to it too.
+
+A recorder directory whose acquisition files do not hold together is refused outright.
+Read as verified (pinned), the directory must also be review-ready, and a pinned pageview
+recording without acquisition records is refused. The only exception is the legacy U6.0.1
+fixture, which predates acquisition records.
+
+**Two modes, kept apart.**
+
+- **Point in time.** `evidence`, and the private UI, read only what had been received by
+  `--as-of`.
+- **Retrospective.** `opportunity-history` reconstructs *source periods* under the
+  publication lag (`validation_protocol_v1`). Its moments may precede the recording's
+  retrieval. That is a reconstruction, not a claim that a response was retrieved then.
+  It still requires an intact, complete recording, and a revision the source made
+  earlier cannot be seen in it.
 
 ## 6. Discard or roll back
 

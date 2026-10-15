@@ -79,6 +79,11 @@ from metaspike.opportunity.rules import (
     ordering_key,
     readiness,
 )
+from metaspike.pageview_recorder import (
+    LEGACY_PAGEVIEW_RECORDINGS,
+    check_recording,
+    is_recorder_output,
+)
 from metaspike.pipeline.collection import CollectionReport, collect
 from metaspike.pipeline.signal_features import wikimedia_family_v2
 from metaspike.scoring.v0 import V0_INPUT_SIGNAL
@@ -1004,6 +1009,23 @@ def _check_origin(
     if not directory.is_dir() or recording_digest(directory) != demand.digests[0]:
         raise HistoryRefused(
             f"{demand.reference}: the directory no longer has the claimed pinned content"
+        )
+    # A recorder-made recording must hold together and be complete. Its acquisition
+    # times are NOT compared with the simulated moments: a historical evaluation is a
+    # retrospective reconstruction of source periods under the publication lag, not a
+    # claim that a response was retrieved at each moment (U6.7.1). A point-in-time
+    # reading (assess_evidence) does enforce them.
+    if is_recorder_output(directory):
+        check = check_recording(directory)
+        if check.problems or not check.review_ready:
+            raise HistoryRefused(
+                f"{demand.reference}: a recording that is not intact and complete is never "
+                "verified demand evidence"
+            )
+    elif demand.digests[0] not in LEGACY_PAGEVIEW_RECORDINGS:
+        raise HistoryRefused(
+            f"{demand.reference}: a pinned recording made after the legacy fixtures must "
+            "carry its acquisition records"
         )
     with replay_client(directory) as client:
         replayed = collect(

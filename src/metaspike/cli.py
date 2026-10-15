@@ -93,12 +93,14 @@ from metaspike.opportunity.rules import shortlist as opportunity_shortlist
 from metaspike.pageview_recorder import (
     MAX_GAMES,
     RecorderRefused,
+    RecordingRefused,
     inspect_recording,
     plan_recording,
     record_pageviews,
     render_inspection,
     render_manifest,
     render_plan,
+    require_usable_recording,
 )
 from metaspike.pipeline.collection import (
     CollectionReport,
@@ -1684,6 +1686,11 @@ def _evidence(args: argparse.Namespace) -> int:
         pageviews = recording_provenance(
             [args.wikimedia_replay], f"recorded through {args.recorded_through.isoformat()}"
         )
+        try:
+            # Checked again inside assess_evidence; here it fails with a clear message.
+            require_usable_recording(pageviews, as_of)
+        except RecordingRefused as error:
+            return _fail(EXIT_SOURCE_POLICY, str(error))
 
     def stores(
         samples_dir: Path | None,
@@ -1853,7 +1860,11 @@ def _record_pageviews(args: argparse.Namespace) -> int:
             print(inspection.model_dump_json(indent=1))
         else:
             print(render_inspection(inspection), end="")
-        return EXIT_OK if not inspection.problems else EXIT_INVALID_OUTPUT
+        # 0: intact, complete, ready for owner review. 3: intact but partial or failed,
+        # diagnostic only. 4: the files do not hold together.
+        if inspection.problems:
+            return EXIT_INVALID_OUTPUT
+        return EXIT_OK if inspection.review_ready else EXIT_COLLECTION_FAILED
     if args.game and args.all_bootstrap:
         return _fail(EXIT_INVALID_CATALOGUE, "--game and --all-bootstrap cannot be combined")
     if args.out is None:
