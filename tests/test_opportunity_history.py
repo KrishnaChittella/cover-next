@@ -702,7 +702,7 @@ def test_exploratory_sensitivity_is_labelled_and_decides_nothing(
 PINNED_WIKIMEDIA = "260d787eda9046d7a07fbc9765309ebc1e2a95041ce8a5a51f0524c0c593b098"
 PINNED_CATALOGUE = "a23a6d22394b66674fb4ef943eaadbda581434690d4144ad8b85155cadbe6533"
 # The recorded CLI's published result (U6.5 handoff), which must not move.
-RECORDED_FINGERPRINT = "ophist_b1d2af287f618f8ab1dbc9634b5b1292"
+RECORDED_FINGERPRINT = "ophist_16c1e527557282abca394e4e7ef42b0e"
 
 
 def recorded_run(

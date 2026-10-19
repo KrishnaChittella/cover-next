@@ -114,6 +114,25 @@ DEMAND_FAMILY: Final = SourceFamily.WIKIMEDIA_READERSHIP
 PLAYERS_FAMILY: Final = "steam_concurrent_players"
 
 
+def _stable(value: object) -> object:
+    """Floats to 9 significant digits, so a fingerprint does not depend on the platform.
+
+    log1p and expm1 come from the C library, and glibc and macOS can differ in the last bit.
+    The reported numbers are untouched; only the bytes that are hashed are rounded.
+    """
+    if isinstance(value, float):
+        return float(f"{value:.9g}")
+    if isinstance(value, dict):
+        return {k: _stable(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_stable(v) for v in value]
+    return value
+
+
+def _stable_id(prefix: str, payload: object) -> str:
+    return content_id(prefix, _stable(payload))
+
+
 class EvaluationMode(StrEnum):
     RECORDED = "recorded"
     SYNTHETIC = "synthetic"
@@ -659,7 +678,7 @@ def _freeze(
         )
         payload = draft_snapshot.model_dump(mode="json", exclude={"fingerprint"})
         frozen.append(
-            draft_snapshot.model_copy(update={"fingerprint": content_id("opsnap", payload)})
+            draft_snapshot.model_copy(update={"fingerprint": _stable_id("opsnap", payload)})
         )
     return tuple(frozen)
 
@@ -1138,7 +1157,7 @@ def evaluate_history(
     }
     draft = OpportunityHistoryReport.model_validate({**fields, "fingerprint": "ophist_" + "0" * 32})
     payload = draft.model_dump(mode="json", exclude={"fingerprint"})
-    return draft.model_copy(update={"fingerprint": content_id("ophist", payload)})
+    return draft.model_copy(update={"fingerprint": _stable_id("ophist", payload)})
 
 
 # --- rendering ---------------------------------------------------------------------------
