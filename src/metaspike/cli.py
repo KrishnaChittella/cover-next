@@ -145,6 +145,8 @@ from metaspike.sources.registry import SourcePolicyError, SourceRegistry, defaul
 from metaspike.sources.replay import replay_client
 from metaspike.sources.sampling_sources import (
     build_steam_players,
+    replay_clock,
+    replay_recorded_apps,
     replay_sampling_client,
     sampling_registry,
 )
@@ -1467,15 +1469,36 @@ def _sample(args: argparse.Namespace) -> int:
     if scheduled_for is not None and scheduled_for.tzinfo is None:
         scheduled_for = scheduled_for.replace(tzinfo=UTC)
     replaying = args.replay is not None
+    clock = _now
+    unrecorded: list[str] = []
+    if replaying:
+        # A replay answers only what was recorded, dated when it was recorded. An app
+        # with no recording is not asked: replaying it would invent a failed attempt.
+        try:
+            clock = replay_clock(args.replay)
+        except ValueError as error:
+            return _fail(EXIT_COLLECTION_FAILED, str(error))
+        if scheduled_for is not None and scheduled_for > clock():
+            return _fail(
+                EXIT_COLLECTION_FAILED,
+                "a replay is dated when it was recorded: --scheduled-for is after the recording",
+            )
+        held = replay_recorded_apps(args.replay)
+        unrecorded = sorted(
+            (t.source_native_id for t in targets if t.source_native_id not in held), key=int
+        )
+        targets = [t for t in targets if t.source_native_id in held]
     pool = LimiterPool() if replaying else default_limiter_pool()
     with replay_sampling_client(args.replay) if replaying else build_client() as client:
         adapter = build_steam_players(
-            client, pool, api_key=Secret("replay-no-key") if replaying else None
+            client, pool, now=clock, api_key=Secret("replay-no-key") if replaying else None
         )
         registry = sampling_registry(adapter)
         store = LocalSampleStore(args.store_dir, registry.policy)
-        report = run_sampling_slot(targets, adapter, store, now=_now, scheduled_for=scheduled_for)
+        report = run_sampling_slot(targets, adapter, store, now=clock, scheduled_for=scheduled_for)
     _print_sampling(report, len(targets))
+    if replaying:
+        print(f"Not sampled (no recording): {', '.join(unrecorded) or '-'}")
     in_scope = [e for e in eligibility if e.canonical_game_id in bootstrap_scope()]
     for state_name in (SourceEligibility.INELIGIBLE, SourceEligibility.UNKNOWN):
         names = sorted(e.slug for e in in_scope if e.state is state_name)

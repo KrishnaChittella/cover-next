@@ -557,27 +557,47 @@ def test_sample_runs_one_slot_and_is_safe_to_rerun(
     recorded_count = str(recorded()["response"]["body"]["response"]["player_count"])
     assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
     first = capsys.readouterr().out
-    assert "Targets 8: 1 observed, 0 unavailable, 7 failed, 0 refused, 0 skipped" in first
-    assert "8 requests sent" in first
+    # A replay asks only what was recorded: one app. The seven other eligible apps are
+    # not asked, so no failed attempt is invented for them.
+    assert "Targets 1: 1 observed, 0 unavailable, 0 failed, 0 refused, 0 skipped" in first
+    assert "1 requests sent" in first
+    assert (
+        "Not sampled (no recording): "
+        + ", ".join(sorted((a for a in EIGHT_APPS if a != "730"), key=int))
+        in first
+    )
     assert "Not sampled (unknown): gta-v, minecraft" in first
     assert "Not sampled (ineligible): fivem, fortnite, gta-online, gta-vi, star-citizen" in first
     assert recorded_count not in first  # values go to the store, not the screen
 
     store = LocalSampleStore(tmp_path / "samples", lambda _: STEAM_CURRENT_PLAYERS_POLICY)
-    assert store.native_ids(SIGNAL) == tuple(sorted(EIGHT_APPS, key=int))
-    now = datetime.now(UTC)
-    slot = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(now), now)
-    if slot.state is SlotState.OBSERVED:  # unless the test straddled a slot boundary
-        assert str(slot.value) == recorded_count
-        assert (
-            slot.selected is not None
-            and SampleFlag.ZERO_REPORTED not in slot.selected.quality_flags
-        )
+    assert store.native_ids(SIGNAL) == ("730",)
+    # Dated when Steam answered, not when the recording was replayed.
+    recorded_at = datetime.fromisoformat(recorded()["recorded_at"])
+    now = recorded_at + timedelta(minutes=1)
+    slot = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(recorded_at), now)
+    assert slot.state is SlotState.OBSERVED and str(slot.value) == recorded_count
+    assert slot.selected is not None
+    assert SampleFlag.ZERO_REPORTED not in slot.selected.quality_flags
+    assert recorded_at <= slot.selected.observed_at < recorded_at + timedelta(seconds=1)
 
-        assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
-        second = capsys.readouterr().out
-        assert "app 730       already_observed" in second
-        assert "7 requests sent" in second  # only the failed apps were retried
+    # Replaying the same recording again replays the same moment: the answer is stored
+    # once more, dated exactly as before, and the slot still resolves to the same value.
+    assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
+    capsys.readouterr()
+    again = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(recorded_at), now)
+    assert again.state is SlotState.OBSERVED and str(again.value) == recorded_count
+    assert all(
+        recorded_at <= a.observed_at < recorded_at + timedelta(seconds=1) for a in again.attempts
+    )
+
+    # A replay cannot be filed under a later slot than the one it was recorded in.
+    later = (recorded_at + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+    assert (
+        cli.main([*sample_arguments(tmp_path), "--scheduled-for", later.isoformat()])
+        == cli.EXIT_COLLECTION_FAILED
+    )
+    assert "after the recording" in capsys.readouterr().err
     # Nothing was scheduled: the command ran once and left no job behind.
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "samples",
@@ -627,7 +647,7 @@ def test_sample_status_reports_health_and_never_a_value_or_a_secret(
     }
     assert status["derived_metrics_allowed"] == "unknown" and status["publishable"] is False
     assert status["quota_per_day"] == 100_000 and status["quota_remaining_today"] == 90_000
-    assert [row["source_native_id"] for row in status["targets"]] == sorted(EIGHT_APPS, key=int)
+    assert [row["source_native_id"] for row in status["targets"]] == ["730"]
     assert all("value" not in row for row in status["targets"])
     assert all(row["slots"] == 96 for row in status["targets"])
 
@@ -731,7 +751,7 @@ def test_the_sampler_reuses_a_state_only_with_the_evidence_it_was_made_from(
     # at private development, by the first sampling run.
     assert cli.main(arguments) == cli.EXIT_OK
     first = capsys.readouterr().out
-    assert "Targets 8:" in first and "8 requests sent" in first
+    assert "Targets 1:" in first and "1 requests sent" in first
     assert len(opened) == 1
     state_file, provenance_file = work / "state.json", work / "state.provenance.json"
     provenance = json.loads(provenance_file.read_text())
@@ -743,9 +763,9 @@ def test_the_sampler_reuses_a_state_only_with_the_evidence_it_was_made_from(
     # B, G. Reused with the complete records, across several slots: accepted, and the
     # state and its provenance are never rewritten.
     kept = (state_file.read_bytes(), provenance_file.read_bytes())
-    for slot in ("2026-10-07T10:15:00+00:00", "2026-10-07T10:30:00+00:00"):
+    for slot in ("2026-10-06T01:00:00+00:00", "2026-10-06T01:15:00+00:00"):
         assert cli.main([*arguments, "--scheduled-for", slot]) == cli.EXIT_OK
-        assert "Targets 8:" in capsys.readouterr().out
+        assert "Targets 1:" in capsys.readouterr().out
         assert (state_file.read_bytes(), provenance_file.read_bytes()) == kept
     assert len(opened) == 3
     # I. The same eligibility as before: the targets are the same eight apps.
@@ -821,6 +841,6 @@ def test_the_sampler_reuses_a_state_only_with_the_evidence_it_was_made_from(
     # Restored, the complete evidence is accepted again.
     provenance_file.write_bytes(provenance_bytes)
     assert tree(work) == before
-    assert cli.main([*arguments, "--scheduled-for", "2026-10-07T10:45:00+00:00"]) == cli.EXIT_OK
-    assert "Targets 8:" in capsys.readouterr().out
+    assert cli.main([*arguments, "--scheduled-for", "2026-10-06T00:45:00+00:00"]) == cli.EXIT_OK
+    assert "Targets 1:" in capsys.readouterr().out
     assert len(opened) == 4

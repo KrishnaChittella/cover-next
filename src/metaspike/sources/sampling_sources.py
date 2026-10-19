@@ -7,7 +7,7 @@ an artifact by being registered in the wrong place.
 
 import json
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
@@ -75,3 +75,37 @@ def replay_sampling_client(recordings: Path) -> httpx.Client:
         )
 
     return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def replay_recorded_apps(recordings: Path) -> frozenset[str]:
+    """The app ids a replay directory holds a recorded response for."""
+    return frozenset(
+        path.stem.removeprefix(REPLAY_FILE_PREFIX)
+        for path in recordings.glob(f"{REPLAY_FILE_PREFIX}*.json")
+        if path.stem.removeprefix(REPLAY_FILE_PREFIX).isdigit()
+    )
+
+
+def replay_clock(recordings: Path) -> Callable[[], datetime]:
+    """A replay's clock: it starts at the newest `recorded_at` and moves 1 ms a reading.
+
+    A replayed answer is dated when the source gave it, never when it is replayed: read
+    at the wall clock, a response recorded days earlier would be stored as a current
+    observation. Each reading moves the clock on, so a run's moments stay ordered, and
+    the same recordings give the same times on every run.
+    """
+    moments = [
+        datetime.fromisoformat(json.loads(path.read_text(encoding="utf-8"))["recorded_at"])
+        for path in sorted(recordings.glob(f"{REPLAY_FILE_PREFIX}*.json"))
+    ]
+    if not moments:
+        raise ValueError(f"no recorded player-count response in {recordings}")
+    start = max(moments).astimezone(UTC)
+    ticks = 0
+
+    def now() -> datetime:
+        nonlocal ticks
+        ticks += 1
+        return start + timedelta(milliseconds=ticks)
+
+    return now
