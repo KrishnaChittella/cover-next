@@ -11,7 +11,7 @@ import {
   NO_GENUINE_OPPORTUNITY,
   ORDER_NOTE,
 } from "@/private/opportunities/compare";
-import type { Loaded, View } from "@/private/opportunities/loader";
+import { type Loaded, type View, viewQuery } from "@/private/opportunities/loader";
 import type {
   MovementNote,
   OpportunityAssessment,
@@ -61,7 +61,7 @@ export function StandingBadge({ standing }: { standing: Standing }) {
 }
 
 function href(slug: string, view: View): string {
-  return view === "synthetic" ? `/opportunities/${slug}?view=synthetic` : `/opportunities/${slug}`;
+  return `/opportunities/${slug}${viewQuery(view)}`;
 }
 
 function movementText(m: MovementNote): string {
@@ -98,7 +98,8 @@ export function Banners({ report, view }: { report: OpportunityReport; view: Vie
           </p>
         </div>
       ) : null}
-      {view === "verified" && report.contains_synthetic ? (
+      {view === "integrated" ? <IntegratedBanner report={report} /> : null}
+      {view !== "synthetic" && report.contains_synthetic ? (
         <div role="alert" className="panel border-warn/60 p-4">
           <p className="text-sm text-warn">
             This report contains synthetic inputs. Only verified readiness is shown here; synthetic evidence counts
@@ -130,6 +131,52 @@ export function Banners({ report, view }: { report: OpportunityReport; view: Vie
   );
 }
 
+export const INTEGRATED_HEADLINE = "RECORDED SOURCES, READ TOGETHER — NOT LIVE DATA";
+
+/** The sources whose input is a genuine recording but of unverified origin. */
+function unverifiedSources(report: OpportunityReport): string[] {
+  const names = new Set<string>();
+  for (const a of report.assessments) for (const s of a.sources) if (s.standing === "unverified") names.add(s.source);
+  return [...names].sort();
+}
+
+function IntegratedBanner({ report }: { report: OpportunityReport }) {
+  const unverified = unverifiedSources(report);
+  return (
+    <div role="alert" className="panel border-warn/60 p-4" data-testid="integrated-banner">
+      <p className="text-base font-semibold tracking-wide text-warn">{INTEGRATED_HEADLINE}</p>
+      <p className="mt-1 text-sm text-ink-soft">
+        Every input here is a genuine recording or recorded catalogue record, read at one past moment. Pinned
+        recordings are verified. The rest is genuinely recorded but of{" "}
+        <strong className="text-warn">unverified origin</strong>: it is shown so its path can be inspected and it
+        counts for nothing. One recorded response is a single observation, never a history and never verified demand.
+      </p>
+      <p className="mt-1 text-sm text-ink-soft">
+        Unverified sources in this report:{" "}
+        <span className="font-mono text-ink">{unverified.length > 0 ? unverified.join(", ") : "none"}</span>
+      </p>
+    </div>
+  );
+}
+
+const EVIDENCE_KINDS = new Set(["demand_signal", "event_evidence"]);
+
+/** Each demand and event source for one game: its state and the standing of its input. */
+function EvidenceCell({ a }: { a: OpportunityAssessment }) {
+  return (
+    <ul className="space-y-0.5" data-testid="evidence-cell">
+      {a.sources
+        .filter((s) => EVIDENCE_KINDS.has(s.kind))
+        .map((s) => (
+          <li key={s.source} className="whitespace-nowrap text-xs">
+            <span className="font-mono">{s.source}</span> {s.state.replaceAll("_", " ")}{" "}
+            {s.standing !== "none" ? <StandingBadge standing={s.standing} /> : null}
+          </li>
+        ))}
+    </ul>
+  );
+}
+
 function Shortlist({
   report,
   view,
@@ -150,6 +197,7 @@ function Shortlist({
             <th className="py-2 pr-3">#</th>
             <th className="py-2 pr-3">Game</th>
             <th className="py-2 pr-3">{simulated ? "Simulated readiness" : "Verified readiness"}</th>
+            <th className="py-2 pr-3">Demand and event sources</th>
             <th className="py-2 pr-3">Why now</th>
             <th className="py-2 pr-3">Angle</th>
             <th className="py-2 pr-3">Creator coverage</th>
@@ -174,6 +222,9 @@ function Shortlist({
                 </td>
                 <td className="py-2 pr-3">
                   <ReadinessBadge readiness={entry.readiness} simulated={simulated} />
+                </td>
+                <td className="py-2 pr-3 text-ink-soft">
+                  <EvidenceCell a={a} />
                 </td>
                 <td className="py-2 pr-3 text-ink-soft">
                   {statements.length > 0
@@ -210,6 +261,13 @@ export function OpportunityBoard({ report, view }: { report: OpportunityReport; 
       <nav aria-label="Report" className="mt-6 flex gap-4 text-sm">
         <Link href="/opportunities" aria-current={view === "verified" ? "page" : undefined} className="underline">
           Verified evidence only
+        </Link>
+        <Link
+          href="/opportunities?view=integrated"
+          aria-current={view === "integrated" ? "page" : undefined}
+          className="underline"
+        >
+          All recorded sources
         </Link>
         <Link
           href="/opportunities?view=synthetic"
@@ -394,7 +452,7 @@ export function CompareSelector({ report, view }: { report: OpportunityReport; v
           })}
         </div>
       </fieldset>
-      {view === "synthetic" ? <input type="hidden" name="view" value="synthetic" /> : null}
+      {view !== "verified" ? <input type="hidden" name="view" value={view} /> : null}
       <button
         type="submit"
         className="mt-3 rounded border border-line-strong px-2 py-1 text-xs font-medium text-ink hover:border-signal"
@@ -583,7 +641,7 @@ export function OpportunityComparison({ comparison, view }: { comparison: Compar
         </pre>
       </details>
       <p className="mt-8 text-sm">
-        <Link href={view === "synthetic" ? "/opportunities?view=synthetic" : "/opportunities"} className="underline">
+        <Link href={`/opportunities${viewQuery(view)}`} className="underline">
           Back to the shortlist
         </Link>
       </p>
@@ -743,8 +801,10 @@ export function OpportunityDetail({
           <thead className="text-xs text-muted">
             <tr>
               <th className="py-1 pr-3">Source</th>
+              <th className="py-1 pr-3">Kind</th>
               <th className="py-1 pr-3">State</th>
               <th className="py-1 pr-3">Latest observation</th>
+              <th className="py-1 pr-3">Freshness</th>
               <th className="py-1 pr-3">Origin</th>
             </tr>
           </thead>
@@ -752,8 +812,10 @@ export function OpportunityDetail({
             {a.sources.map((s) => (
               <tr key={s.source} className="border-t border-line">
                 <td className="py-1 pr-3 font-mono text-xs">{s.source}</td>
+                <td className="py-1 pr-3 text-xs">{s.kind.replaceAll("_", " ")}</td>
                 <td className="py-1 pr-3">{s.state.replaceAll("_", " ")}</td>
                 <td className="py-1 pr-3 font-mono text-xs">{moment(s.latest_observed_at)}</td>
+                <td className="py-1 pr-3 text-xs">{s.freshness ?? "—"}</td>
                 <td className="py-1 pr-3">
                   <StandingBadge standing={s.standing} />
                 </td>
@@ -772,7 +834,7 @@ export function OpportunityDetail({
         </ul>
       </Section>
       <p className="mt-8 text-sm">
-        <Link href={view === "synthetic" ? "/opportunities?view=synthetic" : "/opportunities"} className="underline">
+        <Link href={`/opportunities${viewQuery(view)}`} className="underline">
           Back to the shortlist
         </Link>
       </p>
@@ -796,7 +858,7 @@ export function NotShown({ loaded }: { loaded: Exclude<Loaded, { kind: "ok" }> }
         <p className="mt-2 text-sm text-ink-soft">
           Generate it offline with{" "}
           <code className="font-mono">
-            npm run opportunities:{loaded.view === "synthetic" ? "synthetic" : "recorded"}
+            npm run opportunities:{loaded.view === "verified" ? "recorded" : loaded.view}
           </code>
           .
         </p>

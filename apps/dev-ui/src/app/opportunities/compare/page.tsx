@@ -4,7 +4,7 @@ import Link from "next/link";
 import { NotShown, OpportunityComparison } from "@/components/opportunities";
 import { PageTitle } from "@/components/ui";
 import { buildComparison, parseSelection } from "@/private/opportunities/compare";
-import { loadOpportunityReport, parseView } from "@/private/opportunities/loader";
+import { loadOpportunityReport, parseView, viewQuery } from "@/private/opportunities/loader";
 
 export const metadata: Metadata = { title: "Compare creator opportunities (private)" };
 // Read on each request from local disk, when enabled; never rendered at build time.
@@ -31,7 +31,7 @@ export default async function ComparePage({
       ) : (
         <p role="alert" className="panel border-warn/60 p-4 text-sm text-ink" data-testid="selection-invalid">
           {selection.message}{" "}
-          <Link href={view === "synthetic" ? "/opportunities?view=synthetic#compare" : "/opportunities#compare"} className="underline">
+          <Link href={`/opportunities${viewQuery(view)}#compare`} className="underline">
             Choose again
           </Link>
         </p>

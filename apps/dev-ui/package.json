@@ -19,6 +19,7 @@
     "data:sync": "node scripts/sync-data.mjs",
     "data:replay": "node scripts/sync-data.mjs --replay",
     "opportunities:recorded": "node scripts/opportunities.mjs recorded",
+    "opportunities:integrated": "node scripts/opportunities.mjs integrated",
     "opportunities:synthetic": "node scripts/opportunities.mjs synthetic",
     "opportunities:schema": "node scripts/opportunities.mjs schema",
     "opportunities:schema:check": "node scripts/opportunities.mjs schema --check",

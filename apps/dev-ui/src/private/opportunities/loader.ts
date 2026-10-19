@@ -6,7 +6,7 @@
 //             "production" (next build and next start run as production)
 //   where     <repo>/.metaspike/private/opportunities/, or an absolute directory in
 //             METASPIKE_OPPORTUNITY_DIR (a server environment variable)
-//   which     one of two fixed file names, chosen by a fixed view name; nothing a
+//   which     one of three fixed file names, chosen by a fixed view name; nothing a
 //             browser sends becomes part of a path
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -14,10 +14,18 @@ import path from "node:path";
 import { checkReport, type Violation } from "./validate";
 import type { OpportunityReport } from "./types";
 
-export const VIEWS = ["verified", "synthetic"] as const;
+// verified     pinned recordings only
+// integrated   every genuine recorded input, pinned or not, read together; an input of
+//              unverified origin is shown and counts for nothing
+// synthetic    the labelled demonstration
+export const VIEWS = ["verified", "integrated", "synthetic"] as const;
 export type View = (typeof VIEWS)[number];
 
-const FILES: Record<View, string> = { verified: "verified.json", synthetic: "synthetic.json" };
+const FILES: Record<View, string> = {
+  verified: "verified.json",
+  integrated: "integrated.json",
+  synthetic: "synthetic.json",
+};
 
 export type Loaded =
   | { kind: "disabled"; reason: string }
@@ -28,9 +36,16 @@ export type Loaded =
 
 type Env = Record<string, string | undefined>;
 
-/** Only the exact word "synthetic" selects the synthetic view. Anything else: verified. */
+/** Only the exact words "synthetic" and "integrated" select those views. Anything else: verified. */
 export function parseView(raw: string | string[] | undefined): View {
-  return raw === "synthetic" ? "synthetic" : "verified";
+  if (raw === "synthetic") return "synthetic";
+  if (raw === "integrated") return "integrated";
+  return "verified";
+}
+
+/** The query string that keeps a view across links: empty for the default view. */
+export function viewQuery(view: View): string {
+  return view === "verified" ? "" : `?view=${view}`;
 }
 
 export function enablement(env: Env = process.env): { enabled: true } | { enabled: false; reason: string } {
