@@ -1487,7 +1487,7 @@ def _sample(args: argparse.Namespace) -> int:
         unrecorded = sorted(
             (t.source_native_id for t in targets if t.source_native_id not in held), key=int
         )
-        targets = [t for t in targets if t.source_native_id in held]
+        targets = tuple(t for t in targets if t.source_native_id in held)
     pool = LimiterPool() if replaying else default_limiter_pool()
     with replay_sampling_client(args.replay) if replaying else build_client() as client:
         adapter = build_steam_players(
