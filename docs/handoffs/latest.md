@@ -1,277 +1,118 @@
 # Handoff: latest checkpoint (product branch)
 
-## PRODUCT BUILD U6.9: CREATOR OPPORTUNITY COMPARISON WORKSPACE — CHATGPT REVIEW REQUIRED
+## MULTISOURCE IMPLEMENTATION — RECORDED SOURCES TO THE PRODUCT UI
 
-This checkpoint was worked on branch `product/local-ui` only:
+Previous checkpoint: PRODUCT BUILD U6.9 (`ec679aa`, on `product/local-ui`).
 
-- private, local UI work, built and tested offline;
-- no source call, live recording or pin;
-- no cloud access or deployment;
-- no pull request, merge or publication.
+## Branch
 
-**No later checkpoint has been started.**
+- `product/multisource`, cut from `product/local-ui` at
+  `ec679aa7f566d25f0a2a08873abceff2718aedc9`.
+- Implementation SHA: `ab9d989a76d551d2351237af3781a9608ca1eade`.
+- Docs SHA: `ec5958d6dc343deccdcaeae79c138901162086de`.
+- These branches were not modified: `main` (`cb33198`), `product/local-ui` (`ec679aa`)
+  and `ops/c2f-acceptance-review` (`67f9e31`).
+- Nothing was merged or deployed.
+- No GCP access, no live source call, no credential read.
 
-## 1. Starting SHA
+## What was done
 
-`b6ccbff79284fd27a06f869c64828799543973f1`. Verified at the start: on
-`product/local-ui`, at that commit, tree clean.
+1. **Collector completeness fix.** Commit `111d40f`. `collect_wikimedia` no longer
+   marks a slot done when the answer lacks the due period.
+   - The answer is still landed.
+   - The target counts in `targets_due_period_missing`, and a `due_period_missing`
+     WARNING is logged.
+   - The run, and the work-order outcome, are partial.
+   - The regression test reproduces the C2-F 16 October answer. The next run then asks
+     again and completes.
+2. **Steam replay dating fix.** Commits `a8abc4a` and `c90cf3b`.
+   - **Before:** `metaspike sample --replay` dated a 6 October response by the wall
+     clock, and invented failed attempts for apps with no recording.
+   - **Now:**
+     - replays are dated from the recording's `recorded_at`;
+     - only recorded apps are asked;
+     - a replay may not be filed under a later slot.
+   - The tests were updated to the stricter behaviour.
+3. **Integrated path.** Commit `8a03d1a`.
+   - `npm run opportunities:integrated` reads all the genuine recorded inputs through
+     the existing `sample` and `evidence --opportunities` commands. No new pipeline was
+     added.
+   - New UI view `/opportunities?view=integrated`, selected by the exact word only. It
+     carries a notice and lists the unverified sources.
+   - The board gains a column of demand and event sources, each with state and origin.
+   - The game page source table gains kind and freshness.
+4. **End-to-end proof.** Commit `ab9d989`. `tests/test_integrated_recorded.py` runs the
+   generator's commands with sockets refused and the clock moved to 2027. It requires
+   the UI fixture's exact bytes and asserts every source's standing.
 
-## 2. Implementation SHA
+## Inputs, by standing
 
-`d819b9546a16f664edd6d2e7e68baff7dac697c4`: `feat: compare creator opportunities
-privately`.
-
-## 3. Exact changed files
-
-| File | Change |
+| | |
 |---|---|
-| `apps/dev-ui/src/private/opportunities/compare.ts` | New. `parseSelection`, `buildComparison` (engine order, positions, tie groups), the plain-text serializer `comparisonText`. |
-| `apps/dev-ui/src/app/opportunities/compare/page.tsx` | New. A server page, `force-dynamic`, behind the existing loader. |
-| `apps/dev-ui/src/components/opportunities.tsx` | Adds `CompareSelector` (a plain GET form, added to the shortlist page) and `OpportunityComparison`. Existing components are unchanged. |
-| `apps/dev-ui/src/private/opportunities/brief.ts` | Path hygiene (`safeText`, `safeReference`) replaces U6.8's `scrub`. Adds an `events` field for comparisons; exports `labelled` and `STANDING_LABEL`. |
-| `apps/dev-ui/src/components/compare.test.tsx` | New: 18 tests. |
-| `apps/dev-ui/src/components/creator-brief.test.tsx` | One U6.8 test updated (see §8). |
-| `apps/dev-ui/src/private/opportunities/loader.test.ts` | The compare page is added to the private-page guard (it must be `force-dynamic` and never `use client`). |
-| `apps/dev-ui/README.md` | Comparison usage and the path policy. |
-| `docs/handoffs/latest.md` | This handoff (separate commit). |
+| **Verified (pinned)** | IGDB and Steam app-list catalogue records, identity only. Wikimedia pageviews for six articles through 3 Oct |
+| **Genuinely recorded, unverified** | One Steam players response: app 730, 2026-10-06 01:25:26 UTC. It reaches Counter-Strike 2 as `available`, `fresh` and UNVERIFIED, and is never counted |
+| **Synthetic** | The Steam News fixtures and the existing demonstration view. Neither is used in the integrated report |
+| **Absent** | Eight Wikimedia articles; seven Steam apps; real Steam News on this machine; YouTube; Reddit (approval PENDING) |
 
-No Python, schema, engine or report-contract file changed.
+**Result:** every game abstains. No frozen rule, score, schema or policy was changed.
+The public contract is still 1.5.0.
 
-## 4. Comparison interaction
+## Steam: steps remaining
 
-1. The shortlist page (`/opportunities`, or `?view=synthetic`) has a **Compare games**
-   section. It is a plain `<form method="get" action="/opportunities/compare">` with one
-   checkbox per game in the engine's verified order, plus a hidden `view=synthetic` in the
-   synthetic view. It needs no client script.
-2. `/opportunities/compare?game=a&game=b[&game=c]`, where comma-separated values are also
-   accepted:
-   - The selection is validated on the server against the loaded, validated report.
-   - Plain refusals:
-     - "Choose 2 or 3 games to compare."
-     - "Choose at most 3 games to compare (N were chosen)."
-     - "“x” is chosen more than once."
-     - "“x” is not a game in this report."
-   - A value that is not slug-shaped, such as a path or markup, is never echoed: the
-     message says "A selection is not a game in this report."
-3. The comparison shows:
-   - **Header and notices:** the as-of moment and rules version; the basis; the order
-     note; any ties; the abstention line, when it applies.
-   - **A table:** one column per game, headed by its engine position and linked to its
-     detail page. The rows are readiness and decision; why now (counted evidence); leads,
-     not counted; what changed; video angle; creator coverage; community; events;
-     counterevidence; not known; freshness; and confirm before acting.
-   - **Footer:** the combined questions to answer before choosing, and the
-     unvalidated-thresholds notice.
-   - **Copy controls:** **Copy comparison as text**, and a plain-text view.
+Details are in `docs/multisource-integration.md`.
 
-The comparison is disabled whenever private opportunities are disabled: it uses the
-existing loader unchanged.
+**Before the first supervised real sample:**
 
-## 5. Engine-order preservation
+1. Owner authorisation for one session: 8 apps, 1 slot, 8 requests.
+2. The key, set in the owner's shell.
+3. **A supervised Steam recorder (not built).** Live `sample` writes neither an
+   acquisition record nor a replayable recording, so nothing could ever be pinned.
+4. Review the recording, then pin its digest.
+5. History accrues only under `private_collection`, which needs:
+   - a privacy notice;
+   - US-only storage;
+   - the key registration.
 
-- **Engine order.** Columns are in the engine's order for the basis: `entries` for
-  verified, `simulated_entries` for simulated. Selection order is ignored. Positions are
-  the engine's.
-- **Ties.** Tie groups are read from the engine's `ahead_of_next` ("indistinguishable on
-  the evidence"). Chosen games in one group are stated as tied, "ordered by id only, which
-  means nothing", on screen and in the text.
-- **Nothing computed.** There is no score, rank, winner or "best" (tested), and the text
-  says "A higher position is not a predicted video outcome". Readiness is the engine's
-  (tested per column).
+**Before anything public:**
 
-## 6. Abstention and missingness
+- Valve's answer on derived metrics and commercial use; both are UNKNOWN.
+- A privacy notice.
+- Valve attribution and branding.
+- A reviewed public contract change.
 
-- **All insufficient.** When every chosen game's verified readiness is
-  `insufficient_evidence`, the comparison says: "No real creator opportunity is established
-  for these games by the verified evidence." It still lists the unanswered questions.
-- **Per-game wording** is the U6.8 brief's:
-  - a watchlist entry is "Watchlist — not a recommendation";
-  - a verified candidate is "The rubric supports further creator consideration … not a
-    guarantee";
-  - an insufficient game says "MetaSpike abstains".
-- **Coverage is never read as a negative.**
-  - Missing creator coverage: "That is not low competition: competition is simply
-    unknown."
-  - Even a complete sample: "a lower bound".
-  - Missing community: "That is not low interest".
-- **Labelled leads.** Unverified or synthetic events are listed with their provenance and
-  marked "lead, not counted".
-- **Kept as given:** counterevidence includes down movements and disagreement; the
-  engine's "not known" lines, freshness and references are kept as they are.
-- **Not used:** audience size, market share, or a ranking by missingness.
-
-## 7. Synthetic separation
-
-The synthetic view opts in through `?view=synthetic` on the shortlist and its form.
-
-- **The comparison basis is simulated.**
-- **The warning.** "SYNTHETIC DEMONSTRATION — NOT A REAL RECOMMENDATION" is shown on
-  screen (`role="alert"`) and is the first and last line of the copied text.
-- **Readiness labels.** Every simulated readiness is "SIMULATED …", with "(verified
-  readiness: …)" beside it.
-- **The abstention line** still states the verified fact: no real opportunity is
-  established. The simulated claims are never merged into it.
-
-The verified view of a synthetic report counts nothing invented (tested).
-
-## 8. Copy and path hygiene
-
-Copied text is plain text and React escaping is unchanged. **Path hygiene is a
-conservative policy, not a universal detector:**
-
-- **`safeText` (free text).** Every whitespace-separated token is checked. A token is
-  withheld as `[local path removed]` if it contains `/` or `\`, starts with `~`, or names
-  a drive (`C:`).
-  - **Exceptions:** http(s) URLs with a host are kept whole, whatever words their path
-    holds (`…/r/private/…`, `…/Users/…`). A lone `/` between words is kept, as are plain
-    fractions like `34/34`.
-  - **The cost:** ordinary words with a slash ("and/or") are also withheld. That
-    over-removal is accepted.
-- **`safeReference` (references).** A reference is kept only if it is a plain identifier
-  (`[A-Za-z0-9_.:#@-]`) or an http(s) URL. Anything else is replaced by `[reference
-  withheld]`, including `file:` and `javascript:`.
-
-Tested paths include:
-
-- POSIX: `/Users/…`, `/home/…`;
-- Windows: drive paths and UNC paths;
-- home paths: `~/…`;
-- project-private relative paths: `.metaspike/private/…`, `./tests/…`, `../…`,
-  `apps/dev-ui/…`;
-- a workspace path: `/workspace/…`.
-
-Each was planted in names, coverage, community, missing, caveats, uncertainty, statements
-and references. None reached a brief or a comparison, and the legitimate references
-survived.
-
-**U6.8 parity.** On every fixture assessment, in both views (14 briefs), the U6.8 brief
-text is byte-identical under the new policy. This was checked against the U6.8 `brief.ts`
-taken from Git, in a temporary test.
-
-**One U6.8 test updated.** Its markup payload contained `</script>`, whose `/` the new
-policy withholds. The test now asserts both behaviours: slash-free markup is shown
-literally as text, and markup with `/` is withheld. Neither creates an element.
-
-**Not page text.** In development mode, Next.js's own router payload repeats the URL the
-browser itself requested, for example a `game=../../etc/passwd` query. That is the
-client's own URL in framework state, not page text. No file is read, and our messages
-never echo it.
-
-## 9. Regression tests
-
-`compare.test.tsx` adds 18 tests:
-
-- **Selection:** 2 and 3 games; an invalid game; a duplicate; too many (array and comma
-  forms); too few; hostile values never echoed.
-- **Selector:** the form lists the report's games, and carries `view` in the synthetic
-  view.
-- **Order:** engine order whatever the selection order; positions; ties stated; no score,
-  rank or winner.
-- **Readiness and abstention:** all-insufficient abstention; watchlist and verified
-  candidate semantics.
-- **Coverage and community:** missing creator coverage; an empty sample as a lower bound;
-  missing community.
-- **Events and conflicts:** unverified events as leads; contradictory demand.
-- **Provenance:** as-of, freshness and sources.
-- **Copying:** copy equals the view (mocked clipboard).
-- **Synthetic:** the warning on screen and first and last in the text; the verified view
-  of a synthetic report.
-- **Paths:** POSIX, Windows, home, relative and workspace paths withheld; HTTPS links and
-  identifiers preserved; planted paths absent from copied briefs and comparisons.
-- **Private boundary:** disabled in production; an invalid report refused.
-
-Existing U6.8 creator-brief tests all pass, with one updated as described in §8. The
-loader's private-page guard now covers the compare page.
-
-## 10. Quality-gate results (`apps/dev-ui`)
+## Gates
 
 | Gate | Result |
 |---|---|
-| `npm run contract:check` | exit 0 |
-| `npm run opportunities:schema:check` | exit 0 |
-| `npm run typecheck` | exit 0 |
-| `npm run lint` | exit 0 |
-| `npm test` | exit 0, **236 passed** (15 files; previously 217) |
-| `npm run build` | exit 0; `/opportunities/compare` built as dynamic (ƒ), never prerendered |
+| ruff check, ruff format --check, mypy (247 files) | exit 0 |
+| pytest | **1677 passed**, 8 deselected, 9 m 05 s |
+| dev-ui typecheck, lint | exit 0 |
+| dev-ui vitest | **242 passed** (16 files) |
+| contract:check, opportunities:schema:check | current |
+| next build | exit 0; no private report traced into `.next` |
+| Live check | dev server on 127.0.0.1: integrated board, game page, compare, verified and synthetic views all HTTP 200, with the source table rendered |
 
-**Backend gates:** not run, because no Python, schema or engine file changed.
+## Run it
 
-## 11. Offline demonstration
+```
+cd apps/dev-ui
+npm run opportunities:integrated && npm run opportunities:recorded
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
+# http://127.0.0.1:3000/opportunities?view=integrated
+# http://127.0.0.1:3000/opportunities/counter-strike-2?view=integrated
+uv run pytest -q tests/test_integrated_recorded.py tests/test_jobs.py tests/test_steam_players.py
+```
 
-The private reports were generated earlier by `npm run opportunities:recorded` and
-`npm run opportunities:synthetic`, all offline. They sit in the git-ignored
-`.metaspike/private/` and are not committed.
+## Next step proposed (not started)
 
-- **Recorded:** Minecraft, GTA V and Dota 2.
-  - The columns are in engine order at positions 4, 9 and 14.
-  - Dota 2 and GTA V are in one engine tie group, and stated as tied.
-  - "No real creator opportunity is established for these games by the verified
-    evidence."
-  - Every game abstains; coverage and community are unknown, never low; the engine's
-    "not known" lines are kept.
-- **Synthetic:** Dota 2 and Rust.
-  - The basis is simulated, with the warning on screen and first and last in the text.
-  - Dota 2 is a SIMULATED candidate and Rust a SIMULATED watchlist entry, each with
-    "(verified readiness: Insufficient evidence)".
-- **Server render.** The local dev server (127.0.0.1, `METASPIKE_PRIVATE_OPPORTUNITIES=1`)
-  was run, then stopped. It served:
-  - the shortlist, with the selector and 15 checkboxes;
-  - both comparisons, as above;
-  - a duplicate selection, refused with a message;
-  - four games, refused with a message;
-  - a `../../etc/passwd` selection, refused as "A selection is not a game in this report".
+A supervised Steam players recorder, built and tested offline only:
 
-  No rendered page or comparison text contained a local path. The ranking and readiness
-  were the engine's throughout.
+- plan by default;
+- `--live --confirm`;
+- recordings written in replay format;
+- acquisition records;
+- `--inspect`.
 
-## 12. Privacy and frozen-contract parity
+Any live run needs separate owner approval.
 
-- **Loader and gates unchanged.** The existing loader and its enablement are unchanged:
-  disabled in production, off without the flag, and limited to recognised views
-  (`verified`, `synthetic`).
-- **No new surfaces.** There is no API route, publication endpoint, browser-controlled
-  path, storage, telemetry or analytics. The copy button receives finished text only.
-- **Unchanged contracts.** The report schema, the validator and the public artifact
-  contract 1.5.0 are unchanged.
-
-These are unchanged:
-
-- resolver_v2;
-- baseline_rules_v1;
-- signal_semantics_v2;
-- metaspike_score_v0;
-- event_heat_rules_v1;
-- event_classification_rules_v1;
-- validation_protocol_v1;
-- outcome_rules_v1;
-- recommendation_snapshot_v2;
-- creator_opportunity_rules_v1.
-
-Source policies, provenance rules and the Wikimedia recorder are also unchanged.
-
-**Known limitation:** a static `compare` route takes precedence over `[slug]`, so a game
-whose slug was literally `compare` would not reach its detail page. No such game exists.
-
-## 13. Git-only C2-F isolation
-
-C2-F isolation: Git-only verification. No GCP access, no production action.
-
-Verified with Git:
-
-- Only `product/local-ui` changed.
-- `main` is at `cb33198e2510965e41dff0f5fe7e75cacb7ee2ca`, on both `origin/main` and the
-  main worktree.
-- No changes under `infra/`, `.github/`, `artifacts/`, `schemas/`, `src/` or `tests/`.
-- `BROAD_DISCOVERY_ENABLED = False` is unchanged.
-- No deployment, source request, activation, pin or publication.
-
-## 14. No later checkpoint started
-
-Nothing beyond U6.9 has been started:
-
-- no U6.10;
-- no post-soak acceptance;
-- no live collection;
-- no deployment, merge or publication.
-
-Awaiting independent ChatGPT review.
+STOP. Awaiting review.
