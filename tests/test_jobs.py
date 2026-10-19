@@ -308,6 +308,61 @@ def test_one_wikimedia_pass_lands_one_batch_marks_it_and_a_second_pass_asks_noth
     assert len(data_objects(w)) == 1
 
 
+class WithoutTheDueDay:
+    """The recorded source, answering as Wikimedia did on 18 October 2026: whole, real
+    series that end the day before the period that was due."""
+
+    source = WIKIMEDIA
+    mode = SourceMode.FETCH_HISTORY
+
+    def __init__(self) -> None:
+        self.inner = wikimedia()
+
+    def fetch(self, game: Any, identifier: Any, metric: Any, window: Any, now: Any) -> Any:
+        points = self.inner.fetch(game, identifier, metric, window, now)
+        return [p for p in points if p.period_start != window.end]
+
+
+def test_an_answer_without_the_due_period_is_landed_but_never_marks_the_slot_done() -> None:
+    # The C2-F finding: the source answered for every article, the answers ended the
+    # day before the due slot, and the slot was still marked done for all of them, so
+    # nothing ever asked for that day again.
+    w = at()
+    runtime, log = runtime_for(w, "ms-wikimedia")
+    summary = collect_wikimedia(runtime, WithoutTheDueDay())  # type: ignore[arg-type]
+    assert summary["slot"] == DUE.isoformat()
+    assert summary["targets_due_period_missing"] == 6 and summary["targets_collected"] == 0
+    assert summary["outcome"] == "partial"
+    assert summary["rows_landed"] == 6 * 89 and len(data_objects(w)) == 1  # what it said is kept
+    assert w.operations.list(f"{WIKIMEDIA}/slots/pageviews/dt=2026-10-03/") == ()
+    missing = [e for e in log if e["event"] == "due_period_missing"]
+    assert len(missing) == 6 and all(e["severity"] == "WARNING" for e in missing)
+    assert {e["slot"] for e in missing} == {DUE.isoformat()}
+    assert all(e["latest_period"].startswith("2026-10-02") for e in missing)
+
+    # Nothing was marked, so the next run asks for the slot again and, when the source
+    # now has the day, completes it.
+    # (The supervised window override asks for the recordings' own 90 days again.)
+    again, _ = runtime_for(w, "ms-wikimedia", run_id="run-0002")
+    again.environ = {"METASPIKE_WIKIMEDIA_DAYS": "90"}
+    second = collect_wikimedia(again, wikimedia())
+    assert second["targets_skipped_already_done"] == 0 and second["targets_attempted"] == 14
+    assert second["targets_collected"] == 6 and second["targets_due_period_missing"] == 0
+    assert len(w.operations.list(f"{WIKIMEDIA}/slots/pageviews/dt=2026-10-03/")) == 6
+
+
+def test_the_wikimedia_job_reports_a_missing_due_period_as_partial() -> None:
+    w = at()
+    runtime, _ = runtime_for(w, "ms-wikimedia")
+    summary = collect_wikimedia(runtime, WithoutTheDueDay())  # type: ignore[arg-type]
+    partial_because = [
+        k
+        for k in ("targets_failed", "targets_budget_deferred", "targets_due_period_missing")
+        if summary[k]
+    ]
+    assert partial_because == ["targets_failed", "targets_due_period_missing"]
+
+
 def test_wikimedia_stops_asking_when_the_source_refuses_the_rate() -> None:
     w = at()
     runtime, log = runtime_for(w, "ms-wikimedia")
