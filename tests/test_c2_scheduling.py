@@ -93,7 +93,9 @@ from tests.warehouse_support import World, real_policy, runtime_for, world
 STEAM = "steam_current_players"
 MONDAY = datetime(2026, 10, 5, tzinfo=UTC)
 TUESDAY = datetime(2026, 10, 6, tzinfo=UTC)
-THREE = MONDAY.replace(hour=3)
+PERIOD_HOUR = PRODUCTION.period_hour
+NEXT_HOUR = PERIOD_HOUR + 1
+THREE = MONDAY.replace(hour=PERIOD_HOUR)
 LEDGER = TableRef("ms_ops", "expected_targets")
 WIKI_CAPS = PRODUCTION.sources[WIKIMEDIA]
 
@@ -340,10 +342,10 @@ def test_a_tick_reads_only_the_partitions_that_can_be_due_on_it() -> None:
     def due(source: str, moment: datetime) -> list[str]:
         return due_partitions(manifest, source, moment, SIM)
 
-    assert due(WIKIMEDIA, at(3)) == [f"{WIKIMEDIA}/period/c00"]
-    assert due(WIKIMEDIA, at(4)) == [f"{WIKIMEDIA}/period/c01"]
-    assert due(WIKIMEDIA, at(2)) == [] and due(WIKIMEDIA, at(3, 15)) == []
-    assert due(WIKIMEDIA, at(9)) == []  # only as many cohorts as the source needs
+    assert due(WIKIMEDIA, at(PERIOD_HOUR)) == [f"{WIKIMEDIA}/period/c00"]
+    assert due(WIKIMEDIA, at(PERIOD_HOUR + 1)) == [f"{WIKIMEDIA}/period/c01"]
+    assert due(WIKIMEDIA, at(PERIOD_HOUR - 1)) == [] and due(WIKIMEDIA, at(PERIOD_HOUR, 15)) == []
+    assert due(WIKIMEDIA, at(PERIOD_HOUR + 6)) == []  # only as many cohorts as the source needs
     s = SIM_SAMPLED
     assert due(s, at(9, 15)) == [f"{s}/t0"]
     assert due(s, at(9, 30)) == [f"{s}/t0", f"{s}/t1"]
@@ -603,7 +605,7 @@ def test_an_order_is_immutable_and_issuing_it_twice_is_one_order() -> None:
 
 def test_the_pointer_moves_forward_on_its_generation_and_never_back() -> None:
     store = MemoryObjectStore()
-    three, four = MONDAY.replace(hour=3), MONDAY.replace(hour=4)
+    three, four = MONDAY.replace(hour=PERIOD_HOUR), MONDAY.replace(hour=NEXT_HOUR)
     issue(store, an_order(three))
     first = store.get(pointer_object(WIKIMEDIA)).generation
     later = issue(store, an_order(four))
@@ -619,7 +621,7 @@ def test_the_pointer_moves_forward_on_its_generation_and_never_back() -> None:
 
 def test_a_collector_acts_only_on_a_valid_live_order_addressed_to_it() -> None:
     store = MemoryObjectStore()
-    tick = MONDAY.replace(hour=3)
+    tick = MONDAY.replace(hour=PERIOD_HOUR)
     during = tick + timedelta(minutes=5)
 
     def refused(now: datetime = during, version: str = "p1", source: str = WIKIMEDIA) -> str:
@@ -710,24 +712,24 @@ def dispatcher(w: World, clock: Clock, **options: Any) -> tuple[Any, list[dict[s
 
 
 def test_without_a_live_control_record_a_tick_does_nothing_at_all() -> None:
-    clock = Clock(MONDAY.replace(hour=3, second=20))
+    clock = Clock(MONDAY.replace(hour=PERIOD_HOUR, second=20))
     w = world(clock, policy_for=real_policy)
     runtime, log, starter = dispatcher(w, clock)
     assert dispatch(runtime, starter) == {
         "outcome": "refused",
         "reason": "control_record_absent",
-        "tick": "2026-10-05T03:00:00+00:00",
+        "tick": f"2026-10-05T{PERIOD_HOUR:02d}:00:00+00:00",
     }
     assert starter.started == [] and w.landing.list("") == ()
     assert w.operations.list("") == ()  # no schedule, no lease, no order, no counter
     assert log[-1]["event"] == "tick_refused" and log[-1]["severity"] == "WARNING"
-    arm(w.operations, MONDAY.replace(hour=3))  # armed until exactly now: already expired
+    arm(w.operations, MONDAY.replace(hour=PERIOD_HOUR))  # armed until exactly now: already expired
     assert dispatch(runtime, starter)["reason"] == "control_expired"
     assert starter.started == []
 
 
 def test_one_tick_records_intent_writes_one_order_and_starts_one_collector() -> None:
-    clock = Clock(MONDAY.replace(hour=3, second=20))
+    clock = Clock(MONDAY.replace(hour=PERIOD_HOUR, second=20))
     w = world(clock, policy_for=real_policy)  # the real policies: Steam is not cleared
     publish_targets(
         w.operations,
@@ -753,9 +755,9 @@ def test_one_tick_records_intent_writes_one_order_and_starts_one_collector() -> 
     ledger = w.warehouse.all_rows(LEDGER)
     assert len(ledger) == 14 and {r["source"] for r in ledger} == {WIKIMEDIA}
     assert {r["slot_start"] for r in ledger} == {datetime(2026, 10, 3, tzinfo=UTC)}
-    assert {r["dispatch_run_id"] for r in ledger} == {"tick-20261005T0300Z"}
+    assert {r["dispatch_run_id"] for r in ledger} == {f"tick-20261005T{PERIOD_HOUR:02d}00Z"}
     assert {r["tier"] for r in ledger} == {4} and {r["disposition"] for r in ledger} == {"planned"}
-    assert {r["due_at"] for r in ledger} == {MONDAY.replace(hour=3)}
+    assert {r["due_at"] for r in ledger} == {MONDAY.replace(hour=PERIOD_HOUR)}
     assert {r["due_reason"] for r in ledger} == {"default_long_tail"}
     assert {r["schedule_version"] for r in ledger} == {manifest.version}
     version = policy_version(real_policy(WIKIMEDIA))
@@ -766,7 +768,7 @@ def test_one_tick_records_intent_writes_one_order_and_starts_one_collector() -> 
     order = claim(w.operations, WIKIMEDIA, clock(), version)
     assert len(order.targets) == 14 and order.max_targets == 14 and order.max_requests == 22
     assert order.window_days == 14  # a Monday: the weekly reconciliation window
-    assert order.expires_at == MONDAY.replace(hour=3, minute=50)
+    assert order.expires_at == MONDAY.replace(hour=PERIOD_HOUR, minute=50)
     assert order.schedule_version == manifest.version and not order.probe
 
     # The same tick again: the lease stops it. Nothing is recorded or started twice.
@@ -777,24 +779,28 @@ def test_one_tick_records_intent_writes_one_order_and_starts_one_collector() -> 
 
 
 def test_a_crash_after_planning_resumes_the_same_plan() -> None:
-    clock = Clock(MONDAY.replace(hour=3, second=20))
+    clock = Clock(MONDAY.replace(hour=PERIOD_HOUR, second=20))
     w = world(clock, policy_for=real_policy)
     arm(w.operations, MONDAY + timedelta(days=1))
     runtime, _, _ = dispatcher(w, clock)
     with pytest.raises(RuntimeError, match="could not start: ms-wikimedia"):
         dispatch(runtime, Starter(failing="ms-wikimedia"))
-    stored = w.operations.get("dispatch/plans/tick-20261005T0300Z.json").data
+    stored = w.operations.get(f"dispatch/plans/tick-20261005T{PERIOD_HOUR:02d}00Z.json").data
     # The lease was taken: this tick is spent, and a rerun starts nothing a second time.
     rerun = Starter()
     assert dispatch(runtime, rerun)["outcome"] == "already_dispatched" and rerun.started == []
-    assert w.operations.get("dispatch/plans/tick-20261005T0300Z.json").data == stored
+    assert (
+        w.operations.get(f"dispatch/plans/tick-20261005T{PERIOD_HOUR:02d}00Z.json").data == stored
+    )
     # Before the lease, a rerun reads the stored plan instead of making another.
-    w.operations.delete("dispatch/ticks/tick-20261005T0300Z.json")
+    w.operations.delete(f"dispatch/ticks/tick-20261005T{PERIOD_HOUR:02d}00Z.json")
     clock.moment += timedelta(minutes=9)
     resumed = Starter()
     summary = dispatch(runtime, resumed)
     assert resumed.started == ["ms-wikimedia"] and summary["expected_targets"] == 14
-    assert w.operations.get("dispatch/plans/tick-20261005T0300Z.json").data == stored
+    assert (
+        w.operations.get(f"dispatch/plans/tick-20261005T{PERIOD_HOUR:02d}00Z.json").data == stored
+    )
     assert json.loads(w.operations.get(f"dispatch/counters/{MONDAY:%Y-%m-%d}.json").data) == {
         "day": "2026-10-05", "requests": {WIKIMEDIA: 22}, "executions": 1
     }  # fmt: skip
@@ -839,7 +845,11 @@ def test_a_day_starts_one_collection_and_one_warehouse_run_and_nothing_else() ->
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=2))
     started = run_day(w, clock, range(24), collector=receipt_for(w, Outcome.SUCCEEDED))
-    assert {h: j for h, j in started.items() if j} == {3: ["ms-wikimedia"], 4: ["ms-warehouse"]}
+    assert {h: j for h, j in started.items() if j} == {
+        PRODUCTION.warehouse_daily_hour: ["ms-warehouse"],
+        PERIOD_HOUR: ["ms-wikimedia"],
+        NEXT_HOUR: ["ms-warehouse"],
+    }
     w.load_everything()
     assert len(w.warehouse.all_rows(LEDGER)) == 14
     assert w.operations.list("") != () and not w.operations.list("dispatch/orders/steam")
@@ -854,15 +864,17 @@ def test_an_outage_then_a_rate_limit_open_the_breaker_and_no_backlog_builds() ->
     arm(w.operations, TUESDAY + timedelta(days=30))
     failing = receipt_for(w, Outcome.FAILED)
     days = [TUESDAY + timedelta(days=d) for d in range(5)]
-    started = [run_day(w, clock, [3, 4], collector=failing, day=d) for d in days[:3]]
-    assert [s[3] for s in started] == [["ms-wikimedia"]] * 3
+    started = [
+        run_day(w, clock, [PERIOD_HOUR, NEXT_HOUR], collector=failing, day=d) for d in days[:3]
+    ]
+    assert [s[PERIOD_HOUR] for s in started] == [["ms-wikimedia"]] * 3
     health = SourceHealth.model_validate_json(
         w.operations.get(f"dispatch/health/{WIKIMEDIA}.json").data
     )
     assert health.breaker is Breaker.OPEN and health.consecutive_failures == 3
     # Open: the next day's work is recorded as skipped and nothing is started for it.
-    clock.moment = days[3].replace(hour=3, second=9)
-    health = health.model_copy(update={"reopen_at": days[3] + timedelta(hours=12)})
+    clock.moment = days[3].replace(hour=PERIOD_HOUR, second=9)
+    health = health.model_copy(update={"reopen_at": days[3] + timedelta(hours=PERIOD_HOUR + 9)})
     w.operations.replace(
         f"dispatch/health/{WIKIMEDIA}.json",
         health.model_dump_json().encode(),
@@ -874,13 +886,15 @@ def test_an_outage_then_a_rate_limit_open_the_breaker_and_no_backlog_builds() ->
     assert summary["source_states"] == {WIKIMEDIA: "unavailable"}
     assert json.loads(w.operations.get(f"dispatch/backlog/{WIKIMEDIA}.json").data) == {"items": []}
     # Half open: one small probe. Its success closes the breaker.
-    probe = run_day(w, clock, [3], collector=receipt_for(w, Outcome.SUCCEEDED), day=days[4])
-    assert probe[3] == ["ms-wikimedia"]
+    probe = run_day(
+        w, clock, [PERIOD_HOUR], collector=receipt_for(w, Outcome.SUCCEEDED), day=days[4]
+    )
+    assert probe[PERIOD_HOUR] == ["ms-wikimedia"]
     order_ids = w.operations.list(f"dispatch/orders/{WIKIMEDIA}/")
     latest = OrderPointer.model_validate_json(w.operations.get(pointer_object(WIKIMEDIA)).data)
     order = WorkOrder.model_validate_json(w.operations.get(latest.object).data)
     assert order.probe and len(order.targets) == 5 and len(order_ids) == 5
-    clock.moment = days[4].replace(hour=4, second=9)
+    clock.moment = days[4].replace(hour=NEXT_HOUR, second=9)
     runtime, _, starter = dispatcher(w, clock)
     assert dispatch(runtime, starter)["source_states"] == {WIKIMEDIA: "healthy"}
 
@@ -889,11 +903,11 @@ def test_a_lost_collector_counts_as_a_failure_once_its_order_has_expired() -> No
     clock = Clock(TUESDAY)
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=2))
-    run_day(w, clock, [3])  # the collector never files a receipt
+    run_day(w, clock, [PERIOD_HOUR])  # the collector never files a receipt
     name = f"dispatch/health/{WIKIMEDIA}.json"
     pending = SourceHealth.model_validate_json(w.operations.get(name).data)
     assert pending.pending_order_id is not None and pending.consecutive_failures == 0
-    run_day(w, clock, [4])
+    run_day(w, clock, [NEXT_HOUR])
     health = SourceHealth.model_validate_json(w.operations.get(name).data)
     assert health.pending_order_id is None and health.last_outcome is Outcome.MISSING
     assert health.consecutive_failures == 1
@@ -909,11 +923,11 @@ def test_hours_of_downtime_are_followed_by_one_ordinary_tick() -> None:
     assert w.landing.list("dispatch/expected_targets/") == ()
     assert len(w.operations.list("dispatch/ticks/")) == 1  # no tick was invented for the gap
     # The missed day is inside the next day's window: no extra request, no storm.
-    next_day = run_day(w, clock, [3, 4], day=TUESDAY + timedelta(days=1),
+    next_day = run_day(w, clock, [PERIOD_HOUR, NEXT_HOUR], day=TUESDAY + timedelta(days=1),
                        collector=receipt_for(w, Outcome.SUCCEEDED))  # fmt: skip
-    assert next_day == {3: ["ms-wikimedia"], 4: ["ms-warehouse"]}
+    assert next_day == {PERIOD_HOUR: ["ms-wikimedia"], NEXT_HOUR: ["ms-warehouse"]}
     version = policy_version(real_policy(WIKIMEDIA))
-    during = (TUESDAY + timedelta(days=1)).replace(hour=3, minute=10)
+    during = (TUESDAY + timedelta(days=1)).replace(hour=PERIOD_HOUR, minute=10)
     with pytest.raises(ClaimRefused) as caught:
         claim(w.operations, WIKIMEDIA, during, version)
     assert caught.value.reason == "order_already_completed"
@@ -924,10 +938,10 @@ def test_the_control_record_can_lower_a_limit_and_stops_everything_at_its_expiry
     w = world(clock, policy_for=real_policy)
     arm(
         w.operations,
-        TUESDAY.replace(hour=4),
+        TUESDAY.replace(hour=NEXT_HOUR),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_targets_per_execution=5)},
     )
-    assert run_day(w, clock, [3])[3] == ["ms-wikimedia"]
+    assert run_day(w, clock, [PERIOD_HOUR])[PERIOD_HOUR] == ["ms-wikimedia"]
     order = claim(w.operations, WIKIMEDIA, clock.moment, policy_version(real_policy(WIKIMEDIA)))
     assert len(order.targets) == 5  # nine wait; the limit was lowered, not raised
     w.load_everything()
@@ -935,14 +949,14 @@ def test_the_control_record_can_lower_a_limit_and_stops_everything_at_its_expiry
     assert sorted(r["disposition"] for r in rows) == ["deferred_cap"] * 9 + ["planned"] * 5
     assert {r["work_order_id"] is None for r in rows if r["disposition"] != "planned"} == {True}
     # 04:00 is the expiry: collection stops though the scheduler is still firing.
-    clock.moment = TUESDAY.replace(hour=4, second=9)
+    clock.moment = TUESDAY.replace(hour=NEXT_HOUR, second=9)
     runtime, _, starter = dispatcher(w, clock)
     assert dispatch(runtime, starter)["reason"] == "control_expired" and starter.started == []
     # A source the record does not enable is recorded as skipped and gets no order.
     arm(w.operations, TUESDAY + timedelta(days=3), sources={})
     other = world(clock, policy_for=real_policy)
     arm(other.operations, TUESDAY + timedelta(days=3), sources={})
-    clock.moment = TUESDAY.replace(hour=3, second=9)
+    clock.moment = TUESDAY.replace(hour=PERIOD_HOUR, second=9)
     runtime, _, starter = dispatcher(other, clock)
     summary = dispatch(runtime, starter)
     assert starter.started == [] and summary["work_orders"] == []
@@ -954,7 +968,7 @@ def test_job_starts_and_daily_executions_are_capped() -> None:
     clock = Clock(TUESDAY)
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=3), max_job_starts_per_tick=0)
-    assert run_day(w, clock, [3])[3] == []
+    assert run_day(w, clock, [PERIOD_HOUR])[PERIOD_HOUR] == []
     backlog = json.loads(w.operations.get(f"dispatch/backlog/{WIKIMEDIA}.json").data)
     assert len(backlog["items"]) == 14  # it waits; nothing is lost and nothing is started
     arm(w.operations, TUESDAY + timedelta(days=3), max_executions_per_day=1)
@@ -974,7 +988,7 @@ def test_a_tick_is_configurable_for_a_faster_source_later() -> None:
 
 
 def test_a_job_that_cannot_be_started_fails_the_dispatch() -> None:
-    clock = Clock(TUESDAY.replace(hour=3))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR))
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=1))
     runtime, log, _ = dispatcher(w, clock)
@@ -1031,7 +1045,7 @@ def collected(
 
 
 def test_history_is_filled_once_then_a_routine_run_asks_for_four_days() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, minute=5))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     first, adapter = collected(w, clock, "run-1")
     assert set(adapter.windows.values()) == {90} and first["requests_sent"] == 14
@@ -1051,7 +1065,7 @@ def test_history_is_filled_once_then_a_routine_run_asks_for_four_days() -> None:
     assert adapter.windows == {} and third["requests_sent"] == 0
     assert third["targets_skipped_already_done"] == 14
 
-    clock.moment = MONDAY.replace(hour=3, minute=5) + timedelta(days=7)
+    clock.moment = MONDAY.replace(hour=PERIOD_HOUR, minute=5) + timedelta(days=7)
     weekly, adapter = collected(w, clock, "run-4")
     assert set(adapter.windows.values()) == {14} and weekly["routine_window_days"] == 14
     assert WIKI_CAPS.steady_window_days == 4 and WIKI_CAPS.reconciliation_window_days == 14
@@ -1059,7 +1073,7 @@ def test_history_is_filled_once_then_a_routine_run_asks_for_four_days() -> None:
 
 
 def test_a_run_fills_only_so_many_histories_and_the_rest_wait_for_a_later_run() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, minute=5))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     caps = WIKI_CAPS.model_copy(update={"max_bootstraps_per_execution": 5})
     first, adapter = collected(w, clock, "run-1", caps=caps)
@@ -1074,7 +1088,7 @@ def test_a_run_fills_only_so_many_histories_and_the_rest_wait_for_a_later_run() 
 
 
 def test_a_fill_marker_is_written_only_after_the_batch_and_a_damaged_one_refills() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, minute=5))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     w.now = clock
     runtime, _ = runtime_for(w, "ms-wikimedia")
@@ -1090,7 +1104,7 @@ def test_a_fill_marker_is_written_only_after_the_batch_and_a_damaged_one_refills
 
 
 def test_targets_filled_before_markers_existed_can_be_recorded_as_filled() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, minute=5))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     ids = [t.source_native_id for t in bootstrap_targets(TUESDAY).targets]
     done = seed_bootstrap_markers(
@@ -1116,7 +1130,7 @@ def ordered_runtime(w: World, clock: Clock, run: str) -> tuple[Any, list[dict[st
 
 
 def test_under_work_orders_a_collector_asks_nothing_without_one() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, minute=5))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     runtime, log = ordered_runtime(w, clock, "run-1")
     built: list[str] = []
@@ -1138,7 +1152,7 @@ def test_under_work_orders_a_collector_asks_nothing_without_one() -> None:
 
 
 def test_a_collector_collects_exactly_its_order_once_and_files_a_receipt() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, second=9))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, second=9))
     w = world(clock, policy_for=real_policy)
     ids = [t.source_native_id for t in bootstrap_targets(TUESDAY).targets]
     seed_bootstrap_markers(
@@ -1150,7 +1164,7 @@ def test_a_collector_collects_exactly_its_order_once_and_files_a_receipt() -> No
         TUESDAY + timedelta(days=2),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_targets_per_execution=6)},
     )
-    run_day(w, clock, [3])
+    run_day(w, clock, [PERIOD_HOUR])
     clock.moment += timedelta(minutes=2)
     runtime, _ = ordered_runtime(w, clock, "run-1")
     adapter = Pageviews()
@@ -1175,16 +1189,16 @@ def test_a_collector_collects_exactly_its_order_once_and_files_a_receipt() -> No
     assert result["requests_sent"] == 0 and result["targets_skipped_already_done"] == 6
     # After its expiry the order is dead, whatever state it was left in.
     w.operations.delete(receipt_object(WIKIMEDIA, summary["work_order"]))
-    clock.moment = TUESDAY.replace(hour=3, minute=50)
+    clock.moment = TUESDAY.replace(hour=PERIOD_HOUR, minute=50)
     stale, _ = ordered_runtime(w, clock, "run-4")
     assert collect_wikimedia_job(stale, Pageviews)["reason"] == "order_expired"  # type: ignore[arg-type]
 
 
 def test_an_order_bounds_requests_and_a_rate_limit_is_reported_as_one() -> None:
-    clock = Clock(TUESDAY.replace(hour=3, second=9))
+    clock = Clock(TUESDAY.replace(hour=PERIOD_HOUR, second=9))
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=2))
-    run_day(w, clock, [3])
+    run_day(w, clock, [PERIOD_HOUR])
     version = policy_version(real_policy(WIKIMEDIA))
     order = claim(w.operations, WIKIMEDIA, clock.moment, version)
     tight = order.model_copy(update={"max_requests": 3})

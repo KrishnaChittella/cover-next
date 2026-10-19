@@ -189,10 +189,17 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
-      # A finite soak is four repository variables, all of them or none: the month, the
-      # first and last day, and the day's execution ceiling. Terraform refuses to
-      # unpause without them and refuses them while paused. The schedule mode is never
-      # passed, so this workflow cannot unpause an unbounded schedule.
+      # The schedule is the unbounded hourly one: schedule_mode is passed as steady_state.
+      # Terraform refuses a soak window together with it, so any SOAK_* variable left set
+      # stops the plan here with a plain message. Whether the scheduler actually runs is
+      # still the SCHEDULER_PAUSED variable alone; this workflow never writes false.
+      #
+      # The three source-secret versions are repository variables holding a version
+      # NUMBER (never a secret value). Unset means the jobs carry no reference to that
+      # secret. Terraform refuses "latest" and anything that is not a positive whole
+      # number; the check here only gives a clearer error sooner. Giving the Steam jobs
+      # their key does not start Steam collection: the dispatcher's configuration and the
+      # control record decide which sources are collected, and only Wikimedia is.
       - name: Plan
         working-directory: infra/prod
         env:
@@ -200,25 +207,33 @@ jobs:
           SOAK_START_DAY: ${{ vars.SOAK_START_DAY }}
           SOAK_END_DAY: ${{ vars.SOAK_END_DAY }}
           SOAK_CEILING: ${{ vars.SOAK_DAILY_EXECUTION_CEILING }}
+          STEAM_WEB_API_KEY_VERSION: ${{ vars.STEAM_WEB_API_KEY_VERSION }}
+          IGDB_CLIENT_ID_VERSION: ${{ vars.IGDB_CLIENT_ID_VERSION }}
+          IGDB_CLIENT_SECRET_VERSION: ${{ vars.IGDB_CLIENT_SECRET_VERSION }}
         run: |
-          soak=()
           if [ -n "${SOAK_MONTH}${SOAK_START_DAY}${SOAK_END_DAY}${SOAK_CEILING}" ]; then
-            for value in "${SOAK_MONTH}" "${SOAK_START_DAY}" "${SOAK_END_DAY}" "${SOAK_CEILING}"; do
-              [[ "${value}" =~ ^[1-9][0-9]?$ ]] || {
-                echo "::error::a finite soak needs SOAK_MONTH, SOAK_START_DAY, SOAK_END_DAY and SOAK_DAILY_EXECUTION_CEILING, each a whole number"; exit 1; }
-            done
-            soak=(
-              -var "soak_window={month=${SOAK_MONTH},start_day=${SOAK_START_DAY},end_day=${SOAK_END_DAY}}"
-              -var "soak_daily_execution_ceiling=${SOAK_CEILING}"
-            )
+            echo "::error::steady_state takes no soak window: delete the SOAK_* repository variables"; exit 1
           fi
+          versions=()
+          for pair in \
+            "steam_web_api_key_version=${STEAM_WEB_API_KEY_VERSION}" \
+            "igdb_client_id_version=${IGDB_CLIENT_ID_VERSION}" \
+            "igdb_client_secret_version=${IGDB_CLIENT_SECRET_VERSION}"; do
+            name="${pair%%=*}"; value="${pair#*=}"
+            if [ -n "${value}" ]; then
+              [[ "${value}" =~ ^[1-9][0-9]*$ ]] || {
+                echo "::error::${name} must be a positive whole number (a Secret Manager version), not \"latest\""; exit 1; }
+              versions+=(-var "${name}=${value}")
+            fi
+          done
           terraform init -input=false -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
           terraform plan -input=false -out=tfplan \
             -var "project_id=${{ vars.GCP_PROJECT_ID }}" \
             -var "image=${{ steps.image.outputs.image }}" \
             -var "notification_channel=${{ vars.GCP_NOTIFICATION_CHANNEL }}" \
             -var "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}" \
-            "${soak[@]}"
+            -var "schedule_mode=steady_state" \
+            "${versions[@]}"
           terraform show -no-color tfplan > plan.txt
           terraform show -json tfplan > plan.json
           sha256sum tfplan | cut -d' ' -f1 > tfplan.sha256

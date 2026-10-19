@@ -38,8 +38,8 @@ variable "scheduler_paused" {
 # --- The schedule ---------------------------------------------------------------------
 # Two modes, kept apart. In "finite_soak" (the default) the scheduler can only be
 # unpaused with a window of days named below, so the hourly ticks end by themselves
-# when the window does. "steady_state" is the unbounded hourly schedule; the deploy
-# workflow never passes it, so reaching it takes a reviewed change to the workflow.
+# when the window does. "steady_state" is the unbounded hourly schedule, and what the deploy
+# workflow passes. Whether the scheduler runs is still scheduler_paused alone.
 #
 # Cloud Scheduler's cron has no year. A window of days in a month is therefore not a
 # one-shot: it becomes eligible again on the same dates a year later. What bounds a

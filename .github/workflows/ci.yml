@@ -1,15 +1,20 @@
 # Verification. This workflow has NO cloud credentials and requests none: it cannot
 # reach GCP, and it calls no MetaSpike data source. Everything runs offline.
 #
-# It runs in two ways, and never twice for the same commit:
-#   - on every pull request;
+# Three ways in, never the same work twice for the same commit:
+#   - on every push to a branch other than main: the `fast` job only (format, lint,
+#     types and a fast test subset), for an answer in a few minutes;
+#   - on every pull request: everything, including the full test suite;
 #   - as the first job of the deploy workflow on main (`workflow_call`), where nothing
-#     that touches the cloud can start until every job here has passed.
-# It deliberately does NOT also trigger on a push to main: that push already runs it
-# through the deploy workflow, and running the same checks twice proved nothing more.
+#     that touches the cloud can start until every full job here has passed.
+# A push to main does not trigger this workflow, but the deploy workflow it starts calls
+# it, and a called workflow sees the caller's event: so the full jobs are told apart from
+# the fast one by the branch as well as the event.
 name: CI
 
 on:
+  push:
+    branches-ignore: [main]
   pull_request:
   workflow_call:
   workflow_dispatch:
@@ -24,7 +29,42 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Push only. Skips the files that dominate the run time (the dbt project, which has
+  # its own checks, and the long evidence, catalogue and opportunity suites); every other
+  # test file, including new ones, is in. The pull request runs all of it.
+  fast:
+    if: github.event_name == 'push' && github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install
+      - name: Install exactly what is locked
+        run: uv sync --locked
+      - name: Format
+        run: uv run ruff format --check
+      - name: Lint
+        run: uv run ruff check
+      - name: Types
+        run: uv run mypy
+      - name: Tests (fast subset, offline)
+        run: |
+          uv run pytest -q -x --tb=short \
+            --ignore=tests/test_warehouse_dbt.py \
+            --ignore=tests/test_warehouse_data_checks.py \
+            --ignore=tests/test_evidence.py \
+            --ignore=tests/test_catalogue_blocking.py \
+            --ignore=tests/test_fingerprint_memo.py \
+            --ignore=tests/test_opportunity.py \
+            --ignore=tests/test_opportunity_history.py \
+            --ignore=tests/test_signal_semantics_v2.py
+
   application:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -68,6 +108,7 @@ jobs:
         run: uvx pip-audit --strict --requirement <(uv export --project warehouse --locked --no-dev --no-hashes --no-emit-project)
 
   infrastructure:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -97,6 +138,7 @@ jobs:
         run: terraform test
 
   image:
+    if: github.event_name != 'push' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

@@ -2,10 +2,16 @@ selectors:
   - name: hourly
     description: Sample slots, coverage and source health, with their tests.
     definition:
-      method: tag
-      value: hourly
+      union:
+        - method: tag
+          value: hourly
+        - exclude:
+            - method: tag
+              value: production_data
   - name: daily
-    description: Everything, including period observations and source records.
+    description: >-
+      Everything, including period observations and source records, and the production
+      data checks (tests tagged production_data), which only this selection runs.
     definition:
       union:
         - method: tag
@@ -15,5 +21,9 @@ selectors:
   - name: periods
     description: Period observations and the run log, with their tests. Used when only period data arrived.
     definition:
-      method: tag
-      value: periods
+      union:
+        - method: tag
+          value: periods
+        - exclude:
+            - method: tag
+              value: production_data

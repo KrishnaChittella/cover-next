@@ -55,7 +55,7 @@ class DispatchConfig(FrozenModel):
     max_job_starts_per_tick: int = Field(default=6, ge=0)
     max_executions_per_day: int = Field(default=120, ge=0)
     # UTC hour at which the first cohort of a period source is due.
-    period_hour: int = Field(default=3, ge=0, le=23)
+    period_hour: int = Field(default=12, ge=0, le=23)
     # Monday: the daily run that day uses the reconciliation window.
     reconciliation_weekday: int = Field(default=0, ge=0, le=6)
     # UTC hour at which the schedule is regenerated from the targets document.

@@ -143,10 +143,15 @@ def build(
     as_of: datetime = AS_OF,
     selector: str = "hourly",
     rebuild_from: dict[str, str] | None = None,
+    checks: bool = True,
 ) -> str:
+    """`checks=False` leaves out the production data checks, for tests about the models
+    that deliberately build from empty or partial data. They are on by default, as in
+    production."""
     variables = json.dumps(
         {
             "run_as_of": f"{naive(as_of):%Y-%m-%d %H:%M:%S}",
+            "production_data_checks": checks,
             **{f"rebuild_from_{group}": day for group, day in (rebuild_from or {}).items()},
         }
     )
@@ -383,7 +388,7 @@ def test_every_read_of_a_raw_table_is_bounded_on_its_partition_column() -> None:
         text = path.read_text()
         for table in re.findall(r"source\('ms_(?:raw|ops)', '(\w+)'\)", text):
             readers += 1
-            bound = rf"where {partition[table]} >= {{{{ ms_window_start\("
+            bound = rf"where {partition[table]} >= {{{{ ms_(?:check_)?window_start\("
             assert re.search(bound, text), f"{path.name} reads {table} without a window"
     assert readers >= 5
 
@@ -667,7 +672,7 @@ def test_the_daily_selector_builds_every_model(dbt_ready: None, tmp_path: Path) 
     w = loaded_world(generated_attempts(apps=2, slots=4), batches=1)
     path = tmp_path / "warehouse.duckdb"
     copy_to_duckdb(w, path)
-    log = build(path, selector="daily")
+    log = build(path, selector="daily", checks=False)
     assert "ERROR=0" in log
     built_tables = {
         f"{schema}.{name}"
@@ -819,7 +824,7 @@ def copy_to_duckdb_raw(w: World, path: Path) -> None:
 def test_an_empty_warehouse_full_refreshes_to_empty_tables(dbt_ready: None, tmp_path: Path) -> None:
     path = tmp_path / "warehouse.duckdb"
     copy_to_duckdb(world(lambda: AS_OF), path)
-    log = build(path, "--full-refresh", selector="daily")
+    log = build(path, "--full-refresh", selector="daily", checks=False)
     assert "ERROR=0" in log
     assert query(path, "select count(*) from ms_marts.resolved_sample_slots") == [(0,)]
     assert query(path, "select count(*) from ms_staging.stg_period_observations") == [(0,)]
@@ -974,8 +979,8 @@ def test_the_sample_models_keep_their_three_day_lookback(dbt_ready: None, tmp_pa
     w = loaded_world(generated_attempts(apps=2, slots=4), batches=1)
     path = tmp_path / "warehouse.duckdb"
     copy_to_duckdb(w, path)
-    build(path, selector="daily")
-    build(path, selector="daily")  # incremental this time
+    build(path, selector="daily", checks=False)
+    build(path, selector="daily", checks=False)  # incremental this time
     compiled = tmp_path / "target" / "compiled" / "metaspike_warehouse" / "models"
     for model in ("staging/stg_sample_attempts", "staging/stg_expected_targets",
                   "staging/stg_collection_runs", "staging/stg_source_records",

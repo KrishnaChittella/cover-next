@@ -225,11 +225,18 @@ def test_source_secrets_reach_a_job_only_by_explicit_numeric_version() -> None:
         "igdb-client-secret": "igdb_client_secret_version",
     }
     # No path for a secret VALUE: no version resource, no data field, and the deploy
-    # workflow passes none of these variables.
+    # workflow passes only version NUMBERS, taken from repository variables.
     for root in (BOOTSTRAP, PROD):
         text = code(terraform(root))
         assert "google_secret_manager_secret_version" not in text and "secret_data" not in text
-    assert "_version=" not in workflow("deploy.yml")
+    deploy_text = workflow("deploy.yml")
+    for name in (
+        "STEAM_WEB_API_KEY_VERSION",
+        "IGDB_CLIENT_ID_VERSION",
+        "IGDB_CLIENT_SECRET_VERSION",
+    ):
+        assert f"{name}: ${{{{ vars.{name} }}}}" in deploy_text, name
+    assert not re.search(r"_version=\"?\d", deploy_text)  # never a number written in the file
     example = read(PROD / "prod.tfvars.example")
     assert not re.search(r"^\w+_version\s*=", example, re.M)  # shown only as comments
     # The behaviour itself is proven by `terraform test` with a mocked provider.
@@ -699,7 +706,8 @@ def test_verification_runs_once_per_commit_and_gates_every_cloud_step() -> None:
     ci, deploy = workflow("ci.yml"), workflow("deploy.yml")
     triggers = ci[ci.index("\non:\n") : ci.index("\npermissions:")]
     assert "pull_request:" in triggers and "workflow_call:" in triggers
-    assert "push:" not in triggers  # a push to main is verified by deploy, not twice
+    # A push to main is verified by deploy, not twice; other branches get the fast job.
+    assert "push:\n    branches-ignore: [main]" in triggers
     jobs = deploy[deploy.index("\njobs:\n") :]
     names = re.findall(r"^  ([a-z-]+):\n", jobs, re.M)
     assert names == ["verify", "identity-check", "plan", "apply"]
@@ -723,6 +731,10 @@ def test_verification_runs_once_per_commit_and_gates_every_cloud_step() -> None:
     assert "if: always()" not in deploy and "continue-on-error" not in deploy
     assert deploy.count("id-token: write") == 3  # exactly the three jobs above
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in ci
+    # The full jobs never run on a push; only the fast one does, and it needs no cloud.
+    # (A call from deploy on main also reports the event "push", hence the ref test.)
+    assert ci.count("if: github.event_name != 'push' || github.ref == 'refs/heads/main'") == 3
+    assert ci.count("if: github.event_name == 'push' && github.ref != 'refs/heads/main'") == 1
 
 
 def test_a_push_to_main_can_never_reach_cloud_authentication() -> None:
