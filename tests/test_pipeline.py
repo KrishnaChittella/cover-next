@@ -67,6 +67,8 @@ def test_run_publishes_the_complete_artifact_set(artifacts_dir: Path) -> None:
     assert top_level == {
         "manifest.json",
         "current.json",
+        "radar.json",
+        "validation.json",
         "source-health.json",
         "methodology.json",
         "games",
@@ -98,7 +100,8 @@ def test_every_published_file_validates_against_its_checked_in_json_schema(
             validators[schema_name(str(path.relative_to(root)))].validate(document)
             assert document["schema_version"] == SCHEMA_VERSION
             checked += 1
-    assert checked == (4 + 15) + (3 + 15)
+    # radar and validation are in both the mirror and the version
+    assert checked == (6 + 15) + (5 + 15)
 
 
 def test_checked_in_schemas_match_the_models() -> None:

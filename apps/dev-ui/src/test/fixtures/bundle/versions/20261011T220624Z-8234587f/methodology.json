@@ -1,0 +1,565 @@
+{
+  "schema_version": "1.5.0",
+  "contract_status": "internal",
+  "generated_at": "2026-10-11T22:06:24.937085Z",
+  "run_id": "20261011T220624Z-8234587f",
+  "score_version": "metaspike_score_v0",
+  "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply.",
+  "score": {
+    "version": "metaspike_score_v0",
+    "range": [
+      0.0,
+      100.0
+    ],
+    "terms": [
+      {
+        "name": "significance",
+        "formula": "clamp(robust_z_score / 7, 0, 1)",
+        "rationale": "How unusual the latest day is against the game's own day-to-day variability. A robust z of 3.5 is the conventional outlier threshold and earns half credit; twice that saturates."
+      },
+      {
+        "name": "magnitude",
+        "formula": "clamp(log2(lift_ratio) / 3, 0, 1)",
+        "rationale": "How far the 3-day average sits above the game's own 28-day median, in doublings because attention grows multiplicatively. 8x normal saturates."
+      },
+      {
+        "name": "anomaly",
+        "formula": "sqrt(significance * magnitude)",
+        "rationale": "Geometric mean, so an anomaly must be BOTH statistically unusual and large. Significance alone over-rewards tiny moves in very stable series; magnitude alone over-rewards noise in small, volatile ones."
+      },
+      {
+        "name": "momentum",
+        "formula": "clamp(log2(velocity_ratio) / 1, 0, 1)",
+        "rationale": "Whether attention is still accelerating: the 3-day average against the preceding 3 days. Doubling saturates. Undefined velocity counts as 0."
+      },
+      {
+        "name": "score",
+        "formula": "100 * (0.7 * anomaly + 0.3 * momentum)",
+        "rationale": "Anomaly is the primary signal and momentum the secondary one. The weights are stated priors, not fitted values. Declines clamp to 0: v0 scores upward attention only."
+      }
+    ]
+  },
+  "confidence": {
+    "range": [
+      0.0,
+      100.0
+    ],
+    "current_ceiling": 60.0,
+    "bands": {
+      "low": "< 30",
+      "medium": "30 to 60",
+      "high": "> 60 (unreachable with one source)"
+    },
+    "terms": [
+      {
+        "name": "source_ceiling",
+        "formula": "1 - 0.4 ^ n_sources",
+        "rationale": "Independent corroboration is the main driver of confidence. With one source the ceiling is 0.60, so confidence can never exceed 60."
+      },
+      {
+        "name": "freshness",
+        "formula": "max(0, 1 - staleness_days / 4)",
+        "rationale": "Data that lags the expected latest day says less about 'right now'."
+      },
+      {
+        "name": "history",
+        "formula": "min(1, history_span_days / 90)",
+        "rationale": "A short history gives a weaker picture of what is normal for the game."
+      },
+      {
+        "name": "completeness",
+        "formula": "observed_days / history_span_days",
+        "rationale": "Missing days inside the history weaken every statistic built on it."
+      },
+      {
+        "name": "samples",
+        "formula": "min(baseline_samples / 28, recent_7d_samples / 7)",
+        "rationale": "Whether the windows the score depends on were actually fully populated."
+      },
+      {
+        "name": "confidence",
+        "formula": "100 * source_ceiling * freshness * history * completeness * samples",
+        "rationale": "Multiplicative, so any single weakness lowers confidence and none can be averaged away by the others."
+      }
+    ]
+  },
+  "event_heat": {
+    "version": "event_heat_rules_v1",
+    "status": "internal_uncalibrated",
+    "scope_note": "Event Heat is internal and uncalibrated (event_heat_rules_v1). It is reported beside metaspike_score_v0 and is not part of it. Unavailable means no source has looked at a game's events recently; it never means zero.",
+    "range": [
+      0.0,
+      100.0
+    ],
+    "terms": [
+      {
+        "name": "strength, before the start",
+        "formula": "pre_event_peak * (1 - days_to_start / ramp_days), inside the ramp; else 0",
+        "rationale": "Anticipation builds as a dated event approaches. Outside the ramp an event is scheduled and has no strength yet."
+      },
+      {
+        "name": "strength, while running",
+        "formula": "max(0.5 ^ (days_since_start / half_life_days), active_floor)",
+        "rationale": "The start is the peak. Novelty then halves every half-life, but an event that is still running never falls below its floor."
+      },
+      {
+        "name": "strength, after the end",
+        "formula": "strength_at_end * 0.5 ^ (days_since_end / half_life_days), until decay_window_days; then 0",
+        "rationale": "Influence fades from where it stood when the event ended and stops counting once the window has passed."
+      },
+      {
+        "name": "contribution",
+        "formula": "importance * strength",
+        "rationale": "A type's importance is also the most one event of it can contribute."
+      },
+      {
+        "name": "event_heat",
+        "formula": "scale * (1 - product(1 - contribution)), over the largest max_contributing_events contributions",
+        "rationale": "Each event contributes importance x strength, between 0 and 1. Events of the same type starting on the same UTC day count once, at the larger contribution, so an unmerged duplicate cannot count twice. The max_contributing_events largest contributions c are combined as heat = scale x (1 - product(1 - c)). The result is never below the largest single contribution, never reaches the scale unless one contribution is 1, and adding an event never lowers it."
+      }
+    ],
+    "aggregation": "Each event contributes importance x strength, between 0 and 1. Events of the same type starting on the same UTC day count once, at the larger contribution, so an unmerged duplicate cannot count twice. The max_contributing_events largest contributions c are combined as heat = scale x (1 - product(1 - c)). The result is never below the largest single contribution, never reaches the scale unless one contribution is 1, and adding an event never lowers it.",
+    "availability": [
+      {
+        "name": "available, heat 0",
+        "formula": "a source looked within coverage_max_age_days; no relevant event",
+        "rationale": "A finding: someone looked and there is nothing."
+      },
+      {
+        "name": "available, heat above 0",
+        "formula": "a source looked within coverage_max_age_days; relevant events exist",
+        "rationale": "The events and each one's contribution are listed."
+      },
+      {
+        "name": "unavailable",
+        "formula": "no source has looked, or the last look is older than coverage_max_age_days",
+        "rationale": "Not knowing is never reported as zero. The heat is null and the reason is given."
+      }
+    ],
+    "parameters": [
+      {
+        "name": "scale",
+        "value": "100",
+        "rationale": "The same 0 to 100 scale as the score and confidence, so the three read alike. It is a different quantity and is not added to either."
+      },
+      {
+        "name": "max_contributing_events",
+        "value": "3",
+        "rationale": "A game is rarely about more than a few things at once. Counting only the three strongest stops a pile of small events from looking like one large one."
+      },
+      {
+        "name": "coverage_max_age_days",
+        "value": "14",
+        "rationale": "Dates move. If no source has looked at a game's events for two weeks, what is known may be out of date, and heat is reported as unavailable, never as zero."
+      },
+      {
+        "name": "horizon_days",
+        "value": "30",
+        "rationale": "A month is as far ahead as a dated announcement is useful for planning content, and the longest ramp any type has."
+      },
+      {
+        "name": "radar_windows_hours",
+        "value": "24, 168, 720",
+        "rationale": "The next day, the next week and the next month: what can still be prepared for today, this week, and with planning."
+      }
+    ],
+    "types": [
+      {
+        "event_type": "release",
+        "label": "Release",
+        "importance": 1.0,
+        "ramp_days": 30.0,
+        "pre_event_peak": 0.6,
+        "default_duration_days": 0.0,
+        "half_life_days": 7.0,
+        "active_floor": 0.0,
+        "decay_window_days": 30.0,
+        "rationale": "The largest moment a game has. Anticipation builds for a month, the day itself is the peak, and interest halves about weekly for a month after."
+      },
+      {
+        "event_type": "expansion",
+        "label": "Expansion",
+        "importance": 0.85,
+        "ramp_days": 21.0,
+        "pre_event_peak": 0.55,
+        "default_duration_days": 0.0,
+        "half_life_days": 6.0,
+        "active_floor": 0.0,
+        "decay_window_days": 21.0,
+        "rationale": "A second launch for an existing audience: nearly as large as a release, with a shorter build-up and tail."
+      },
+      {
+        "event_type": "platform_release",
+        "label": "Platform release",
+        "importance": 0.6,
+        "ramp_days": 14.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 0.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.0,
+        "decay_window_days": 14.0,
+        "rationale": "A launch for a new audience only. Real, but smaller than the original."
+      },
+      {
+        "event_type": "season",
+        "label": "New season",
+        "importance": 0.7,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 60.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.15,
+        "decay_window_days": 3.0,
+        "rationale": "A season's start is the event; the season then runs for weeks. Strength halves every five days and holds at a low floor until the season ends."
+      },
+      {
+        "event_type": "wipe",
+        "label": "Wipe",
+        "importance": 0.65,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.6,
+        "default_duration_days": 14.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.1,
+        "decay_window_days": 2.0,
+        "rationale": "A reset everyone plays through at once. Sharp, anticipated a few days ahead, and largely over within two weeks."
+      },
+      {
+        "event_type": "major_patch",
+        "label": "Major update",
+        "importance": 0.6,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 0.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.0,
+        "decay_window_days": 10.0,
+        "rationale": "Changes what there is to say about a game. Usually dated a few days ahead; interest fades within about ten days."
+      },
+      {
+        "event_type": "dlc",
+        "label": "DLC",
+        "importance": 0.5,
+        "ramp_days": 10.0,
+        "pre_event_peak": 0.45,
+        "default_duration_days": 0.0,
+        "half_life_days": 4.0,
+        "active_floor": 0.0,
+        "decay_window_days": 10.0,
+        "rationale": "New content smaller than an expansion."
+      },
+      {
+        "event_type": "expedition",
+        "label": "Expedition",
+        "importance": 0.45,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 42.0,
+        "half_life_days": 5.0,
+        "active_floor": 0.1,
+        "decay_window_days": 2.0,
+        "rationale": "A time-limited community event that runs for weeks, strongest at its start."
+      },
+      {
+        "event_type": "major_in_game_event",
+        "label": "In-game event",
+        "importance": 0.55,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.5,
+        "default_duration_days": 3.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.25,
+        "decay_window_days": 3.0,
+        "rationale": "A live moment inside the game. Short, so it stays near full strength while it runs and fades within days."
+      },
+      {
+        "event_type": "beta",
+        "label": "Beta",
+        "importance": 0.5,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.45,
+        "default_duration_days": 7.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.2,
+        "decay_window_days": 4.0,
+        "rationale": "First hands-on access for a wide audience, for a limited time."
+      },
+      {
+        "event_type": "playtest",
+        "label": "Playtest",
+        "importance": 0.35,
+        "ramp_days": 5.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 4.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.2,
+        "decay_window_days": 3.0,
+        "rationale": "Limited access, smaller than a beta."
+      },
+      {
+        "event_type": "free_weekend",
+        "label": "Free weekend",
+        "importance": 0.4,
+        "ramp_days": 3.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 3.0,
+        "half_life_days": 3.0,
+        "active_floor": 0.4,
+        "decay_window_days": 2.0,
+        "rationale": "A few days in which anyone can play. It matters while it lasts and little after."
+      },
+      {
+        "event_type": "showcase",
+        "label": "Showcase",
+        "importance": 0.45,
+        "ramp_days": 7.0,
+        "pre_event_peak": 0.4,
+        "default_duration_days": 1.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.5,
+        "decay_window_days": 4.0,
+        "rationale": "A dated presentation. Speculation builds for a week and the reaction is spent within days."
+      },
+      {
+        "event_type": "trailer",
+        "label": "Trailer",
+        "importance": 0.4,
+        "ramp_days": 2.0,
+        "pre_event_peak": 0.3,
+        "default_duration_days": 0.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.0,
+        "decay_window_days": 5.0,
+        "rationale": "Often a surprise, so there is little build-up. Reaction content has a short life."
+      },
+      {
+        "event_type": "minor_patch",
+        "label": "Minor update",
+        "importance": 0.15,
+        "ramp_days": 1.0,
+        "pre_event_peak": 0.2,
+        "default_duration_days": 0.0,
+        "half_life_days": 2.0,
+        "active_floor": 0.0,
+        "decay_window_days": 3.0,
+        "rationale": "Routine maintenance. Recorded, and deliberately worth little: three of them together stay well under one major patch."
+      }
+    ],
+    "radar_windows_hours": [
+      24,
+      168,
+      720
+    ],
+    "limitations": [
+      "Internal and uncalibrated: every value is an engineering prior, not fitted to outcomes and not backtested.",
+      "No event source is collected yet. Until one is, event intelligence is unavailable for every game.",
+      "Event Heat is not part of metaspike_score_v0 and does not affect any rank.",
+      "Events are matched by exact rules only. Two reports of one event that share no id, reference or title stay separate; heat counts one event per type and start day so that such a duplicate cannot count twice.",
+      "A source without native event ids that moves a date is seen as reporting a new event.",
+      "Importance is per type, not per game: a small game's release and a large game's are treated alike.",
+      "All days are UTC. An event known only to the day starts at 00:00 UTC."
+    ]
+  },
+  "features": {
+    "granularity": "daily",
+    "history_days": 90,
+    "principle": "Each game is compared against its own recent normal, never against other games' raw popularity. All windows are anchored on t, the latest observed day; missing days are excluded from every window, never counted as zero.",
+    "definitions": [
+      {
+        "name": "latest_views",
+        "unit": "views/day",
+        "definition": "x[t]: pageviews on t, the latest day with an observation.",
+        "valid_when": "at least one observed day in the window"
+      },
+      {
+        "name": "avg_3d",
+        "unit": "views/day",
+        "definition": "Mean of observed days in [t-2, t].",
+        "valid_when": ">= 2 observed days of 3"
+      },
+      {
+        "name": "avg_7d",
+        "unit": "views/day",
+        "definition": "Mean of observed days in [t-6, t].",
+        "valid_when": ">= 5 observed days of 7"
+      },
+      {
+        "name": "baseline_mean_28d / baseline_std_28d",
+        "unit": "views/day",
+        "definition": "Rolling mean and sample standard deviation (n-1) of observed days in the baseline window [t-34, t-7].",
+        "valid_when": ">= 14 observed days of 28"
+      },
+      {
+        "name": "baseline_median_28d / baseline_mad_28d",
+        "unit": "views/day",
+        "definition": "Median m of the baseline window, and MAD = median(|x_i - m|) over the same days. The median is the game's 'normal' level; it is unaffected by old spikes.",
+        "valid_when": ">= 14 observed days of 28"
+      },
+      {
+        "name": "lift_ratio / lift_pct",
+        "unit": "ratio / percent",
+        "definition": "lift_ratio = avg_3d / baseline_median_28d; lift_pct = (lift_ratio - 1) * 100.",
+        "valid_when": "avg_3d valid and baseline_median_28d > 0"
+      },
+      {
+        "name": "lift_7d_pct",
+        "unit": "percent",
+        "definition": "(avg_7d / baseline_median_28d - 1) * 100.",
+        "valid_when": "avg_7d valid and baseline_median_28d > 0"
+      },
+      {
+        "name": "velocity_ratio / velocity_pct",
+        "unit": "ratio / percent",
+        "definition": "velocity_ratio = avg_3d / prior_avg_3d, where prior_avg_3d is the mean of observed days in [t-5, t-3]; velocity_pct = (velocity_ratio - 1) * 100.",
+        "valid_when": "both 3-day windows have >= 2 observed days and prior_avg_3d > 0"
+      },
+      {
+        "name": "consecutive_rising_days",
+        "unit": "days",
+        "definition": "Number of consecutive day-over-day increases ending at t. A missing day ends the run.",
+        "valid_when": "always (0 when there is no run)"
+      },
+      {
+        "name": "z_score",
+        "unit": "standard deviations",
+        "definition": "(x[t] - baseline_mean_28d) / baseline_std_28d.",
+        "valid_when": "baseline valid and baseline_std_28d > 0"
+      },
+      {
+        "name": "robust_z_score",
+        "unit": "robust standard deviations",
+        "definition": "(x[t] - baseline_median_28d) / s, with s = 1.4826 * MAD. If MAD is 0, s = 1.2533 * mean(|x_i - m|) instead (robust_scale_method = 'mean_ad'). Unlike z_score it is not inflated or masked by earlier outliers.",
+        "valid_when": "baseline valid and s > 0"
+      },
+      {
+        "name": "history_percentile",
+        "unit": "percentile (0-100)",
+        "definition": "Mid-rank percentile of x[t] among all observed days before t in the fetched window: 100 * (count(x_i < x[t]) + 0.5 * count(x_i = x[t])) / n.",
+        "valid_when": "n >= 30 prior observed days"
+      },
+      {
+        "name": "staleness_days",
+        "unit": "days",
+        "definition": "Days by which t trails the latest day the source was due to have published, given its expected publication lag. Never negative.",
+        "valid_when": "at least one observed day in the window"
+      },
+      {
+        "name": "missing_days",
+        "unit": "days",
+        "definition": "Days with no observation between the first observed day and t.",
+        "valid_when": "always"
+      }
+    ]
+  },
+  "explanations": "Deterministic templates rendered from computed features. A sentence appears only when its backing feature crosses a fixed threshold. No language model.",
+  "metrics": [
+    {
+      "metric_id": "pageviews",
+      "display_name": "Pageviews",
+      "unit": "views",
+      "description": "Human (non-bot) views of the page that represents the game.",
+      "role": "demand",
+      "aggregation": "sum",
+      "granularities": [
+        "daily"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "source": "wikimedia_pageviews",
+      "signals": [
+        {
+          "metric": "pageviews",
+          "granularity": "daily"
+        }
+      ],
+      "description": "Daily human (non-bot) pageviews of the game's English Wikipedia article, all access methods, from the Wikimedia Analytics API.",
+      "policy": {
+        "source": "wikimedia_pageviews",
+        "raw_storage_allowed": "allowed",
+        "retention_days": null,
+        "historical_storage_allowed": "allowed",
+        "derived_metrics_allowed": "allowed",
+        "commercial_use_allowed": "allowed",
+        "redistribution_allowed": "allowed",
+        "attribution_required": "not_required",
+        "attribution_text": "Pageview data from the Wikimedia Analytics API (CC0 1.0).",
+        "approval_required": "not_required",
+        "approval_status": "not_required",
+        "commercial_approval_required": "not_required",
+        "commercial_approval_status": "not_required",
+        "stage_clearance": [
+          {
+            "stage": "private_development",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "private_collection",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "public_launch",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          },
+          {
+            "stage": "commercial_production",
+            "cleared": true,
+            "reason": "CC0 1.0 data with no usage condition."
+          }
+        ],
+        "operations": {
+          "budget_group": "wikimedia",
+          "rate_limit": {
+            "max_requests": 200,
+            "per_seconds": 60,
+            "max_concurrency": 1,
+            "basis": "documented",
+            "note": "200 requests/minute for unauthenticated clients with a compliant User-Agent. The Analytics API asks clients to wait for each request to finish before sending another, hence a concurrency of 1."
+          },
+          "quota": null,
+          "cache_max_age_seconds": null,
+          "expected_publication_lag_seconds": 86400,
+          "publication_lag_basis": "observed"
+        },
+        "display": {
+          "link_back_required": "not_required",
+          "branding_required": "not_required",
+          "note": "CC0 data carries no display condition. Wikimedia marks must not be used in a way that implies endorsement."
+        },
+        "field_rules": [
+          {
+            "field": "pageviews",
+            "storage_allowed": "allowed",
+            "display_allowed": "allowed",
+            "note": "Aggregate daily counts; no personal data."
+          }
+        ],
+        "reviewed_at": "2026-10-04",
+        "references": [
+          "https://doc.wikimedia.org/generated-data-platform/aqs/analytics-api/documentation/access-policy.html",
+          "https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy",
+          "https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use",
+          "https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits"
+        ],
+        "notes": "API data is published under CC0 1.0. Use is subject to the Wikimedia Terms of Use: a descriptive User-Agent with contact information is mandatory, requests must be made one at a time, and clients that endanger service stability may be blocked. No publication schedule is documented for daily data: one hour after a day ended it was not yet available, so a 24-hour lag is allowed for until measured."
+      }
+    }
+  ],
+  "limitations": [
+    "Single source: only Wikimedia pageviews are collected, so nothing is corroborated and confidence is capped at 60.",
+    "Wikipedia readership is a proxy for general public attention. It is not player counts, viewership, search demand or creator supply.",
+    "Daily granularity in UTC. The newest point is the last complete day, typically 1 day old.",
+    "English Wikipedia only, so attention from non-English audiences is under-represented.",
+    "Views of redirect titles are counted separately by the source and are not included.",
+    "A game with no article of its own (for example FiveM) has no coverage and is unranked.",
+    "A day the source omits is treated as missing, not as zero views.",
+    "No event detection yet: the score reports that attention moved, not what caused it.",
+    "Weekly seasonality is not modelled; the 28-day baseline spans four whole weeks to limit, but not remove, its effect.",
+    "Score weights and saturation points are stated priors, not values fitted to outcomes.",
+    "The score rewards upward attention only; declines score 0 rather than negative."
+  ]
+}

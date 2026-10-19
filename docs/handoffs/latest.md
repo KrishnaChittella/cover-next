@@ -1,157 +1,118 @@
-# Handoff: latest checkpoint
+# Handoff: latest checkpoint (product branch)
 
-This file is the short-lived handoff from Claude Code to ChatGPT. It is overwritten at
-each checkpoint; Git history is the archive. It supports communication only and
-replaces no code, test, audit or document.
+## MULTISOURCE IMPLEMENTATION — RECORDED SOURCES TO THE PRODUCT UI
 
-Previous checkpoint: **PHASE 4 PART C2-F: FINAL UNPAUSE PLAN READY — REVIEW REQUIRED**
+Previous checkpoint: PRODUCT BUILD U6.9 (`ec679aa`, on `product/local-ui`).
 
-Current checkpoint: **PHASE 4 PART C2-F: ARMED AND SCHEDULED — SEVEN-DAY SOAK PENDING**
+## Branch
 
-The control record is armed and the approved unpause plan is applied. The scheduler is
-enabled with the finite cron and its next run is the first tick of the window.
-**C2-F is NOT YET PASSED and has not yet run:** the observation window opens at
-2026-10-12T00:00:00Z. Nothing was triggered by hand and no source was called.
+- `product/multisource`, cut from `product/local-ui` at
+  `ec679aa7f566d25f0a2a08873abceff2718aedc9`.
+- Implementation SHA: `ab9d989a76d551d2351237af3781a9608ca1eade`.
+- Docs SHA: `ec5958d6dc343deccdcaeae79c138901162086de`.
+- These branches were not modified: `main` (`cb33198`), `product/local-ui` (`ec679aa`)
+  and `ops/c2f-acceptance-review` (`67f9e31`).
+- Nothing was merged or deployed.
+- No GCP access, no live source call, no credential read.
 
-No manual action is required before the first tick. Nothing depends on a laptop.
+## What was done
 
-## Launch
+1. **Collector completeness fix.** Commit `111d40f`. `collect_wikimedia` no longer
+   marks a slot done when the answer lacks the due period.
+   - The answer is still landed.
+   - The target counts in `targets_due_period_missing`, and a `due_period_missing`
+     WARNING is logged.
+   - The run, and the work-order outcome, are partial.
+   - The regression test reproduces the C2-F 16 October answer. The next run then asks
+     again and completes.
+2. **Steam replay dating fix.** Commits `a8abc4a` and `c90cf3b`.
+   - **Before:** `metaspike sample --replay` dated a 6 October response by the wall
+     clock, and invented failed attempts for apps with no recording.
+   - **Now:**
+     - replays are dated from the recording's `recorded_at`;
+     - only recorded apps are asked;
+     - a replay may not be filed under a later slot.
+   - The tests were updated to the stricter behaviour.
+3. **Integrated path.** Commit `8a03d1a`.
+   - `npm run opportunities:integrated` reads all the genuine recorded inputs through
+     the existing `sample` and `evidence --opportunities` commands. No new pipeline was
+     added.
+   - New UI view `/opportunities?view=integrated`, selected by the exact word only. It
+     carries a notice and lists the unverified sources.
+   - The board gains a column of demand and event sources, each with state and origin.
+   - The game page source table gains kind and freshness.
+4. **End-to-end proof.** Commit `ab9d989`. `tests/test_integrated_recorded.py` runs the
+   generator's commands with sockets refused and the clock moved to 2027. It requires
+   the UI fixture's exact bytes and asserts every source's standing.
+
+## Inputs, by standing
 
 | | |
 |---|---|
-| Launch completed | 2026-10-11 02:20:17 UTC, 21 h 40 m before the first tick |
-| Control record written | 02:11:44 UTC |
-| Control generation | `1791578645841911` (disabled) → **`1791684706340016`** (armed) |
-| Write mechanism | `--if-generation-match` on the disabled generation; it held |
-| Read-back | byte-identical to the approved record (238 bytes); validated by the dispatcher's own model before writing |
-| Approved plan | run `38101148562`, SHA-256 `61c335bbd54e7bbed2cba09490315331d0c858f595f079aea28fd75e95659bd1` |
-| Apply run | `38104368815`, apply job finished 02:20:20 UTC, success |
-| Terraform result | `Apply complete! Resources: 0 added, 2 changed, 0 destroyed.` (0 replaced) |
-| Prod state serial | 13 → **14**; still 94 managed resources |
+| **Verified (pinned)** | IGDB and Steam app-list catalogue records, identity only. Wikimedia pageviews for six articles through 3 Oct |
+| **Genuinely recorded, unverified** | One Steam players response: app 730, 2026-10-06 01:25:26 UTC. It reaches Counter-Strike 2 as `available`, `fresh` and UNVERIFIED, and is never counted |
+| **Synthetic** | The Steam News fixtures and the existing demonstration view. Neither is used in the integrated report |
+| **Absent** | Eight Wikimedia articles; seven Steam apps; real Steam News on this machine; YouTube; Reddit (approval PENDING) |
 
-Order kept: preflight, then control, then apply. Between the control write and the
-apply the scheduler was confirmed still PAUSED with 35 executions.
+**Result:** every game abstains. No frozen rule, score, schema or policy was changed.
+The public contract is still 1.5.0.
 
-The control record now in place:
+## Steam: steps remaining
 
-```json
-{"version":1,"enabled":true,"armed_until":"2026-10-18T23:30:00Z","max_job_starts_per_tick":1,"max_executions_per_day":3,"sources":{"wikimedia_pageviews":{"enabled":true,"max_requests_per_day":22,"max_targets_per_execution":14}},"pins":[]}
+Details are in `docs/multisource-integration.md`.
+
+**Before the first supervised real sample:**
+
+1. Owner authorisation for one session: 8 apps, 1 slot, 8 requests.
+2. The key, set in the owner's shell.
+3. **A supervised Steam recorder (not built).** Live `sample` writes neither an
+   acquisition record nor a replayable recording, so nothing could ever be pinned.
+4. Review the recording, then pin its digest.
+5. History accrues only under `private_collection`, which needs:
+   - a privacy notice;
+   - US-only storage;
+   - the key registration.
+
+**Before anything public:**
+
+- Valve's answer on derived metrics and commercial use; both are UNKNOWN.
+- A privacy notice.
+- Valve attribution and branding.
+- A reviewed public contract change.
+
+## Gates
+
+| Gate | Result |
+|---|---|
+| ruff check, ruff format --check, mypy (247 files) | exit 0 |
+| pytest | **1677 passed**, 8 deselected, 9 m 05 s |
+| dev-ui typecheck, lint | exit 0 |
+| dev-ui vitest | **242 passed** (16 files) |
+| contract:check, opportunities:schema:check | current |
+| next build | exit 0; no private report traced into `.next` |
+| Live check | dev server on 127.0.0.1: integrated board, game page, compare, verified and synthetic views all HTTP 200, with the source table rendered |
+
+## Run it
+
+```
+cd apps/dev-ui
+npm run opportunities:integrated && npm run opportunities:recorded
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
+# http://127.0.0.1:3000/opportunities?view=integrated
+# http://127.0.0.1:3000/opportunities/counter-strike-2?view=integrated
+uv run pytest -q tests/test_integrated_recorded.py tests/test_jobs.py tests/test_steam_players.py
 ```
 
-## Preflight (02:10 UTC on 11 October), all met
+## Next step proposed (not started)
 
-Before midnight UTC, against an external clock. `main` level with origin and clean;
-only two documents changed since the plan's commit `fea9429`. Plan run succeeded;
-artifact unexpired (2026-10-14T01:24:20Z) and hashing exactly; rendered diff 0 add,
-2 change, 0 destroy. State serial 13, 94 resources, no apply since the plan. Scheduler
-PAUSED `0 * * * *` `Etc/UTC`. Control disabled at generation `1791578645841911`. 35
-executions, the last being the catch-up `ms-warehouse-lxqp9`. Seven jobs on the
-approved digest. 51 landed batches and 51 load receipts, so none pending;
-`collection_runs` 54, observations 1,372, ledger 28. Ten policies, silence disabled,
-the two failure alerts enabled, volume threshold 60. The five repository variables as
-approved. 0 secret versions, 0 keys, WIF ACTIVE, quota 10,240 MiB. No Cloud Run log
-entry since the catch-up.
+A supervised Steam players recorder, built and tested offline only:
 
-## Verified after the apply (02:20 UTC)
+- plan by default;
+- `--live --confirm`;
+- recordings written in replay format;
+- acquisition records;
+- `--inspect`.
 
-**Scheduler**, read from the live job:
+Any live run needs separate owner approval.
 
-| | |
-|---|---|
-| State | **ENABLED** |
-| Schedule | **`0 * 12-18 10 *`** |
-| Time zone | `Etc/UTC` |
-| Next scheduled run | **2026-10-12T00:00:00Z** |
-| Last attempt | none |
-
-Only four fields differ from before the apply: state, schedule, the next-run time and
-the update timestamp. Retry settings, deadline, target and identity are unchanged. No
-scheduler attempt has been logged since the scheduler was paused on 9 October.
-
-**Monitoring.** Ten policies, none added or removed. One changed: "unusually many job
-executions in a day" now reads "more than 31 completed executions in 24 hours" with a
-threshold of **31**, and nothing else in that policy changed. `dispatcher_silent`
-remains disabled. `scheduler_delivery_failed` and `dispatcher_failed` remain enabled.
-The other seven are identical to their pre-apply copies.
-
-**Terraform outputs:** `collection_running = true`,
-`daily_execution_alert_threshold = 31`, `dispatch_schedule = "0 * 12-18 10 *"`,
-`soak_scheduled_ticks = 168`.
-
-**Control:** enabled, byte-identical to the approved record, `armed_until`
-2026-10-18T23:30:00Z, generation `1791684706340016`.
-
-**Cloud Run:** executions still **35**; the last is the catch-up of 01:06 UTC. No
-dispatcher, collector or warehouse job has run since. No Cloud Run log entry at all
-since the catch-up. All seven jobs at generation 6 on
-`sha256:a8680b2be8b5e4bea48392c2b5324b44a680b4c2a4d56e2f49b836bdb979c754`.
-
-**Security:** 0 secret versions; 0 user-managed keys across 10 service accounts; the
-audit comparison differs only in the alert list and the scheduler; WIF pool ACTIVE.
-
-**BigQuery quota:** 10,240 MiB a day.
-
-**Sources:** Wikimedia 0, Steam 0, IGDB 0.
-
-**Repository variables:** `SCHEDULER_PAUSED=false`, `SOAK_MONTH=10`,
-`SOAK_START_DAY=12`, `SOAK_END_DAY=18`, `SOAK_DAILY_EXECUTION_CEILING=31`.
-
-The portfolio repository was not touched.
-
-## The soak
-
-| | |
-|---|---|
-| Opens | 2026-10-12T00:00:00Z |
-| Last tick | 2026-10-18T23:00:00Z |
-| Control expires | 2026-10-18T23:30:00Z |
-| Ticks | 168 |
-
-Expected: 168 dispatchers; a collection opportunity at 03:00 UTC on each of seven
-days; Monday 12 October with the 14-day reconciliation window, Tuesday to Sunday with
-4-day windows; 14 requests a day (above 22 a review event, above 44 an incident); two
-children a day, at most three; at most 189 executions for the soak, so at most 224 in
-the project; no rolling 24 hours above 31 completed executions; about $0.30.
-
-First milestones, to be read afterwards and not waited for:
-
-| UTC | Expected |
-|---|---|
-| 2026-10-12 00:00 | First tick. Dispatcher only; nothing is due |
-| 2026-10-12 03:00 | Monday reconciliation order: 14 targets, 14-day window, 22 reserved, 14 requests expected. Collector starts |
-| 2026-10-12 04:00 | Warehouse run, after the collector's receipt |
-
-Work begins two to four minutes after each hour: that is Cloud Run's start-up time,
-measured in C2-E, and is not a fault.
-
-**The schedule is not one-shot.** The cron has no year and the same dates are eligible
-again from 2027-10-12. The control record's expiry and the post-soak reconciliation
-are what bound it to this year.
-
-## Success criteria
-
-The fourteen criteria are in section 31 of `docs/phase4-c2-plan.md`, with the alert
-ceiling at 31. They are judged after the window. **C2-F is not yet passed.**
-
-## Stops, if one is needed
-
-- Stop source work at once: disable the control record (one write, on generation
-  `1791684706340016`).
-- Stop everything: `gcloud scheduler jobs pause ms-dispatch-15m --location=us-central1
-  --project=metaspike-prod-kc`.
-
-Neither is needed for the soak to end. The ticks stop by themselves after 23:00 UTC on
-18 October.
-
-## After the window
-
-A read-only audit against the criteria; then the reconciliation: `SCHEDULER_PAUSED`
-back to `true`, the four soak variables deleted, one plan, review, apply; and the
-control record disabled.
-
-## Exact next approval required
-
-None before the first tick. The next checkpoint is whatever observation or audit
-ChatGPT instructs, during or after the window.
-
-STOP. Nothing is to be triggered by hand.
+STOP. Awaiting review.

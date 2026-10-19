@@ -18,8 +18,16 @@
           "title": "Methodology",
           "type": "string"
         },
+        "radar": {
+          "title": "Radar",
+          "type": "string"
+        },
         "source_health": {
           "title": "Source Health",
+          "type": "string"
+        },
+        "validation": {
+          "title": "Validation",
           "type": "string"
         }
       },
@@ -27,9 +35,44 @@
         "current",
         "source_health",
         "methodology",
+        "radar",
+        "validation",
         "games"
       ],
       "title": "ManifestPaths",
+      "type": "object"
+    },
+    "RestrictedSourceView": {
+      "additionalProperties": false,
+      "description": "A source whose data is in this bundle and is not cleared to be shown publicly.",
+      "properties": {
+        "cleared_stages": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cleared Stages",
+          "type": "array"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "purpose",
+        "cleared_stages",
+        "reason"
+      ],
+      "title": "RestrictedSourceView",
       "type": "object"
     }
   },
@@ -50,6 +93,14 @@
       "title": "Contract Status",
       "type": "string"
     },
+    "distribution": {
+      "enum": [
+        "internal",
+        "private_development_only"
+      ],
+      "title": "Distribution",
+      "type": "string"
+    },
     "game_count": {
       "minimum": 0,
       "title": "Game Count",
@@ -64,6 +115,13 @@
       "minimum": 0,
       "title": "Ranked Count",
       "type": "integer"
+    },
+    "restricted_sources": {
+      "items": {
+        "$ref": "#/$defs/RestrictedSourceView"
+      },
+      "title": "Restricted Sources",
+      "type": "array"
     },
     "run_id": {
       "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
@@ -90,6 +148,8 @@
     "generated_at",
     "run_id",
     "score_version",
+    "distribution",
+    "restricted_sources",
     "content_hash",
     "version_path",
     "artifacts",

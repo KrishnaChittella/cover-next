@@ -20,32 +20,55 @@ below is an exact key the resolver's own candidate rules already compare.
     parent / version parent held by the entity    the entity's records' (source, id)
     exact title                                   normalised title key
     alternative title, on either side             normalised alternative-title keys
-    packaging variant                             title core without packaging words,
-                                                  rework words and, on the incoming
-                                                  side, any year-like number
+    packaging variant                             the words of the title core, with
+                                                  packaging words, rework words and
+                                                  every number set aside; then the
+                                                  resolver's own comparison, per record
 
-The last row is the only one that is not a plain equality. The resolver drops a
-number from the incoming title when it equals one of the other record's release
-years, which the index cannot know in advance, so the lookup tries every way of
-dropping the incoming title's numbers. That can only add candidates.
+The last row is the only one that is not a plain equality. The resolver compares
+
+    incoming core, minus rework words, minus numbers equal to one of the OTHER
+    record's release years            ==            the other record's core, minus rework words
+
+so which numbers are dropped depends on the record being compared with. The index
+handles that in two steps, neither of which is a guess:
+
+1. A necessary condition, used as the key. Dropping numbers from one side can only
+   make the two cores equal if they already have the same WORDS in the same order:
+   the tokens that are not numbers. So every record is filed under its core with all
+   numbers removed, and an incoming title is looked up under its own. A record filed
+   anywhere else cannot be a packaging variant, whatever its release years are.
+2. The resolver's comparison itself, on that bucket only. Each record in the bucket
+   keeps its core and its release years, and the lookup evaluates exactly the
+   expression above with them, by calling the resolver's own `_without`.
+
+The result for this row is therefore exactly the set of entities the resolver would
+call a packaging variant: nothing is missed, and the work is linear in the number of
+records that share the title's words, however many numbers the title carries. An
+earlier version tried every way of dropping the incoming title's numbers, which is
+exponential in them, and above ten numbers gave up and had every entity assessed.
+There is no such limit now and no input for which everything must be assessed.
 """
-
-from itertools import combinations
 
 from metaspike.catalogue.overrides import NO_OVERRIDES, OverrideSet
 from metaspike.domain.identity import SourceRecordKey
 from metaspike.domain.source_records import SourceRecord
 from metaspike.resolution.models import ResolverInput
 from metaspike.resolution.normalize import REWORK_WORDS, normalize_title
-from metaspike.resolution.resolver import _EXTERNAL_NAME, _without
+from metaspike.resolution.resolver import _EXTERNAL_NAME, _release_years, _without
 from metaspike.resolution.source_urls import url_asserted_ids
 
-# A title with more distinct numbers than this is not blocked on its packaging key:
-# the record is assessed against every entity instead. Correct, merely slower, and no
-# real title is expected to reach it.
-MAX_TITLE_NUMBERS = 10
-
 _Identity = tuple[str, str]
+_Tokens = tuple[str, ...]
+
+
+def number_free(tokens: _Tokens) -> _Tokens:
+    """The tokens that are not numbers, in order: the words of a title core.
+
+    Uses the same test for "a number" as the resolver's `_without` (`str.isdigit`), so a
+    token the resolver could drop as a year is never part of this key.
+    """
+    return tuple(token for token in tokens if not token.isdigit())
 
 
 class CandidateIndex:
@@ -60,7 +83,8 @@ class CandidateIndex:
         self._url_asserts: dict[_Identity, set[str]] = {}
         self._title: dict[str, set[str]] = {}
         self._alternative: dict[str, set[str]] = {}
-        self._core: dict[tuple[str, ...], set[str]] = {}
+        # words of the core -> {(core, release years): entities}. See the module docstring.
+        self._packaging: dict[_Tokens, dict[tuple[_Tokens, frozenset[int]], set[str]]] = {}
 
     def add(self, ref: str, record: SourceRecord) -> None:
         """Index one record as belonging to an entity. A record is never removed."""
@@ -76,15 +100,18 @@ class CandidateIndex:
         self._title.setdefault(title.key, set()).add(ref)
         for alternative in record.alternative_titles:
             self._alternative.setdefault(normalize_title(alternative).key, set()).add(ref)
+        # The other side of the resolver's packaging comparison, exactly as it computes
+        # it, kept with the release years that comparison reads from the same record.
         core = _without(title.core_tokens, REWORK_WORDS, set())
         if core:
-            self._core.setdefault(core, set()).add(ref)
+            bucket = self._packaging.setdefault(number_free(core), {})
+            bucket.setdefault((core, frozenset(_release_years(record))), set()).add(ref)
 
     def holding(self, key: SourceRecordKey | None) -> set[str]:
         return set() if key is None else set(self._by_key.get(key, ()))
 
-    def candidates(self, record: SourceRecord) -> set[str] | None:
-        """Every entity that could be a candidate, or None if all must be assessed."""
+    def candidates(self, record: SourceRecord) -> set[str]:
+        """Every entity that could be a candidate for `record`. Never misses one."""
         found: set[str] = set()
         found |= self._by_key.get(record.key, set())
         # Upstream links: the entity holds the record's parent or version parent.
@@ -102,17 +129,21 @@ class CandidateIndex:
         found |= self._title.get(title.key, set()) | self._alternative.get(title.key, set())
         for alternative in record.alternative_titles:
             found |= self._title.get(normalize_title(alternative).key, set())
-        # Packaging variants: the same words once packaging, rework words and a year
-        # qualifier are set aside.
-        tokens = tuple(token for token in title.core_tokens if token not in REWORK_WORDS)
-        numbers = sorted({int(token) for token in tokens if token.isdigit()})
-        if len(numbers) > MAX_TITLE_NUMBERS:
-            return None
-        for size in range(len(numbers) + 1):
-            for dropped in combinations(numbers, size):
-                core = _without(tokens, frozenset(), set(dropped))
-                if core:
-                    found |= self._core.get(core, set())
+        found |= self.packaging_variants(title.core_tokens)
+        return found
+
+    def packaging_variants(self, core_tokens: _Tokens) -> set[str]:
+        """Entities holding a record the resolver would call a packaging variant.
+
+        Only records with the same words can qualify, and for each of those the
+        resolver's own comparison is evaluated with that record's release years.
+        """
+        words = number_free(_without(core_tokens, REWORK_WORDS, set()))
+        found: set[str] = set()
+        for (their_core, their_years), refs in self._packaging.get(words, {}).items():
+            # resolver._structural_relation: my_core and my_core == their_core
+            if _without(core_tokens, REWORK_WORDS, set(their_years)) == their_core:
+                found |= refs
         return found
 
 
@@ -162,7 +193,7 @@ def blocked_view(view: ResolverInput, overrides: OverrideSet = NO_OVERRIDES) -> 
     for record in view.context:
         context.add(record)
     wanted = wanted_refs(view.incoming, index, overrides, view.bound_to)
-    if wanted is None:
+    if wanted is None:  # reserved; see `wanted_refs`
         return view
     return ResolverInput(
         incoming=view.incoming,
@@ -178,10 +209,14 @@ def wanted_refs(
     overrides: OverrideSet,
     bound_to: str | None = None,
 ) -> set[str] | None:
-    """The candidates, plus the entities an override or an existing binding names."""
+    """The candidates, plus the entities an override or an existing binding names.
+
+    The return type keeps `None`, which callers read as "assess every entity": the
+    conservative answer, always correct. Nothing returns it today; it stays in the
+    contract so that a future case the index cannot key has a safe way out that the
+    callers already handle, instead of a reason to prune.
+    """
     wanted = index.candidates(record)
-    if wanted is None:
-        return None
     override = overrides.for_record(record.key)
     if override is not None:
         # An override is applied by reference, not by evidence, so the entities it

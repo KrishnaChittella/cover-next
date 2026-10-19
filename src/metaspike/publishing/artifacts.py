@@ -15,16 +15,41 @@ payloads, secrets or exception traces.
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.5.0"
 CONTRACT_STATUS = "internal"
 SCOPE_NOTE = (
     "metaspike_score_v0 measures relative attention anomaly and recent momentum from a "
     "single source (Wikimedia pageviews, daily). It is not a complete measure of creator "
     "demand or supply."
+)
+
+EVENT_SCOPE_NOTE = (
+    "Event Heat is internal and uncalibrated (event_heat_rules_v1). It is reported beside "
+    "metaspike_score_v0 and is not part of it. Unavailable means no source has looked at a "
+    "game's events recently; it never means zero."
+)
+RADAR_SCOPE_NOTE = (
+    "The radar lists dated events that have not started, with their timing. It ranks "
+    "nothing and recommends nothing: an event being scheduled is not, by itself, a content "
+    "opportunity."
+)
+
+VALIDATION_SCOPE_NOTE = (
+    "Historical validation of metaspike_score_v0, an internal attention measure, against "
+    "what the same demand signal did afterwards. It is not evidence about the final "
+    "creator-opportunity model, which does not exist yet. Read the evidence status before "
+    "any number."
 )
 
 SemVer = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
@@ -78,6 +103,13 @@ EventTypeView = Literal[
     "platform_release",
     "major_in_game_event",
 ]
+
+
+EventPhaseView = Literal["upcoming", "active", "decaying", "expired", "called_off"]
+EventAvailabilityView = Literal["available", "unavailable"]
+EventUnavailableReasonView = Literal["no_event_coverage", "event_coverage_stale"]
+EventStatusView = Literal["scheduled", "cancelled", "withdrawn"]
+TimePrecisionView = Literal["day", "exact"]
 
 
 class ContractModel(BaseModel):
@@ -248,6 +280,63 @@ class EventView(ContractModel):
     reference: str | None = None
 
 
+class EventContributionView(ContractModel):
+    """One event at the evaluation moment, and its part in the game's Event Heat."""
+
+    event_id: str
+    event_type: EventTypeView
+    title: str
+    starts_at: AwareDatetime
+    # The end used for evaluation. When `end_assumed`, the source gave none and this is
+    # the start plus the type's default duration.
+    ends_at: AwareDatetime
+    end_assumed: bool
+    time_precision: TimePrecisionView
+    status: EventStatusView
+    phase: EventPhaseView
+    in_ramp: bool
+    strength: float = Field(ge=0, le=1)
+    importance: float = Field(gt=0, le=1)
+    contribution: float = Field(ge=0, le=1)
+    counted: bool
+    rank: int | None = Field(default=None, ge=1)
+    not_counted_because: str | None = None
+    sources: tuple[str, ...]
+    text: str | None = None
+
+
+class EventIntelligenceView(ContractModel):
+    """A game's event intelligence: available with a heat, or explicitly unavailable.
+
+    `event_heat` is null exactly when `availability` is "unavailable". A heat of 0 is a
+    finding (a source looked and nothing is relevant); null is the absence of one.
+    """
+
+    availability: EventAvailabilityView
+    rules_version: str
+    rules_status: str
+    as_of: AwareDatetime
+    event_heat: float | None = Field(default=None, ge=0, le=100)
+    top_event_id: str | None = None
+    summary: str
+    reasons: tuple[ReasonView, ...]
+    unavailable_reasons: tuple[EventUnavailableReasonView, ...]
+    coverage_checked_at: AwareDatetime | None = None
+    coverage_sources: tuple[str, ...]
+    contributions: tuple[EventContributionView, ...]
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        available = self.availability == "available"
+        if available != (self.event_heat is not None):
+            raise ValueError("event_heat is a number exactly when availability is available")
+        if available == bool(self.unavailable_reasons):
+            raise ValueError("unavailable_reasons are given exactly when unavailable")
+        if not available and (self.contributions or self.top_event_id is not None):
+            raise ValueError("unavailable event intelligence carries no events")
+        return self
+
+
 class MethodologyRef(ContractModel):
     score_version: str
     path: str
@@ -269,6 +358,7 @@ class GameArtifact(ArtifactHeader):
     history: tuple[HistorySeries, ...]
     source_coverage: tuple[SourceCoverage, ...]
     events: tuple[EventView, ...] = ()
+    event_intelligence: EventIntelligenceView
     methodology: MethodologyRef
     updated_at: AwareDatetime
 
@@ -300,8 +390,65 @@ class SourceHealthEntry(ContractModel):
     failures: tuple[SourceFailure, ...]
 
 
+class EventSourceStageView(ContractModel):
+    stage: str
+    cleared: bool
+    reason: str
+
+
+class EventSourceGameView(ContractModel):
+    canonical_game_id: str
+    slug: str
+    name: str
+    source_game_ids: tuple[str, ...]
+    last_checked_at: AwareDatetime | None = None
+    fetches_ok: int = Field(ge=0)
+    fetches_failed: int = Field(ge=0)
+    posts: int = Field(ge=0)
+    candidates_classified: int = Field(ge=0)
+    candidates_promoted: int = Field(ge=0)
+    candidates_not_promoted: int = Field(ge=0)
+
+
+class EventSourceView(ContractModel):
+    """An event source: what it was asked by `as_of` and what came of it, in counts.
+
+    A post is not an event. `posts_observed` and `candidates` count announcements;
+    only `candidates_promoted` became event observations, and only those can reach
+    Event Heat or the radar. No title or text of a post is published here.
+    """
+
+    source: str
+    purpose: Literal["event_intelligence"]
+    classification_rules_version: str
+    as_of: AwareDatetime
+    # "not_collected": nothing had been asked of the source by `as_of`. That is not the
+    # same as asked-and-found-nothing, which is "collected" with zero posts.
+    status: Literal["not_collected", "collected"]
+    stage_clearance: tuple[EventSourceStageView, ...]
+    fetches_ok: int = Field(ge=0)
+    fetches_failed: int = Field(ge=0)
+    fetches_not_sent: int = Field(ge=0)
+    last_success_at: AwareDatetime | None = None
+    last_failure_at: AwareDatetime | None = None
+    games_checked: int = Field(ge=0)
+    posts_observed: int = Field(ge=0)
+    candidates: int = Field(ge=0)
+    candidates_classified: int = Field(ge=0)
+    candidates_promoted: int = Field(ge=0)
+    candidates_not_promoted: int = Field(ge=0)
+    candidates_unresolved: int = Field(ge=0)
+    refusals: dict[str, int]
+    promoted_event_types: dict[str, int]
+    # Requests made after `as_of`: not part of this picture, counted so that a store
+    # filled later is not mistaken for coverage that existed then.
+    fetches_after_as_of: int = Field(ge=0)
+    games: tuple[EventSourceGameView, ...]
+
+
 class SourceHealthArtifact(ArtifactHeader):
     sources: tuple[SourceHealthEntry, ...]
+    event_sources: tuple[EventSourceView, ...]
 
 
 class TermView(ContractModel):
@@ -426,10 +573,44 @@ class SourceMethodology(ContractModel):
     policy: SourcePolicyView
 
 
+class EventTypeRuleView(ContractModel):
+    event_type: EventTypeView
+    label: str
+    importance: float
+    ramp_days: float
+    pre_event_peak: float
+    default_duration_days: float
+    half_life_days: float
+    active_floor: float
+    decay_window_days: float
+    rationale: str
+
+
+class ParameterView(ContractModel):
+    name: str
+    value: str
+    rationale: str
+
+
+class EventHeatMethodology(ContractModel):
+    version: str
+    status: str
+    scope_note: str
+    range: tuple[float, float]
+    terms: tuple[TermView, ...]
+    aggregation: str
+    availability: tuple[TermView, ...]
+    parameters: tuple[ParameterView, ...]
+    types: tuple[EventTypeRuleView, ...]
+    radar_windows_hours: tuple[int, ...]
+    limitations: tuple[str, ...]
+
+
 class MethodologyArtifact(ArtifactHeader):
     scope_note: str
     score: ScoreMethodology
     confidence: ConfidenceMethodology
+    event_heat: EventHeatMethodology
     features: FeatureMethodology
     explanations: str
     metrics: tuple[MetricView, ...]
@@ -437,14 +618,282 @@ class MethodologyArtifact(ArtifactHeader):
     limitations: tuple[str, ...]
 
 
+class RadarItemView(ContractModel):
+    canonical_game_id: GameIdView
+    slug: SlugView
+    name: str
+    event_id: str
+    event_type: EventTypeView
+    title: str
+    starts_at: AwareDatetime
+    time_precision: TimePrecisionView
+    hours_until_start: float = Field(ge=0)
+    window_hours: int
+    in_ramp: bool
+    strength: float = Field(ge=0, le=1)
+    contribution: float = Field(ge=0, le=1)
+    game_event_heat: float = Field(ge=0, le=100)
+    sources: tuple[str, ...]
+    text: str
+    artifact_path: str
+
+
+class RadarArtifact(ArtifactHeader):
+    """Dated events that have not started, for games with event coverage.
+
+    "unavailable" means no game has event coverage, so nothing is known. It is not an
+    empty radar: an available radar with no items is.
+    """
+
+    scope_note: str
+    availability: EventAvailabilityView
+    rules_version: str
+    rules_status: str
+    as_of: AwareDatetime
+    windows_hours: tuple[int, ...]
+    games_with_coverage: int = Field(ge=0)
+    games_without_coverage: int = Field(ge=0)
+    unavailable_reasons: tuple[EventUnavailableReasonView, ...]
+    summary: str
+    items: tuple[RadarItemView, ...]
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        available = self.availability == "available"
+        if available == bool(self.unavailable_reasons):
+            raise ValueError("unavailable_reasons are given exactly when unavailable")
+        if not available and self.items:
+            raise ValueError("an unavailable radar carries no items")
+        return self
+
+
+EvidenceStatusView = Literal["framework_only", "insufficient_sample", "exploratory", "validated"]
+ValidationAvailabilityView = Literal["available", "not_run"]
+OutcomeAvailabilityView = Literal["available", "unavailable"]
+
+
+class OutcomeSummaryView(ContractModel):
+    """A set of primary outcomes. With a count of 0 every statistic is null, never 0."""
+
+    count: int = Field(ge=0)
+    mean: float | None = None
+    median: float | None = None
+    minimum: float | None = None
+    maximum: float | None = None
+    hit_rate: float | None = Field(default=None, ge=0, le=1)
+    downside_rate: float | None = Field(default=None, ge=0, le=1)
+
+
+class TopKView(ContractModel):
+    k: int
+    days_with_full_group: int
+    outcomes: OutcomeSummaryView
+
+
+class AssociationView(ContractModel):
+    statistic: str
+    days_used: int
+    days_skipped: int
+    mean_rho: float | None = None
+    median_rho: float | None = None
+    positive_days: int
+    negative_days: int
+
+
+class StrategyResultView(ContractModel):
+    strategy: str
+    label: str
+    description: str
+    top_k: tuple[TopKView, ...]
+    association: AssociationView
+
+
+class StratumView(ContractModel):
+    label: str
+    outcomes: OutcomeSummaryView
+
+
+class LeadTimeView(ContractModel):
+    found: int
+    none_in_window: int
+    unavailable: int
+    median_days: float | None = None
+    mean_days: float | None = None
+
+
+class SpreadView(ContractModel):
+    count: int = Field(ge=0)
+    mean: float | None = None
+    median: float | None = None
+
+
+class RequirementView(ContractModel):
+    name: str
+    required: int
+    actual: int
+    met: bool
+
+
+class StatusCheckView(ContractModel):
+    status: EvidenceStatusView
+    reached: bool
+    requirements: tuple[RequirementView, ...]
+    rationale: str
+
+
+class EvidenceView(ContractModel):
+    status: EvidenceStatusView
+    checks: tuple[StatusCheckView, ...]
+    holdout_supported: bool
+    holdout_rationale: str
+    conclusion: str
+
+
+class LeakageCheckView(ContractModel):
+    name: str
+    description: str
+    checked: int = Field(ge=0)
+    passed: bool
+
+
+class EventBacktestView(ContractModel):
+    # At least one event observation was visible to at least one prediction.
+    real_event_history: bool
+    # Snapshots with event coverage (a source had looked), heat 0 included.
+    snapshots_with_event_intelligence: int = Field(ge=0)
+    snapshots_with_positive_event_heat: int = Field(ge=0)
+    # The event sources whose data was visible to at least one prediction. Each must be
+    # cleared for the bundle this report is published in; see the manifest.
+    event_sources_used: tuple[str, ...]
+    note: str
+
+
+class InspectionEntryView(ContractModel):
+    rank: int
+    slug: SlugView
+    name: str
+    score: float = Field(ge=0, le=100)
+    confidence: float = Field(ge=0, le=100)
+    outcome_availability: OutcomeAvailabilityView
+    unavailable_reason: str | None = None
+    realized_uplift_72h: float | None = None
+    movement_24h: float | None = None
+    persistence_7d: float | None = Field(default=None, ge=0, le=1)
+    lead_time_days: int | None = None
+
+
+class InspectionUnrankedView(ContractModel):
+    slug: SlugView
+    name: str
+    reason: str
+
+
+class InspectionDayView(ContractModel):
+    # The UTC day the recommendation was simulated on, and the exact moment.
+    day: date
+    as_of: AwareDatetime
+    # The newest demand day that could be seen at that moment.
+    latest_due_day: date
+    primary_window_start: date
+    primary_window_end: date
+    ranked: tuple[InspectionEntryView, ...]
+    unranked: tuple[InspectionUnrankedView, ...]
+
+
+class ValidationReportView(ContractModel):
+    report_id: str
+    format: str
+    protocol_version: str
+    outcome_rules_version: str
+    score_version: str
+    event_rules_version: str
+    first_prediction_day: date
+    last_prediction_day: date
+    first_latest_due_day: date
+    last_latest_due_day: date
+    publication_lag_hours: dict[str, float]
+    data_through: date
+    # Exactly which records the report summarises: SHA-256 over their sorted ids.
+    snapshot_set_hash: str
+    label_set_hash: str
+    snapshot_dates: int
+    universe_size: int
+    games_ranked: int
+    games_with_outcome: int
+    independent_sources: int
+    recommendations: int
+    ranked: int
+    unranked: int
+    primary_evaluable: int
+    primary_unavailable: dict[str, int]
+    overall: OutcomeSummaryView
+    strategies: tuple[StrategyResultView, ...]
+    score_bins: tuple[StratumView, ...]
+    confidence_bands: tuple[StratumView, ...]
+    movement_24h: SpreadView
+    persistence_7d: SpreadView
+    lead_time: LeadTimeView
+    evidence: EvidenceView
+    leakage_checks: tuple[LeakageCheckView, ...]
+    events: EventBacktestView
+    limitations: tuple[str, ...]
+    inspection: tuple[InspectionDayView, ...]
+    inspection_truncated: bool
+    created_at: AwareDatetime
+
+
+class OutcomeDefinitionView(ContractModel):
+    """`outcome_rules_v1` as published: what each outcome is and every constant in it."""
+
+    version: str
+    terms: tuple[TermView, ...]
+    parameters: tuple[ParameterView, ...]
+    unavailable: tuple[TermView, ...]
+
+
+class ValidationArtifact(ArtifactHeader):
+    """Historical validation, or the plain statement that none has been run.
+
+    "not_run" carries no report and no number. It is not a result of zero.
+    """
+
+    scope_note: str
+    availability: ValidationAvailabilityView
+    protocol_version: str
+    outcome_definition: OutcomeDefinitionView
+    report: ValidationReportView | None = None
+
+    @model_validator(mode="after")
+    def _availability_is_consistent(self) -> Self:
+        if (self.availability == "available") != (self.report is not None):
+            raise ValueError("a report is present exactly when validation is available")
+        return self
+
+
 class ManifestPaths(ContractModel):
     current: str
     source_health: str
     methodology: str
+    radar: str
+    validation: str
     games: dict[str, str]
 
 
+class RestrictedSourceView(ContractModel):
+    """A source whose data is in this bundle and is not cleared to be shown publicly."""
+
+    source: str
+    purpose: str
+    cleared_stages: tuple[str, ...]
+    reason: str
+
+
 class Manifest(ArtifactHeader):
+    # "private_development_only": the bundle holds something derived from a source that
+    # is cleared for private development and not for public launch. Such a bundle is
+    # for the local developer interface and must never be published.
+    distribution: Literal["internal", "private_development_only"]
+    restricted_sources: tuple[RestrictedSourceView, ...]
     content_hash: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
     version_path: str
     artifacts: ManifestPaths
@@ -455,6 +904,8 @@ class Manifest(ArtifactHeader):
 CURRENT_FILE = "current.json"
 SOURCE_HEALTH_FILE = "source-health.json"
 METHODOLOGY_FILE = "methodology.json"
+RADAR_FILE = "radar.json"
+VALIDATION_FILE = "validation.json"
 MANIFEST_FILE = "manifest.json"
 GAMES_DIR = "games"
 VERSIONS_DIR = "versions"
@@ -473,6 +924,8 @@ class ArtifactBundle:
     games: dict[str, GameArtifact]
     source_health: SourceHealthArtifact
     methodology: MethodologyArtifact
+    radar: RadarArtifact
+    validation: ValidationArtifact
 
     def version_files(self) -> dict[str, ContractModel]:
         """Path relative to the version directory -> artifact."""
@@ -480,6 +933,8 @@ class ArtifactBundle:
             CURRENT_FILE: self.current,
             SOURCE_HEALTH_FILE: self.source_health,
             METHODOLOGY_FILE: self.methodology,
+            RADAR_FILE: self.radar,
+            VALIDATION_FILE: self.validation,
         }
         for slug, game in sorted(self.games.items()):
             files[game_file(slug)] = game

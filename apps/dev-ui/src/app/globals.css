@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+/* One restrained dark palette. Colour marks state; it never carries it alone. */
+@theme {
+  --color-canvas: #0b0c0f;
+  --color-surface: #111318;
+  --color-raised: #171a20;
+  --color-line: #23272f;
+  --color-line-strong: #343a45;
+  --color-ink: #e8eaee;
+  --color-ink-soft: #b3b9c4;
+  --color-muted: #8a909c;
+  --color-faint: #5d6370;
+  --color-signal: #e0a83c;
+  --color-signal-soft: #3a2f17;
+  --color-up: #5fb98a;
+  --color-down: #dd7a6c;
+  --color-info: #7aa7d9;
+  --color-warn: #d9a441;
+  --color-bad: #dd7a6c;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    background: var(--color-canvas);
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A focus ring that is always visible and never depends on hover. */
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--color-signal-soft);
+    color: var(--color-ink);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@utility eyebrow {
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+@utility panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+}

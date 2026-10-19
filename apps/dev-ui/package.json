@@ -1,0 +1,53 @@
+{
+  "name": "metaspike-dev-ui",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Private, local developer interface over MetaSpike's published artifacts. Not a public product.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "dev": "next dev --hostname 127.0.0.1 --port 3000",
+    "build": "next build",
+    "start": "next start --hostname 127.0.0.1 --port 3000",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "contract:generate": "node scripts/generate-contract.mjs",
+    "contract:check": "node scripts/generate-contract.mjs --check",
+    "data:sync": "node scripts/sync-data.mjs",
+    "data:replay": "node scripts/sync-data.mjs --replay",
+    "opportunities:recorded": "node scripts/opportunities.mjs recorded",
+    "opportunities:integrated": "node scripts/opportunities.mjs integrated",
+    "opportunities:synthetic": "node scripts/opportunities.mjs synthetic",
+    "opportunities:schema": "node scripts/opportunities.mjs schema",
+    "opportunities:schema:check": "node scripts/opportunities.mjs schema --check",
+    "check": "npm run contract:check && npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "echarts": "^6.1.0",
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.0",
+    "jsdom": "^30.1.2",
+    "json-schema-to-typescript": "^16.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.3"
+  }
+}

@@ -1,0 +1,1070 @@
+{
+  "$defs": {
+    "AssociationView": {
+      "additionalProperties": false,
+      "properties": {
+        "days_skipped": {
+          "title": "Days Skipped",
+          "type": "integer"
+        },
+        "days_used": {
+          "title": "Days Used",
+          "type": "integer"
+        },
+        "mean_rho": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Rho"
+        },
+        "median_rho": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median Rho"
+        },
+        "negative_days": {
+          "title": "Negative Days",
+          "type": "integer"
+        },
+        "positive_days": {
+          "title": "Positive Days",
+          "type": "integer"
+        },
+        "statistic": {
+          "title": "Statistic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "statistic",
+        "days_used",
+        "days_skipped",
+        "positive_days",
+        "negative_days"
+      ],
+      "title": "AssociationView",
+      "type": "object"
+    },
+    "EventBacktestView": {
+      "additionalProperties": false,
+      "properties": {
+        "event_sources_used": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Event Sources Used",
+          "type": "array"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "real_event_history": {
+          "title": "Real Event History",
+          "type": "boolean"
+        },
+        "snapshots_with_event_intelligence": {
+          "minimum": 0,
+          "title": "Snapshots With Event Intelligence",
+          "type": "integer"
+        },
+        "snapshots_with_positive_event_heat": {
+          "minimum": 0,
+          "title": "Snapshots With Positive Event Heat",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "real_event_history",
+        "snapshots_with_event_intelligence",
+        "snapshots_with_positive_event_heat",
+        "event_sources_used",
+        "note"
+      ],
+      "title": "EventBacktestView",
+      "type": "object"
+    },
+    "EvidenceView": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/StatusCheckView"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "conclusion": {
+          "title": "Conclusion",
+          "type": "string"
+        },
+        "holdout_rationale": {
+          "title": "Holdout Rationale",
+          "type": "string"
+        },
+        "holdout_supported": {
+          "title": "Holdout Supported",
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "framework_only",
+            "insufficient_sample",
+            "exploratory",
+            "validated"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "checks",
+        "holdout_supported",
+        "holdout_rationale",
+        "conclusion"
+      ],
+      "title": "EvidenceView",
+      "type": "object"
+    },
+    "InspectionDayView": {
+      "additionalProperties": false,
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "day": {
+          "format": "date",
+          "title": "Day",
+          "type": "string"
+        },
+        "latest_due_day": {
+          "format": "date",
+          "title": "Latest Due Day",
+          "type": "string"
+        },
+        "primary_window_end": {
+          "format": "date",
+          "title": "Primary Window End",
+          "type": "string"
+        },
+        "primary_window_start": {
+          "format": "date",
+          "title": "Primary Window Start",
+          "type": "string"
+        },
+        "ranked": {
+          "items": {
+            "$ref": "#/$defs/InspectionEntryView"
+          },
+          "title": "Ranked",
+          "type": "array"
+        },
+        "unranked": {
+          "items": {
+            "$ref": "#/$defs/InspectionUnrankedView"
+          },
+          "title": "Unranked",
+          "type": "array"
+        }
+      },
+      "required": [
+        "day",
+        "as_of",
+        "latest_due_day",
+        "primary_window_start",
+        "primary_window_end",
+        "ranked",
+        "unranked"
+      ],
+      "title": "InspectionDayView",
+      "type": "object"
+    },
+    "InspectionEntryView": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "lead_time_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lead Time Days"
+        },
+        "movement_24h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Movement 24H"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "outcome_availability": {
+          "enum": [
+            "available",
+            "unavailable"
+          ],
+          "title": "Outcome Availability",
+          "type": "string"
+        },
+        "persistence_7d": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Persistence 7D"
+        },
+        "rank": {
+          "title": "Rank",
+          "type": "integer"
+        },
+        "realized_uplift_72h": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Realized Uplift 72H"
+        },
+        "score": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Score",
+          "type": "number"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        },
+        "unavailable_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unavailable Reason"
+        }
+      },
+      "required": [
+        "rank",
+        "slug",
+        "name",
+        "score",
+        "confidence",
+        "outcome_availability"
+      ],
+      "title": "InspectionEntryView",
+      "type": "object"
+    },
+    "InspectionUnrankedView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "slug": {
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug",
+        "name",
+        "reason"
+      ],
+      "title": "InspectionUnrankedView",
+      "type": "object"
+    },
+    "LeadTimeView": {
+      "additionalProperties": false,
+      "properties": {
+        "found": {
+          "title": "Found",
+          "type": "integer"
+        },
+        "mean_days": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean Days"
+        },
+        "median_days": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median Days"
+        },
+        "none_in_window": {
+          "title": "None In Window",
+          "type": "integer"
+        },
+        "unavailable": {
+          "title": "Unavailable",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "found",
+        "none_in_window",
+        "unavailable"
+      ],
+      "title": "LeadTimeView",
+      "type": "object"
+    },
+    "LeakageCheckView": {
+      "additionalProperties": false,
+      "properties": {
+        "checked": {
+          "minimum": 0,
+          "title": "Checked",
+          "type": "integer"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "description",
+        "checked",
+        "passed"
+      ],
+      "title": "LeakageCheckView",
+      "type": "object"
+    },
+    "OutcomeDefinitionView": {
+      "additionalProperties": false,
+      "description": "`outcome_rules_v1` as published: what each outcome is and every constant in it.",
+      "properties": {
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/ParameterView"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "terms": {
+          "items": {
+            "$ref": "#/$defs/TermView"
+          },
+          "title": "Terms",
+          "type": "array"
+        },
+        "unavailable": {
+          "items": {
+            "$ref": "#/$defs/TermView"
+          },
+          "title": "Unavailable",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "terms",
+        "parameters",
+        "unavailable"
+      ],
+      "title": "OutcomeDefinitionView",
+      "type": "object"
+    },
+    "OutcomeSummaryView": {
+      "additionalProperties": false,
+      "description": "A set of primary outcomes. With a count of 0 every statistic is null, never 0.",
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "downside_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Downside Rate"
+        },
+        "hit_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hit Rate"
+        },
+        "maximum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maximum"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean"
+        },
+        "median": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median"
+        },
+        "minimum": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "OutcomeSummaryView",
+      "type": "object"
+    },
+    "ParameterView": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value",
+        "rationale"
+      ],
+      "title": "ParameterView",
+      "type": "object"
+    },
+    "RequirementView": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "title": "Actual",
+          "type": "integer"
+        },
+        "met": {
+          "title": "Met",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "required": {
+          "title": "Required",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "required",
+        "actual",
+        "met"
+      ],
+      "title": "RequirementView",
+      "type": "object"
+    },
+    "SpreadView": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "mean": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mean"
+        },
+        "median": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Median"
+        }
+      },
+      "required": [
+        "count"
+      ],
+      "title": "SpreadView",
+      "type": "object"
+    },
+    "StatusCheckView": {
+      "additionalProperties": false,
+      "properties": {
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        },
+        "reached": {
+          "title": "Reached",
+          "type": "boolean"
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/RequirementView"
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "framework_only",
+            "insufficient_sample",
+            "exploratory",
+            "validated"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "reached",
+        "requirements",
+        "rationale"
+      ],
+      "title": "StatusCheckView",
+      "type": "object"
+    },
+    "StrategyResultView": {
+      "additionalProperties": false,
+      "properties": {
+        "association": {
+          "$ref": "#/$defs/AssociationView"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "strategy": {
+          "title": "Strategy",
+          "type": "string"
+        },
+        "top_k": {
+          "items": {
+            "$ref": "#/$defs/TopKView"
+          },
+          "title": "Top K",
+          "type": "array"
+        }
+      },
+      "required": [
+        "strategy",
+        "label",
+        "description",
+        "top_k",
+        "association"
+      ],
+      "title": "StrategyResultView",
+      "type": "object"
+    },
+    "StratumView": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "outcomes": {
+          "$ref": "#/$defs/OutcomeSummaryView"
+        }
+      },
+      "required": [
+        "label",
+        "outcomes"
+      ],
+      "title": "StratumView",
+      "type": "object"
+    },
+    "TermView": {
+      "additionalProperties": false,
+      "properties": {
+        "formula": {
+          "title": "Formula",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rationale": {
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "formula",
+        "rationale"
+      ],
+      "title": "TermView",
+      "type": "object"
+    },
+    "TopKView": {
+      "additionalProperties": false,
+      "properties": {
+        "days_with_full_group": {
+          "title": "Days With Full Group",
+          "type": "integer"
+        },
+        "k": {
+          "title": "K",
+          "type": "integer"
+        },
+        "outcomes": {
+          "$ref": "#/$defs/OutcomeSummaryView"
+        }
+      },
+      "required": [
+        "k",
+        "days_with_full_group",
+        "outcomes"
+      ],
+      "title": "TopKView",
+      "type": "object"
+    },
+    "ValidationReportView": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence_bands": {
+          "items": {
+            "$ref": "#/$defs/StratumView"
+          },
+          "title": "Confidence Bands",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "data_through": {
+          "format": "date",
+          "title": "Data Through",
+          "type": "string"
+        },
+        "event_rules_version": {
+          "title": "Event Rules Version",
+          "type": "string"
+        },
+        "events": {
+          "$ref": "#/$defs/EventBacktestView"
+        },
+        "evidence": {
+          "$ref": "#/$defs/EvidenceView"
+        },
+        "first_latest_due_day": {
+          "format": "date",
+          "title": "First Latest Due Day",
+          "type": "string"
+        },
+        "first_prediction_day": {
+          "format": "date",
+          "title": "First Prediction Day",
+          "type": "string"
+        },
+        "format": {
+          "title": "Format",
+          "type": "string"
+        },
+        "games_ranked": {
+          "title": "Games Ranked",
+          "type": "integer"
+        },
+        "games_with_outcome": {
+          "title": "Games With Outcome",
+          "type": "integer"
+        },
+        "independent_sources": {
+          "title": "Independent Sources",
+          "type": "integer"
+        },
+        "inspection": {
+          "items": {
+            "$ref": "#/$defs/InspectionDayView"
+          },
+          "title": "Inspection",
+          "type": "array"
+        },
+        "inspection_truncated": {
+          "title": "Inspection Truncated",
+          "type": "boolean"
+        },
+        "label_set_hash": {
+          "title": "Label Set Hash",
+          "type": "string"
+        },
+        "last_latest_due_day": {
+          "format": "date",
+          "title": "Last Latest Due Day",
+          "type": "string"
+        },
+        "last_prediction_day": {
+          "format": "date",
+          "title": "Last Prediction Day",
+          "type": "string"
+        },
+        "lead_time": {
+          "$ref": "#/$defs/LeadTimeView"
+        },
+        "leakage_checks": {
+          "items": {
+            "$ref": "#/$defs/LeakageCheckView"
+          },
+          "title": "Leakage Checks",
+          "type": "array"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "movement_24h": {
+          "$ref": "#/$defs/SpreadView"
+        },
+        "outcome_rules_version": {
+          "title": "Outcome Rules Version",
+          "type": "string"
+        },
+        "overall": {
+          "$ref": "#/$defs/OutcomeSummaryView"
+        },
+        "persistence_7d": {
+          "$ref": "#/$defs/SpreadView"
+        },
+        "primary_evaluable": {
+          "title": "Primary Evaluable",
+          "type": "integer"
+        },
+        "primary_unavailable": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Primary Unavailable",
+          "type": "object"
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "string"
+        },
+        "publication_lag_hours": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Publication Lag Hours",
+          "type": "object"
+        },
+        "ranked": {
+          "title": "Ranked",
+          "type": "integer"
+        },
+        "recommendations": {
+          "title": "Recommendations",
+          "type": "integer"
+        },
+        "report_id": {
+          "title": "Report Id",
+          "type": "string"
+        },
+        "score_bins": {
+          "items": {
+            "$ref": "#/$defs/StratumView"
+          },
+          "title": "Score Bins",
+          "type": "array"
+        },
+        "score_version": {
+          "title": "Score Version",
+          "type": "string"
+        },
+        "snapshot_dates": {
+          "title": "Snapshot Dates",
+          "type": "integer"
+        },
+        "snapshot_set_hash": {
+          "title": "Snapshot Set Hash",
+          "type": "string"
+        },
+        "strategies": {
+          "items": {
+            "$ref": "#/$defs/StrategyResultView"
+          },
+          "title": "Strategies",
+          "type": "array"
+        },
+        "universe_size": {
+          "title": "Universe Size",
+          "type": "integer"
+        },
+        "unranked": {
+          "title": "Unranked",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "report_id",
+        "format",
+        "protocol_version",
+        "outcome_rules_version",
+        "score_version",
+        "event_rules_version",
+        "first_prediction_day",
+        "last_prediction_day",
+        "first_latest_due_day",
+        "last_latest_due_day",
+        "publication_lag_hours",
+        "data_through",
+        "snapshot_set_hash",
+        "label_set_hash",
+        "snapshot_dates",
+        "universe_size",
+        "games_ranked",
+        "games_with_outcome",
+        "independent_sources",
+        "recommendations",
+        "ranked",
+        "unranked",
+        "primary_evaluable",
+        "primary_unavailable",
+        "overall",
+        "strategies",
+        "score_bins",
+        "confidence_bands",
+        "movement_24h",
+        "persistence_7d",
+        "lead_time",
+        "evidence",
+        "leakage_checks",
+        "events",
+        "limitations",
+        "inspection",
+        "inspection_truncated",
+        "created_at"
+      ],
+      "title": "ValidationReportView",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Historical validation, or the plain statement that none has been run.\n\n\"not_run\" carries no report and no number. It is not a result of zero.",
+  "properties": {
+    "availability": {
+      "enum": [
+        "available",
+        "not_run"
+      ],
+      "title": "Availability",
+      "type": "string"
+    },
+    "contract_status": {
+      "const": "internal",
+      "description": "INTERNAL / non-binding engineering contract; not the public contract.",
+      "title": "Contract Status",
+      "type": "string"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "outcome_definition": {
+      "$ref": "#/$defs/OutcomeDefinitionView"
+    },
+    "protocol_version": {
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "report": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ValidationReportView"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "run_id": {
+      "pattern": "^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}$",
+      "title": "Run Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope_note": {
+      "title": "Scope Note",
+      "type": "string"
+    },
+    "score_version": {
+      "title": "Score Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "contract_status",
+    "generated_at",
+    "run_id",
+    "score_version",
+    "scope_note",
+    "availability",
+    "protocol_version",
+    "outcome_definition"
+  ],
+  "title": "ValidationArtifact",
+  "type": "object"
+}

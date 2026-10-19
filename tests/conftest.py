@@ -125,3 +125,21 @@ def limited_client(
     recorded = sleeps if sleeps is not None else []
     limiter = RateLimiter(operations, ledger=ledger, clock=Clock(recorded.append))
     return LimitedHttpClient(mock_client(handler), limiter, retry)
+
+
+@pytest.fixture(autouse=True)
+def _no_local_state(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Keep every test away from the developer's own local stores.
+
+    The command line defaults to stores under `.metaspike/` in the working directory.
+    A developer's machine may hold real, private things there (a backtest, or
+    announcements from a supervised probe), and a test must neither read them nor
+    depend on their absence. A test that wants a store passes its own directory.
+    """
+    from metaspike import cli
+
+    empty = tmp_path_factory.mktemp("no-local-state")
+    for name in ("DEFAULT_EVENTS_DIR", "DEFAULT_EVENT_SOURCES_DIR", "DEFAULT_VALIDATION_DIR"):
+        monkeypatch.setattr(cli, name, empty / name.lower())

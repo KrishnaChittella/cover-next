@@ -139,7 +139,8 @@ def test_every_artifact_and_schema_is_marked_internal(artifacts_dir: Path) -> No
         for path in artifacts_dir.rglob("*.json")
         if "versions" not in path.relative_to(artifacts_dir).parts
     ]
-    assert len(documents) == 4 + 15
+    # manifest, current, health, methodology, radar, validation; then the games
+    assert len(documents) == 6 + 15
     assert {document["contract_status"] for document in documents} == {"internal"}
 
     for name, model in ARTIFACT_MODELS.items():
@@ -148,4 +149,4 @@ def test_every_artifact_and_schema_is_marked_internal(artifacts_dir: Path) -> No
         assert schema["properties"]["contract_status"]["const"] == "internal"
         assert "INTERNAL" in schema["properties"]["contract_status"]["description"]
     assert "INTERNAL / NON-BINDING" in (artifacts.__doc__ or "")
-    assert artifacts.SCHEMA_VERSION == "1.0.0"
+    assert artifacts.SCHEMA_VERSION == "1.5.0"  # 1.1 events, 1.2 validation, 1.3 lag-safe

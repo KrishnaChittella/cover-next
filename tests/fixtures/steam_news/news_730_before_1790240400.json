@@ -1,0 +1,54 @@
+{
+ "note": "SYNTHETIC. Written by hand for tests in the shape the adapter reads. Not a recording of any Steam response; every title, id and URL here is invented.",
+ "status": 200,
+ "body": {
+  "appnews": {
+   "appid": 730,
+   "newsitems": [
+    {
+     "gid": "9005",
+     "title": "Season 4 starts September 29, 2026",
+     "url": "https://example.invalid/news/9005",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1789920000,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730
+    },
+    {
+     "gid": "9006",
+     "title": "Developer diary: the road to Season 4",
+     "url": "https://example.invalid/news/9006",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1789228800,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730
+    },
+    {
+     "gid": "9007",
+     "title": "Major Update 3.0",
+     "url": "https://example.invalid/news/9007",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1788631200,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730,
+     "tags": [
+      "patchnotes"
+     ]
+    }
+   ],
+   "count": 7
+  }
+ }
+}

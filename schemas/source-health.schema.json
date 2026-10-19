@@ -1,5 +1,275 @@
 {
   "$defs": {
+    "EventSourceGameView": {
+      "additionalProperties": false,
+      "properties": {
+        "candidates_classified": {
+          "minimum": 0,
+          "title": "Candidates Classified",
+          "type": "integer"
+        },
+        "candidates_not_promoted": {
+          "minimum": 0,
+          "title": "Candidates Not Promoted",
+          "type": "integer"
+        },
+        "candidates_promoted": {
+          "minimum": 0,
+          "title": "Candidates Promoted",
+          "type": "integer"
+        },
+        "canonical_game_id": {
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "fetches_failed": {
+          "minimum": 0,
+          "title": "Fetches Failed",
+          "type": "integer"
+        },
+        "fetches_ok": {
+          "minimum": 0,
+          "title": "Fetches Ok",
+          "type": "integer"
+        },
+        "last_checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Checked At"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "posts": {
+          "minimum": 0,
+          "title": "Posts",
+          "type": "integer"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "source_game_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Source Game Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "slug",
+        "name",
+        "source_game_ids",
+        "fetches_ok",
+        "fetches_failed",
+        "posts",
+        "candidates_classified",
+        "candidates_promoted",
+        "candidates_not_promoted"
+      ],
+      "title": "EventSourceGameView",
+      "type": "object"
+    },
+    "EventSourceStageView": {
+      "additionalProperties": false,
+      "properties": {
+        "cleared": {
+          "title": "Cleared",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "cleared",
+        "reason"
+      ],
+      "title": "EventSourceStageView",
+      "type": "object"
+    },
+    "EventSourceView": {
+      "additionalProperties": false,
+      "description": "An event source: what it was asked by `as_of` and what came of it, in counts.\n\nA post is not an event. `posts_observed` and `candidates` count announcements;\nonly `candidates_promoted` became event observations, and only those can reach\nEvent Heat or the radar. No title or text of a post is published here.",
+      "properties": {
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "candidates": {
+          "minimum": 0,
+          "title": "Candidates",
+          "type": "integer"
+        },
+        "candidates_classified": {
+          "minimum": 0,
+          "title": "Candidates Classified",
+          "type": "integer"
+        },
+        "candidates_not_promoted": {
+          "minimum": 0,
+          "title": "Candidates Not Promoted",
+          "type": "integer"
+        },
+        "candidates_promoted": {
+          "minimum": 0,
+          "title": "Candidates Promoted",
+          "type": "integer"
+        },
+        "candidates_unresolved": {
+          "minimum": 0,
+          "title": "Candidates Unresolved",
+          "type": "integer"
+        },
+        "classification_rules_version": {
+          "title": "Classification Rules Version",
+          "type": "string"
+        },
+        "fetches_after_as_of": {
+          "minimum": 0,
+          "title": "Fetches After As Of",
+          "type": "integer"
+        },
+        "fetches_failed": {
+          "minimum": 0,
+          "title": "Fetches Failed",
+          "type": "integer"
+        },
+        "fetches_not_sent": {
+          "minimum": 0,
+          "title": "Fetches Not Sent",
+          "type": "integer"
+        },
+        "fetches_ok": {
+          "minimum": 0,
+          "title": "Fetches Ok",
+          "type": "integer"
+        },
+        "games": {
+          "items": {
+            "$ref": "#/$defs/EventSourceGameView"
+          },
+          "title": "Games",
+          "type": "array"
+        },
+        "games_checked": {
+          "minimum": 0,
+          "title": "Games Checked",
+          "type": "integer"
+        },
+        "last_failure_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Failure At"
+        },
+        "last_success_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Success At"
+        },
+        "posts_observed": {
+          "minimum": 0,
+          "title": "Posts Observed",
+          "type": "integer"
+        },
+        "promoted_event_types": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Promoted Event Types",
+          "type": "object"
+        },
+        "purpose": {
+          "const": "event_intelligence",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "refusals": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Refusals",
+          "type": "object"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "stage_clearance": {
+          "items": {
+            "$ref": "#/$defs/EventSourceStageView"
+          },
+          "title": "Stage Clearance",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "not_collected",
+            "collected"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "purpose",
+        "classification_rules_version",
+        "as_of",
+        "status",
+        "stage_clearance",
+        "fetches_ok",
+        "fetches_failed",
+        "fetches_not_sent",
+        "games_checked",
+        "posts_observed",
+        "candidates",
+        "candidates_classified",
+        "candidates_promoted",
+        "candidates_not_promoted",
+        "candidates_unresolved",
+        "refusals",
+        "promoted_event_types",
+        "fetches_after_as_of",
+        "games"
+      ],
+      "title": "EventSourceView",
+      "type": "object"
+    },
     "SourceFailure": {
       "additionalProperties": false,
       "properties": {
@@ -149,6 +419,13 @@
       "title": "Contract Status",
       "type": "string"
     },
+    "event_sources": {
+      "items": {
+        "$ref": "#/$defs/EventSourceView"
+      },
+      "title": "Event Sources",
+      "type": "array"
+    },
     "generated_at": {
       "format": "date-time",
       "title": "Generated At",
@@ -182,7 +459,8 @@
     "generated_at",
     "run_id",
     "score_version",
-    "sources"
+    "sources",
+    "event_sources"
   ],
   "title": "SourceHealthArtifact",
   "type": "object"

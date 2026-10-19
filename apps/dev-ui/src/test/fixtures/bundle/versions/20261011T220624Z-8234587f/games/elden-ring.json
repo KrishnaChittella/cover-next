@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.5.0",
+  "contract_status": "internal",
+  "generated_at": "2026-10-11T22:06:24.937085Z",
+  "run_id": "20261011T220624Z-8234587f",
+  "score_version": "metaspike_score_v0",
+  "canonical_game_id": "86d32c9a-afbe-4220-94c3-52dbf2489f04",
+  "slug": "elden-ring",
+  "name": "Elden Ring",
+  "aliases": [],
+  "lifecycle_state": "RELEASED",
+  "relationships": [],
+  "rank": null,
+  "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "unscored",
+    "value": null,
+    "components": null,
+    "unscored_reason": "no_observations"
+  },
+  "confidence": null,
+  "features": null,
+  "explanation": {
+    "summary": "Not scored: data collection failed for this game in the latest run.",
+    "reasons": [
+      {
+        "code": "no_data",
+        "text": "Not scored: data collection failed for this game in the latest run."
+      }
+    ],
+    "top_reasons": [
+      "Not scored: data collection failed for this game in the latest run."
+    ]
+  },
+  "history": [],
+  "source_coverage": [
+    {
+      "source": "wikimedia_pageviews",
+      "status": "failed",
+      "latest_observed_day": null,
+      "staleness_days": null,
+      "observed_days": 0,
+      "missing_days": 0,
+      "attribution": null
+    }
+  ],
+  "events": [],
+  "event_intelligence": {
+    "availability": "unavailable",
+    "rules_version": "event_heat_rules_v1",
+    "rules_status": "internal_uncalibrated",
+    "as_of": "2026-10-04T00:00:00Z",
+    "event_heat": null,
+    "top_event_id": null,
+    "summary": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "reasons": [
+      {
+        "code": "no_event_coverage",
+        "text": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events."
+      }
+    ],
+    "unavailable_reasons": [
+      "no_event_coverage"
+    ],
+    "coverage_checked_at": null,
+    "coverage_sources": [],
+    "contributions": []
+  },
+  "methodology": {
+    "score_version": "metaspike_score_v0",
+    "path": "methodology.json",
+    "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
+  },
+  "updated_at": "2026-10-11T22:06:24.937085Z"
+}

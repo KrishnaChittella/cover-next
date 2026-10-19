@@ -1,0 +1,70 @@
+{
+ "note": "SYNTHETIC. Written by hand for tests in the shape the adapter reads. Not a recording of any Steam response; every title, id and URL here is invented.",
+ "status": 200,
+ "body": {
+  "appnews": {
+   "appid": 730,
+   "newsitems": [
+    {
+     "gid": "9001",
+     "title": "Hotfix 1.4.2",
+     "url": "https://example.invalid/news/9001",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1790868600,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730,
+     "tags": [
+      "patchnotes"
+     ]
+    },
+    {
+     "gid": "9002",
+     "title": "Season 4 is now live",
+     "url": "https://example.invalid/news/9002",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1790701200,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730
+    },
+    {
+     "gid": "9003",
+     "title": "Release Notes for 9/25/2026",
+     "url": "https://example.invalid/news/9003",
+     "is_external_url": false,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "Community Announcements",
+     "date": 1790373600,
+     "feedname": "steam_community_announcements",
+     "feed_type": 1,
+     "appid": 730,
+     "tags": [
+      "patchnotes"
+     ]
+    },
+    {
+     "gid": "9004",
+     "title": "Synthetic Outlet: ten things we think about Season 4",
+     "url": "https://example.invalid/news/9004",
+     "is_external_url": true,
+     "author": "synthetic-author",
+     "contents": "synthetic body that must never be stored",
+     "feedlabel": "synthetic_press",
+     "date": 1790240400,
+     "feedname": "synthetic_press",
+     "feed_type": 0,
+     "appid": 730
+    }
+   ],
+   "count": 7
+  }
+ }
+}

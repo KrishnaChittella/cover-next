@@ -1,0 +1,588 @@
+{
+  "schema_version": "1.5.0",
+  "contract_status": "internal",
+  "generated_at": "2026-10-11T22:06:24.937085Z",
+  "run_id": "20261011T220624Z-8234587f",
+  "score_version": "metaspike_score_v0",
+  "canonical_game_id": "367ff339-1e0f-4c81-aa18-ee9e8715c74f",
+  "slug": "escape-from-tarkov",
+  "name": "Escape from Tarkov",
+  "aliases": [
+    "Tarkov",
+    "EFT"
+  ],
+  "lifecycle_state": "LIVE_SERVICE",
+  "relationships": [],
+  "rank": 3,
+  "score": {
+    "score_version": "metaspike_score_v0",
+    "status": "scored",
+    "value": 0.0,
+    "components": {
+      "significance": 0.0,
+      "magnitude": 0.0,
+      "anomaly": 0.0,
+      "momentum": 0.0
+    },
+    "unscored_reason": null
+  },
+  "confidence": {
+    "value": 60.0,
+    "band": "medium",
+    "ceiling": 60.0,
+    "independent_sources": 1,
+    "factors": {
+      "source_ceiling": 0.6,
+      "freshness": 1.0,
+      "history": 1.0,
+      "completeness": 1.0,
+      "samples": 1.0
+    }
+  },
+  "features": {
+    "as_of_day": "2026-10-03",
+    "window_days": 90,
+    "observed_days": 90,
+    "history_span_days": 90,
+    "missing_days": 0,
+    "staleness_days": 0,
+    "latest_views": 539.0,
+    "avg_3d": 534.6667,
+    "avg_7d": 543.2857,
+    "prior_avg_3d": 564.3333,
+    "recent_7d_samples": 7,
+    "baseline_samples": 28,
+    "baseline_mean_28d": 582.75,
+    "baseline_median_28d": 574.5,
+    "baseline_std_28d": 51.1017,
+    "baseline_mad_28d": 34.5,
+    "lift_ratio": 0.9307,
+    "lift_pct": -6.9336,
+    "lift_7d_pct": -5.4333,
+    "velocity_ratio": 0.9474,
+    "velocity_pct": -5.2569,
+    "consecutive_rising_days": 1,
+    "z_score": -0.8561,
+    "robust_z_score": -0.694,
+    "robust_scale_method": "mad",
+    "history_percentile": 24.1573,
+    "percentile_samples": 89,
+    "flags": []
+  },
+  "explanation": {
+    "summary": "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574.",
+    "reasons": [
+      {
+        "code": "lift_normal",
+        "text": "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574."
+      },
+      {
+        "code": "single_source",
+        "text": "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+      }
+    ],
+    "top_reasons": [
+      "Attention is in line with its 28-day baseline: a 3-day average of 535 daily views against a typical 574.",
+      "Confidence is limited (60/100) because only one source, Wikimedia pageviews, is currently available."
+    ]
+  },
+  "history": [
+    {
+      "source": "wikimedia_pageviews",
+      "metric": "pageviews",
+      "granularity": "daily",
+      "attribution": "Pageview data from the Wikimedia Analytics API (CC0 1.0).",
+      "points": [
+        {
+          "day": "2026-07-06",
+          "value": 581.0,
+          "rolling_mean_7d": null
+        },
+        {
+          "day": "2026-07-07",
+          "value": 558.0,
+          "rolling_mean_7d": null
+        },
+        {
+          "day": "2026-07-08",
+          "value": 570.0,
+          "rolling_mean_7d": null
+        },
+        {
+          "day": "2026-07-09",
+          "value": 555.0,
+          "rolling_mean_7d": null
+        },
+        {
+          "day": "2026-07-10",
+          "value": 563.0,
+          "rolling_mean_7d": 565.4
+        },
+        {
+          "day": "2026-07-11",
+          "value": 521.0,
+          "rolling_mean_7d": 558.0
+        },
+        {
+          "day": "2026-07-12",
+          "value": 504.0,
+          "rolling_mean_7d": 550.29
+        },
+        {
+          "day": "2026-07-13",
+          "value": 504.0,
+          "rolling_mean_7d": 539.29
+        },
+        {
+          "day": "2026-07-14",
+          "value": 665.0,
+          "rolling_mean_7d": 554.57
+        },
+        {
+          "day": "2026-07-15",
+          "value": 609.0,
+          "rolling_mean_7d": 560.14
+        },
+        {
+          "day": "2026-07-16",
+          "value": 618.0,
+          "rolling_mean_7d": 569.14
+        },
+        {
+          "day": "2026-07-17",
+          "value": 596.0,
+          "rolling_mean_7d": 573.86
+        },
+        {
+          "day": "2026-07-18",
+          "value": 541.0,
+          "rolling_mean_7d": 576.71
+        },
+        {
+          "day": "2026-07-19",
+          "value": 517.0,
+          "rolling_mean_7d": 578.57
+        },
+        {
+          "day": "2026-07-20",
+          "value": 528.0,
+          "rolling_mean_7d": 582.0
+        },
+        {
+          "day": "2026-07-21",
+          "value": 487.0,
+          "rolling_mean_7d": 556.57
+        },
+        {
+          "day": "2026-07-22",
+          "value": 582.0,
+          "rolling_mean_7d": 552.71
+        },
+        {
+          "day": "2026-07-23",
+          "value": 554.0,
+          "rolling_mean_7d": 543.57
+        },
+        {
+          "day": "2026-07-24",
+          "value": 555.0,
+          "rolling_mean_7d": 537.71
+        },
+        {
+          "day": "2026-07-25",
+          "value": 510.0,
+          "rolling_mean_7d": 533.29
+        },
+        {
+          "day": "2026-07-26",
+          "value": 515.0,
+          "rolling_mean_7d": 533.0
+        },
+        {
+          "day": "2026-07-27",
+          "value": 618.0,
+          "rolling_mean_7d": 545.86
+        },
+        {
+          "day": "2026-07-28",
+          "value": 522.0,
+          "rolling_mean_7d": 550.86
+        },
+        {
+          "day": "2026-07-29",
+          "value": 526.0,
+          "rolling_mean_7d": 542.86
+        },
+        {
+          "day": "2026-07-30",
+          "value": 498.0,
+          "rolling_mean_7d": 534.86
+        },
+        {
+          "day": "2026-07-31",
+          "value": 584.0,
+          "rolling_mean_7d": 539.0
+        },
+        {
+          "day": "2026-08-01",
+          "value": 505.0,
+          "rolling_mean_7d": 538.29
+        },
+        {
+          "day": "2026-08-02",
+          "value": 633.0,
+          "rolling_mean_7d": 555.14
+        },
+        {
+          "day": "2026-08-03",
+          "value": 971.0,
+          "rolling_mean_7d": 605.57
+        },
+        {
+          "day": "2026-08-04",
+          "value": 836.0,
+          "rolling_mean_7d": 650.43
+        },
+        {
+          "day": "2026-08-05",
+          "value": 837.0,
+          "rolling_mean_7d": 694.86
+        },
+        {
+          "day": "2026-08-06",
+          "value": 811.0,
+          "rolling_mean_7d": 739.57
+        },
+        {
+          "day": "2026-08-07",
+          "value": 867.0,
+          "rolling_mean_7d": 780.0
+        },
+        {
+          "day": "2026-08-08",
+          "value": 737.0,
+          "rolling_mean_7d": 813.14
+        },
+        {
+          "day": "2026-08-09",
+          "value": 847.0,
+          "rolling_mean_7d": 843.71
+        },
+        {
+          "day": "2026-08-10",
+          "value": 936.0,
+          "rolling_mean_7d": 838.71
+        },
+        {
+          "day": "2026-08-11",
+          "value": 950.0,
+          "rolling_mean_7d": 855.0
+        },
+        {
+          "day": "2026-08-12",
+          "value": 797.0,
+          "rolling_mean_7d": 849.29
+        },
+        {
+          "day": "2026-08-13",
+          "value": 813.0,
+          "rolling_mean_7d": 849.57
+        },
+        {
+          "day": "2026-08-14",
+          "value": 744.0,
+          "rolling_mean_7d": 832.0
+        },
+        {
+          "day": "2026-08-15",
+          "value": 789.0,
+          "rolling_mean_7d": 839.43
+        },
+        {
+          "day": "2026-08-16",
+          "value": 818.0,
+          "rolling_mean_7d": 835.29
+        },
+        {
+          "day": "2026-08-17",
+          "value": 780.0,
+          "rolling_mean_7d": 813.0
+        },
+        {
+          "day": "2026-08-18",
+          "value": 917.0,
+          "rolling_mean_7d": 808.29
+        },
+        {
+          "day": "2026-08-19",
+          "value": 920.0,
+          "rolling_mean_7d": 825.86
+        },
+        {
+          "day": "2026-08-20",
+          "value": 794.0,
+          "rolling_mean_7d": 823.14
+        },
+        {
+          "day": "2026-08-21",
+          "value": 729.0,
+          "rolling_mean_7d": 821.0
+        },
+        {
+          "day": "2026-08-22",
+          "value": 636.0,
+          "rolling_mean_7d": 799.14
+        },
+        {
+          "day": "2026-08-23",
+          "value": 667.0,
+          "rolling_mean_7d": 777.57
+        },
+        {
+          "day": "2026-08-24",
+          "value": 604.0,
+          "rolling_mean_7d": 752.43
+        },
+        {
+          "day": "2026-08-25",
+          "value": 715.0,
+          "rolling_mean_7d": 723.57
+        },
+        {
+          "day": "2026-08-26",
+          "value": 693.0,
+          "rolling_mean_7d": 691.14
+        },
+        {
+          "day": "2026-08-27",
+          "value": 660.0,
+          "rolling_mean_7d": 672.0
+        },
+        {
+          "day": "2026-08-28",
+          "value": 751.0,
+          "rolling_mean_7d": 675.14
+        },
+        {
+          "day": "2026-08-29",
+          "value": 592.0,
+          "rolling_mean_7d": 668.86
+        },
+        {
+          "day": "2026-08-30",
+          "value": 660.0,
+          "rolling_mean_7d": 667.86
+        },
+        {
+          "day": "2026-08-31",
+          "value": 654.0,
+          "rolling_mean_7d": 675.0
+        },
+        {
+          "day": "2026-09-01",
+          "value": 604.0,
+          "rolling_mean_7d": 659.14
+        },
+        {
+          "day": "2026-09-02",
+          "value": 642.0,
+          "rolling_mean_7d": 651.86
+        },
+        {
+          "day": "2026-09-03",
+          "value": 693.0,
+          "rolling_mean_7d": 656.57
+        },
+        {
+          "day": "2026-09-04",
+          "value": 602.0,
+          "rolling_mean_7d": 635.29
+        },
+        {
+          "day": "2026-09-05",
+          "value": 509.0,
+          "rolling_mean_7d": 623.43
+        },
+        {
+          "day": "2026-09-06",
+          "value": 552.0,
+          "rolling_mean_7d": 608.0
+        },
+        {
+          "day": "2026-09-07",
+          "value": 575.0,
+          "rolling_mean_7d": 596.71
+        },
+        {
+          "day": "2026-09-08",
+          "value": 602.0,
+          "rolling_mean_7d": 596.43
+        },
+        {
+          "day": "2026-09-09",
+          "value": 564.0,
+          "rolling_mean_7d": 585.29
+        },
+        {
+          "day": "2026-09-10",
+          "value": 599.0,
+          "rolling_mean_7d": 571.86
+        },
+        {
+          "day": "2026-09-11",
+          "value": 551.0,
+          "rolling_mean_7d": 564.57
+        },
+        {
+          "day": "2026-09-12",
+          "value": 511.0,
+          "rolling_mean_7d": 564.86
+        },
+        {
+          "day": "2026-09-13",
+          "value": 569.0,
+          "rolling_mean_7d": 567.29
+        },
+        {
+          "day": "2026-09-14",
+          "value": 554.0,
+          "rolling_mean_7d": 564.29
+        },
+        {
+          "day": "2026-09-15",
+          "value": 589.0,
+          "rolling_mean_7d": 562.43
+        },
+        {
+          "day": "2026-09-16",
+          "value": 525.0,
+          "rolling_mean_7d": 556.86
+        },
+        {
+          "day": "2026-09-17",
+          "value": 549.0,
+          "rolling_mean_7d": 549.71
+        },
+        {
+          "day": "2026-09-18",
+          "value": 527.0,
+          "rolling_mean_7d": 546.29
+        },
+        {
+          "day": "2026-09-19",
+          "value": 574.0,
+          "rolling_mean_7d": 555.29
+        },
+        {
+          "day": "2026-09-20",
+          "value": 515.0,
+          "rolling_mean_7d": 547.57
+        },
+        {
+          "day": "2026-09-21",
+          "value": 633.0,
+          "rolling_mean_7d": 558.86
+        },
+        {
+          "day": "2026-09-22",
+          "value": 598.0,
+          "rolling_mean_7d": 560.14
+        },
+        {
+          "day": "2026-09-23",
+          "value": 652.0,
+          "rolling_mean_7d": 578.29
+        },
+        {
+          "day": "2026-09-24",
+          "value": 645.0,
+          "rolling_mean_7d": 592.0
+        },
+        {
+          "day": "2026-09-25",
+          "value": 534.0,
+          "rolling_mean_7d": 593.0
+        },
+        {
+          "day": "2026-09-26",
+          "value": 535.0,
+          "rolling_mean_7d": 587.43
+        },
+        {
+          "day": "2026-09-27",
+          "value": 506.0,
+          "rolling_mean_7d": 586.14
+        },
+        {
+          "day": "2026-09-28",
+          "value": 597.0,
+          "rolling_mean_7d": 581.0
+        },
+        {
+          "day": "2026-09-29",
+          "value": 539.0,
+          "rolling_mean_7d": 572.57
+        },
+        {
+          "day": "2026-09-30",
+          "value": 557.0,
+          "rolling_mean_7d": 559.0
+        },
+        {
+          "day": "2026-10-01",
+          "value": 546.0,
+          "rolling_mean_7d": 544.86
+        },
+        {
+          "day": "2026-10-02",
+          "value": 519.0,
+          "rolling_mean_7d": 542.71
+        },
+        {
+          "day": "2026-10-03",
+          "value": 539.0,
+          "rolling_mean_7d": 543.29
+        }
+      ]
+    }
+  ],
+  "source_coverage": [
+    {
+      "source": "wikimedia_pageviews",
+      "status": "covered",
+      "latest_observed_day": "2026-10-03",
+      "staleness_days": 0,
+      "observed_days": 90,
+      "missing_days": 0,
+      "attribution": "Pageview data from the Wikimedia Analytics API (CC0 1.0)."
+    }
+  ],
+  "events": [],
+  "event_intelligence": {
+    "availability": "unavailable",
+    "rules_version": "event_heat_rules_v1",
+    "rules_status": "internal_uncalibrated",
+    "as_of": "2026-10-04T00:00:00Z",
+    "event_heat": null,
+    "top_event_id": null,
+    "summary": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "reasons": [
+      {
+        "code": "no_event_coverage",
+        "text": "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events."
+      }
+    ],
+    "unavailable_reasons": [
+      "no_event_coverage"
+    ],
+    "coverage_checked_at": null,
+    "coverage_sources": [],
+    "contributions": []
+  },
+  "methodology": {
+    "score_version": "metaspike_score_v0",
+    "path": "methodology.json",
+    "scope_note": "metaspike_score_v0 measures relative attention anomaly and recent momentum from a single source (Wikimedia pageviews, daily). It is not a complete measure of creator demand or supply."
+  },
+  "updated_at": "2026-10-11T22:06:24.937085Z"
+}

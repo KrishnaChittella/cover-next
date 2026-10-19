@@ -22,6 +22,7 @@ from metaspike.catalogue.eligibility import (
     sampling_targets,
     steam_eligibility,
 )
+from metaspike.catalogue.evaluation import IncompleteRecords
 from metaspike.catalogue.generate import CatalogueState, generate_catalogue
 from metaspike.domain.identity import SourceRecordKey
 from metaspike.domain.samples import SampleFlag, SampleStatus, SlotState
@@ -556,29 +557,53 @@ def test_sample_runs_one_slot_and_is_safe_to_rerun(
     recorded_count = str(recorded()["response"]["body"]["response"]["player_count"])
     assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
     first = capsys.readouterr().out
-    assert "Targets 8: 1 observed, 0 unavailable, 7 failed, 0 refused, 0 skipped" in first
-    assert "8 requests sent" in first
+    # A replay asks only what was recorded: one app. The seven other eligible apps are
+    # not asked, so no failed attempt is invented for them.
+    assert "Targets 1: 1 observed, 0 unavailable, 0 failed, 0 refused, 0 skipped" in first
+    assert "1 requests sent" in first
+    assert (
+        "Not sampled (no recording): "
+        + ", ".join(sorted((a for a in EIGHT_APPS if a != "730"), key=int))
+        in first
+    )
     assert "Not sampled (unknown): gta-v, minecraft" in first
     assert "Not sampled (ineligible): fivem, fortnite, gta-online, gta-vi, star-citizen" in first
     assert recorded_count not in first  # values go to the store, not the screen
 
     store = LocalSampleStore(tmp_path / "samples", lambda _: STEAM_CURRENT_PLAYERS_POLICY)
-    assert store.native_ids(SIGNAL) == tuple(sorted(EIGHT_APPS, key=int))
-    now = datetime.now(UTC)
-    slot = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(now), now)
-    if slot.state is SlotState.OBSERVED:  # unless the test straddled a slot boundary
-        assert str(slot.value) == recorded_count
-        assert (
-            slot.selected is not None
-            and SampleFlag.ZERO_REPORTED not in slot.selected.quality_flags
-        )
+    assert store.native_ids(SIGNAL) == ("730",)
+    # Dated when Steam answered, not when the recording was replayed.
+    recorded_at = datetime.fromisoformat(recorded()["recorded_at"])
+    now = recorded_at + timedelta(minutes=1)
+    slot = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(recorded_at), now)
+    assert slot.state is SlotState.OBSERVED and str(slot.value) == recorded_count
+    assert slot.selected is not None
+    assert SampleFlag.ZERO_REPORTED not in slot.selected.quality_flags
+    assert recorded_at <= slot.selected.observed_at < recorded_at + timedelta(seconds=1)
 
-        assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
-        second = capsys.readouterr().out
-        assert "app 730       already_observed" in second
-        assert "7 requests sent" in second  # only the failed apps were retried
+    # Replaying the same recording again replays the same moment: the answer is stored
+    # once more, dated exactly as before, and the slot still resolves to the same value.
+    assert cli.main(sample_arguments(tmp_path)) == cli.EXIT_OK
+    capsys.readouterr()
+    again = store.resolve(SIGNAL, "730", Granularity.FIFTEEN_MINUTES.floor(recorded_at), now)
+    assert again.state is SlotState.OBSERVED and str(again.value) == recorded_count
+    assert all(
+        recorded_at <= a.observed_at < recorded_at + timedelta(seconds=1) for a in again.attempts
+    )
+
+    # A replay cannot be filed under a later slot than the one it was recorded in.
+    later = (recorded_at + timedelta(days=1)).replace(minute=0, second=0, microsecond=0)
+    assert (
+        cli.main([*sample_arguments(tmp_path), "--scheduled-for", later.isoformat()])
+        == cli.EXIT_COLLECTION_FAILED
+    )
+    assert "after the recording" in capsys.readouterr().err
     # Nothing was scheduled: the command ran once and left no job behind.
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["samples", "state.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "samples",
+        "state.json",
+        "state.provenance.json",  # says the state is local, and under which policy
+    ]
 
 
 def test_sample_keeps_the_catalogue_state_so_bindings_keep_their_dates(
@@ -622,7 +647,7 @@ def test_sample_status_reports_health_and_never_a_value_or_a_secret(
     }
     assert status["derived_metrics_allowed"] == "unknown" and status["publishable"] is False
     assert status["quota_per_day"] == 100_000 and status["quota_remaining_today"] == 90_000
-    assert [row["source_native_id"] for row in status["targets"]] == sorted(EIGHT_APPS, key=int)
+    assert [row["source_native_id"] for row in status["targets"]] == ["730"]
     assert all("value" not in row for row in status["targets"])
     assert all(row["slots"] == 96 for row in status["targets"])
 
@@ -664,3 +689,158 @@ def test_the_player_probe_is_never_part_of_all_and_refuses_an_ineligible_app(
     assert KEY not in printed and KEY not in target.read_text()
     assert findings(target) == []
     assert "HTTP status 200" in printed and "interpreted as observed" in printed
+
+
+# --- reusing a catalogue state needs the evidence it was made from ----------------------
+
+
+def recorded_subset(root: Path, *, igdb: bool, steam: bool) -> list[str]:
+    """The two recorded fixture directories with one source's rows left out.
+
+    Recorded rows, untouched; only which of them are supplied changes.
+    """
+    directories = []
+    for name in ("catalogue", "bootstrap_catalogue"):
+        target = root / name
+        target.mkdir(parents=True)
+        games = json.loads((FIXTURES / name / "igdb_games.json").read_text())
+        apps = json.loads((FIXTURES / name / "steam_apps.json").read_text())
+        (target / "igdb_games.json").write_text(
+            json.dumps(games if igdb else {**games, "rows": []})
+        )
+        (target / "steam_apps.json").write_text(json.dumps(apps if steam else {**apps, "apps": []}))
+        directories.append(str(target))
+    return directories
+
+
+def with_recorded(arguments: list[str], directories: list[str]) -> list[str]:
+    start, end = arguments.index("--recorded") + 1, arguments.index("--state")
+    return [*arguments[:start], *directories, *arguments[end:]]
+
+
+def tree(root: Path) -> dict[str, bytes]:
+    return {
+        str(path.relative_to(root)): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+def test_the_sampler_reuses_a_state_only_with_the_evidence_it_was_made_from(
+    tmp_path: Path,
+    offline: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The gap: `generate-catalogue` required every earlier record when continuing a
+    state, and the sampler did not. It would read bindings made from the complete
+    records beside a smaller set, and choose its Steam targets from the mismatch."""
+    work = tmp_path / "work"
+    work.mkdir()
+    arguments = sample_arguments(work)
+    opened: list[Path] = []
+    real_client = replay_sampling_client
+
+    def counting_client(recordings: Path) -> httpx.Client:
+        opened.append(recordings)
+        return real_client(recordings)
+
+    monkeypatch.setattr(cli, "replay_sampling_client", counting_client)
+
+    # A. A state generated from the complete recorded IGDB and Steam catalogue fixtures,
+    # at private development, by the first sampling run.
+    assert cli.main(arguments) == cli.EXIT_OK
+    first = capsys.readouterr().out
+    assert "Targets 1:" in first and "1 requests sent" in first
+    assert len(opened) == 1
+    state_file, provenance_file = work / "state.json", work / "state.provenance.json"
+    provenance = json.loads(provenance_file.read_text())
+    assert provenance["stage"] == "private_development"
+    assert provenance["retained_sources"] == ["igdb", "steam_catalogue"]
+    state = CatalogueState.model_validate_json(state_file.read_bytes())
+    made_from = len({d.record for d in state.decisions.decisions})
+
+    # B, G. Reused with the complete records, across several slots: accepted, and the
+    # state and its provenance are never rewritten.
+    kept = (state_file.read_bytes(), provenance_file.read_bytes())
+    for slot in ("2026-10-06T01:00:00+00:00", "2026-10-06T01:15:00+00:00"):
+        assert cli.main([*arguments, "--scheduled-for", slot]) == cli.EXIT_OK
+        assert "Targets 1:" in capsys.readouterr().out
+        assert (state_file.read_bytes(), provenance_file.read_bytes()) == kept
+    assert len(opened) == 3
+    # I. The same eligibility as before: the targets are the same eight apps.
+    records = [
+        record
+        for name in ("catalogue", "bootstrap_catalogue")
+        for record in load_recorded_catalogue(FIXTURES / name).values()
+    ]
+    targets = sampling_targets(state, steam_eligibility(state, records), bootstrap_scope())
+    assert len(targets) == 8
+
+    before = tree(work)
+    refusals = {
+        # C. Only the IGDB records: the Steam records the state was made from are missing.
+        "igdb-only": (
+            recorded_subset(tmp_path / "igdb-only", igdb=True, steam=False),
+            "steam_catalogue",
+        ),
+        # D. Only the Steam catalogue records: the IGDB records are missing.
+        "steam-only": (recorded_subset(tmp_path / "steam-only", igdb=False, steam=True), "igdb"),
+        # E. Nothing at all, and one of the two directories alone.
+        "empty": (recorded_subset(tmp_path / "empty", igdb=False, steam=False), "igdb"),
+        "one-directory": ([str(FIXTURES / "bootstrap_catalogue")], "igdb"),
+    }
+    for name, (directories, missing_source) in refusals.items():
+        code = cli.main(with_recorded(arguments, directories))
+        captured = capsys.readouterr()
+        # F, G. An expected refusal with a clear message, not an internal error.
+        assert code == cli.EXIT_INVALID_CATALOGUE, name
+        assert code != cli.EXIT_UNEXPECTED
+        assert "catalogue state cannot be reused" in captured.err, name
+        assert "record(s) the state being continued was made from" in captured.err, name
+        assert f"from {missing_source}" in captured.err, name
+        assert "Traceback" not in captured.err and "unexpected failure" not in captured.err
+        assert captured.out == ""  # no target was chosen and nothing was reported
+        # No client was opened, so no request could be sent.
+        assert len(opened) == 3, name
+        # Nothing was written: no sample, and the state and provenance are byte-identical.
+        assert tree(work) == before, name
+    # The count is exact when everything is missing.
+    assert cli.main(with_recorded(arguments, refusals["empty"][0])) == cli.EXIT_INVALID_CATALOGUE
+    assert f"{made_from} record(s)" in capsys.readouterr().err
+    # The refusal happens in the loader, before eligibility is computed at all.
+    with pytest.raises(IncompleteRecords):
+        cli._load_or_generate_state(state_file, [], DeploymentStage.PRIVATE_DEVELOPMENT)
+    source = (FIXTURES.parent.parent / "src/metaspike/cli.py").read_text()
+    loader = source[
+        source.index("def _load_or_generate_state(") : source.index("def _probe_steam_players(")
+    ]
+    assert "require_complete(records, known_record_keys(state))" in loader
+    handler = source[source.index("def _sample(") : source.index("def _print_sampling(")]
+    assert handler.index("_load_or_generate_state(") < handler.index("steam_eligibility(")
+    assert handler.index("_load_or_generate_state(") < handler.index("replay_sampling_client(")
+
+    # Policy is not bypassed by any of this: the same state at a stage Steam's catalogue
+    # does not clear is refused for that reason, with complete records or without.
+    for supplied in (records, []):
+        with pytest.raises(SourcePolicyError, match="not cleared for private_collection"):
+            cli._load_or_generate_state(state_file, supplied, DeploymentStage.PRIVATE_COLLECTION)
+
+    # H. Missing or tampered provenance is still refused, and still touches nothing.
+    provenance_bytes = provenance_file.read_bytes()
+    provenance_file.unlink()
+    assert cli.main(arguments) == cli.EXIT_SOURCE_POLICY
+    assert "has no provenance file" in capsys.readouterr().err
+    provenance_file.write_text(json.dumps({**provenance, "retained_sources": ["igdb"]}))
+    assert cli.main(arguments) == cli.EXIT_SOURCE_POLICY
+    assert "but the state retains" in capsys.readouterr().err
+    provenance_file.write_text(json.dumps({**provenance, "state_sha256": "0" * 64}))
+    assert cli.main(arguments) == cli.EXIT_SOURCE_POLICY
+    assert "digest differs" in capsys.readouterr().err
+    assert len(opened) == 3 and state_file.read_bytes() == kept[0]
+    # Restored, the complete evidence is accepted again.
+    provenance_file.write_bytes(provenance_bytes)
+    assert tree(work) == before
+    assert cli.main([*arguments, "--scheduled-for", "2026-10-06T00:45:00+00:00"]) == cli.EXIT_OK
+    assert "Targets 1:" in capsys.readouterr().out
+    assert len(opened) == 4

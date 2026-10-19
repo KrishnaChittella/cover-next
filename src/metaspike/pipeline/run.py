@@ -11,10 +11,11 @@ from metaspike.domain.timeseries import TimeWindow
 from metaspike.pipeline.assess import assess
 from metaspike.pipeline.collection import CollectionReport, collect
 from metaspike.publishing.artifacts import ArtifactBundle
-from metaspike.publishing.build import build_bundle
+from metaspike.publishing.build import EventInputs, build_bundle
 from metaspike.publishing.publisher import publish
 from metaspike.sources.registry import SourceRegistry
 from metaspike.storage.base import ObservationStore
+from metaspike.validation.report import ValidationReport
 
 
 class CollectionFailedError(Exception):
@@ -34,6 +35,8 @@ def build_and_publish(
     registry: SourceRegistry,
     artifacts_dir: Path,
     generated_at: datetime,
+    events: EventInputs | None = None,
+    validation: ValidationReport | None = None,
 ) -> RunResult:
     if not report.any_success:
         raise CollectionFailedError(
@@ -41,7 +44,9 @@ def build_and_publish(
             "were left unchanged"
         )
     assessments = assess(catalogue, report)
-    bundle = build_bundle(catalogue, report, assessments, registry, generated_at)
+    bundle = build_bundle(
+        catalogue, report, assessments, registry, generated_at, events, validation
+    )
     version_dir = publish(bundle, artifacts_dir)
     return RunResult(report=report, bundle=bundle, version_dir=version_dir)
 

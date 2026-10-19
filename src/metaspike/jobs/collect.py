@@ -24,7 +24,7 @@ from metaspike.catalogue.persistence import CatalogueRepository
 from metaspike.catalogue.seed import bootstrap_catalogue
 from metaspike.domain.games import Catalogue, SourceIdentifier
 from metaspike.domain.model import FrozenModel
-from metaspike.domain.observations import Observation
+from metaspike.domain.observations import Observation, ObservationStatus
 from metaspike.domain.samples import SampleAttempt, SampleReading, SampleStatus
 from metaspike.domain.signals import SignalKey, SourceErrorCode
 from metaspike.domain.source_policy import SourcePurpose
@@ -56,6 +56,9 @@ BOOTSTRAP_FORMAT = "bootstrap_marker_v1"
 # Why a run stopped asking when the stop was ours: the attempt budget was spent. Also
 # the name of the log event. Deliberately not a source error code.
 BUDGET_EXHAUSTED = "request_budget_exhausted"
+# A target answered without the period that was due: what it said is landed, and the
+# slot is not marked done. Also the name of the log event.
+DUE_PERIOD_MISSING = "due_period_missing"
 # Errors that mean the source has refused us, not that one request went wrong.
 _REFUSALS = (
     SourceErrorCode.UNAUTHORIZED,
@@ -205,7 +208,7 @@ def collect_wikimedia(
     rows: list[dict[str, Any]] = []
     fetched: list[str] = []
     filled: list[str] = []
-    skipped = failed = attempted = fills_deferred = budget_deferred = 0
+    skipped = failed = attempted = fills_deferred = budget_deferred = due_missing = 0
     widest = 0
     halted_by: str | None = None
     known: set[str] = set()
@@ -295,9 +298,25 @@ def collect_wikimedia(
         landed = observation_rows(observations, native_id, runtime.run_id)
         if landed:
             rows.extend(landed)
-            fetched.append(native_id)
             if fill or days >= caps.bootstrap_window_days:
                 filled.append(native_id)
+            if any(
+                point.period_start == due and point.status is ObservationStatus.OBSERVED
+                for point in observations
+            ):
+                fetched.append(native_id)
+            else:
+                # The answer is real and is landed, but it does not hold the period this
+                # run was for. The slot is not done: no marker, so a later run asks again.
+                due_missing += 1
+                runtime.log(
+                    DUE_PERIOD_MISSING,
+                    severity="WARNING",
+                    source=WIKIMEDIA,
+                    target=native_id,
+                    slot=due.isoformat(),
+                    latest_period=max(str(row["period_start"]) for row in landed),
+                )
         else:
             failed += 1  # the source answered with nothing: not a result, so no marker
     unknown = 0 if wanted is None else len(wanted - known)
@@ -328,7 +347,7 @@ def collect_wikimedia(
                 ),
             )
     outbound = budget.used - sent_before
-    complete_run = not failed and not fills_deferred and not budget_deferred
+    complete_run = not (failed or fills_deferred or budget_deferred or due_missing)
     return {
         "outcome": "succeeded" if complete_run else "partial",
         # Outbound attempts: every physical request sent, retries included.
@@ -347,6 +366,7 @@ def collect_wikimedia(
         "targets_collected": len(fetched),
         "targets_skipped_already_done": skipped,
         "targets_failed": failed,
+        "targets_due_period_missing": due_missing,
         "history_filled": len(filled),
         "history_fill_deferred": fills_deferred,
         "rows_landed": len(rows),
@@ -386,7 +406,11 @@ def collect_wikimedia_job(
         outcome = Outcome.RATE_LIMITED
     elif summary["targets_failed"] and not summary["targets_collected"]:
         outcome = Outcome.FAILED
-    elif summary["targets_failed"] or summary["targets_budget_deferred"]:
+    elif (
+        summary["targets_failed"]
+        or summary["targets_budget_deferred"]
+        or summary["targets_due_period_missing"]
+    ):
         outcome = Outcome.PARTIAL
     else:
         outcome = Outcome.SUCCEEDED

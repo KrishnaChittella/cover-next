@@ -1,0 +1,10 @@
+node_modules/
+.next/
+out/
+next-env.d.ts
+*.tsbuildinfo
+# The synced artifact bundle is a local copy of generated output, never source.
+public/data/
+.env
+.env.*
+!.env.example

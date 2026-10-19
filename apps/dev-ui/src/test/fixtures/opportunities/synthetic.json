@@ -1,0 +1,684 @@
+{
+ "rules_version": "creator_opportunity_rules_v1",
+ "as_of": "2026-10-20T12:00:00Z",
+ "distribution": "private_development_only",
+ "contains_synthetic": true,
+ "contains_unverified": false,
+ "entries": [
+  {
+   "position": 1,
+   "canonical_game_id": "0ace3a7a-a923-4f5b-9e9a-fc8a88e8c1c9",
+   "slug": "dota-2",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "indistinguishable on the evidence; ordered by canonical id only, which means nothing"
+  },
+  {
+   "position": 2,
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "indistinguishable on the evidence; ordered by canonical id only, which means nothing"
+  },
+  {
+   "position": 3,
+   "canonical_game_id": "cc600051-5a1b-458f-8cd0-cf1324bc44df",
+   "slug": "counter-strike-2",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "more sources answered"
+  },
+  {
+   "position": 4,
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "last in the list"
+  }
+ ],
+ "simulated_entries": [
+  {
+   "position": 1,
+   "canonical_game_id": "0ace3a7a-a923-4f5b-9e9a-fc8a88e8c1c9",
+   "slug": "dota-2",
+   "readiness": "evidence_supported_candidate",
+   "ahead_of_next": "readier on the rubric"
+  },
+  {
+   "position": 2,
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "readiness": "provisional_watchlist",
+   "ahead_of_next": "readier on the rubric"
+  },
+  {
+   "position": 3,
+   "canonical_game_id": "cc600051-5a1b-458f-8cd0-cf1324bc44df",
+   "slug": "counter-strike-2",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "more sources answered"
+  },
+  {
+   "position": 4,
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "readiness": "insufficient_evidence",
+   "ahead_of_next": "last in the list"
+  }
+ ],
+ "assessments": [
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "2128bf4d-7afc-4d2b-9803-3afae37bb7f3",
+   "slug": "rust",
+   "name": "Rust",
+   "as_of": "2026-10-20T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "simulated_readiness": "provisional_watchlist",
+   "simulated_facts": {
+    "moving_up": [
+     "wikimedia_readership"
+    ],
+    "moving_down": [
+     "steam_players"
+    ],
+    "disagreement": true,
+    "timely_event": false,
+    "angle": true,
+    "coverage_known": false,
+    "sources_answering": 7
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-19T00:00:00Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:45:20Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "youtube_data",
+     "kind": "creator_supply",
+     "state": "incomplete",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "reddit_data",
+     "kind": "community_interest",
+     "state": "incomplete",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:00:00Z",
+     "freshness": null
+    }
+   ],
+   "movements": [
+    {
+     "family": "wikimedia_readership",
+     "source": "wikimedia_pageviews",
+     "standing": "synthetic",
+     "direction": "up",
+     "log_lift": 1.385544829542015,
+     "robust_z": 27.7108965908403,
+     "observed_through": "2026-10-19T00:00:00Z"
+    },
+    {
+     "family": "steam_players",
+     "source": "steam_current_players",
+     "standing": "synthetic",
+     "direction": "down",
+     "log_lift": -7.823345765741899,
+     "robust_z": -156.46691531483796,
+     "observed_through": "2026-10-20T11:45:20Z"
+    }
+   ],
+   "events": [],
+   "angles": [
+    {
+     "origin": "community",
+     "addresses": "update or patch breakdown",
+     "about": [
+      "version 2.3"
+     ],
+     "references": [
+      "synr003",
+      "synr004",
+      "synr005"
+     ],
+     "timely": true,
+     "timely_reason": "newest supporting post 2026-10-20 08:00Z, within 7 days",
+     "standing": "synthetic",
+     "confirmed": false,
+     "assumptions": [
+      "that posts in the sampled communities reflect wider interest",
+      "that a video on it would be watched; nothing here measures that",
+      "that existing videos do not already cover it; total competition is unknown"
+     ]
+    },
+    {
+     "origin": "community",
+     "addresses": "explainer answering a question asked more than once / how-to or guide",
+     "about": [
+      "getting",
+      "offlined",
+      "stop"
+     ],
+     "references": [
+      "synr001",
+      "synr002"
+     ],
+     "timely": true,
+     "timely_reason": "newest supporting post 2026-10-20 02:00Z, within 7 days",
+     "standing": "synthetic",
+     "confirmed": false,
+     "assumptions": [
+      "that posts in the sampled communities reflect wider interest",
+      "that a video on it would be watched; nothing here measures that",
+      "that existing videos do not already cover it; total competition is unknown"
+     ]
+    }
+   ],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "[SYNTHETIC] Incomplete sample. The sample held 9 video(s): 4 supported as being about this game (from 3 channel(s)), 3 uncertain, 2 excluded. The sample did not run to its end, so even the supported count is partial. Total competition is unknown.",
+   "community": "[SYNTHETIC] Incomplete sample. The sample held 9 post(s): 6 supported as being about this game (in 1 communit(ies)), 2 uncertain, 1 excluded; 2 candidate angle(s). The searches did not run to their end.",
+   "why_now": [],
+   "unconfirmed": [
+    {
+     "text": "wikimedia_readership is up against its own history (log lift 1.39, robust z 27.7)",
+     "standing": "synthetic",
+     "references": [
+      "wikimedia_pageviews"
+     ]
+    },
+    {
+     "text": "3 posts discuss version 2.3 (update or patch breakdown)",
+     "standing": "synthetic",
+     "references": [
+      "synr003",
+      "synr004",
+      "synr005"
+     ]
+    },
+    {
+     "text": "2 posts discuss getting, offlined, stop (explainer answering a question asked more than once / how-to or guide)",
+     "standing": "synthetic",
+     "references": [
+      "synr001",
+      "synr002"
+     ]
+    }
+   ],
+   "caveats": [
+    "steam_players is DOWN against its own history (synthetic)",
+    "demand families disagree: one is up while another is down",
+    "youtube_data's sample is incomplete",
+    "reddit_data's sample is incomplete",
+    "total creator competition is unknown: a sample is a lower bound",
+    "SYNTHETIC, counted for nothing: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data"
+   ],
+   "missing": [
+    "Creator supply is a bounded sample (incomplete), not the market: total creator competition is unknown, and nothing calibrated says whether what was sampled is much or little.",
+    "Community interest is a bounded sample (incomplete): what these searches showed being discussed, not how much interest exists. 2 candidate angle(s), none validated as an opportunity.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "No demand family has a current, verified observation of this game: wikimedia_pageviews is available but SYNTHETIC, so it counts for nothing; steam_current_players is available but SYNTHETIC, so it counts for nothing.",
+    "Not publishable under the current source policies: igdb, steam_catalogue, steam_current_players, steam_news, youtube_data, reddit_data.",
+    "The event intelligence above was computed from announcements that are synthetic. It is a diagnostic of the pipeline, not a verified real-world event.",
+    "Invented for a demonstration, and no observation of this game: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data."
+   ],
+   "uncertainty": "2 verified source(s) answered for this game; 5 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  },
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "0ace3a7a-a923-4f5b-9e9a-fc8a88e8c1c9",
+   "slug": "dota-2",
+   "name": "Dota 2",
+   "as_of": "2026-10-20T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "simulated_readiness": "evidence_supported_candidate",
+   "simulated_facts": {
+    "moving_up": [
+     "wikimedia_readership",
+     "steam_players"
+    ],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": true,
+    "angle": true,
+    "coverage_known": true,
+    "sources_answering": 7
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-19T00:00:00Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:45:20Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "youtube_data",
+     "kind": "creator_supply",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T10:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "reddit_data",
+     "kind": "community_interest",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T09:00:00Z",
+     "freshness": null
+    }
+   ],
+   "movements": [
+    {
+     "family": "wikimedia_readership",
+     "source": "wikimedia_pageviews",
+     "standing": "synthetic",
+     "direction": "up",
+     "log_lift": 1.385544829542015,
+     "robust_z": 27.7108965908403,
+     "observed_through": "2026-10-19T00:00:00Z"
+    },
+    {
+     "family": "steam_players",
+     "source": "steam_current_players",
+     "standing": "synthetic",
+     "direction": "up",
+     "log_lift": 0.46541905092524516,
+     "robust_z": 9.308381018504903,
+     "observed_through": "2026-10-20T11:45:20Z"
+    }
+   ],
+   "events": [
+    {
+     "event_id": "evt_3cae87b2b58512487af3afda",
+     "event_type": "season",
+     "starts_at": "2026-10-23T00:00:00Z",
+     "time_precision": "day",
+     "phase": "upcoming",
+     "standing": "synthetic"
+    }
+   ],
+   "angles": [
+    {
+     "origin": "event",
+     "addresses": "the season (upcoming)",
+     "about": [
+      "starts 2026-10-23 (day precision)"
+     ],
+     "references": [
+      "evt_3cae87b2b58512487af3afda"
+     ],
+     "timely": true,
+     "timely_reason": "upcoming at the moment assessed",
+     "standing": "synthetic",
+     "confirmed": false,
+     "assumptions": [
+      "that the event happens as announced",
+      "that viewers look for coverage of it"
+     ]
+    }
+   ],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "[SYNTHETIC] The bounded sample ran to its end and returned no video. That is what this sample held, not evidence of low competition.",
+   "community": "[SYNTHETIC] The bounded sample ran to its end and returned no post. That is what these searches held, not evidence of low interest.",
+   "why_now": [],
+   "unconfirmed": [
+    {
+     "text": "wikimedia_readership is up against its own history (log lift 1.39, robust z 27.7)",
+     "standing": "synthetic",
+     "references": [
+      "wikimedia_pageviews"
+     ]
+    },
+    {
+     "text": "steam_players is up against its own history (log lift 0.465, robust z 9.31)",
+     "standing": "synthetic",
+     "references": [
+      "steam_current_players"
+     ]
+    },
+    {
+     "text": "a season is upcoming, starting 2026-10-23 (day precision)",
+     "standing": "synthetic",
+     "references": [
+      "evt_3cae87b2b58512487af3afda"
+     ]
+    }
+   ],
+   "caveats": [
+    "total creator competition is unknown: a sample is a lower bound",
+    "SYNTHETIC, counted for nothing: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data"
+   ],
+   "missing": [
+    "Creator supply is a bounded sample (no_results), not the market: total creator competition is unknown, and nothing calibrated says whether what was sampled is much or little.",
+    "Community interest is a bounded sample (no_results): what these searches showed being discussed, not how much interest exists. 0 candidate angle(s), none validated as an opportunity.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "No demand family has a current, verified observation of this game: wikimedia_pageviews is available but SYNTHETIC, so it counts for nothing; steam_current_players is available but SYNTHETIC, so it counts for nothing.",
+    "Not publishable under the current source policies: igdb, steam_catalogue, steam_current_players, steam_news, youtube_data, reddit_data.",
+    "The event intelligence above was computed from announcements that are synthetic. It is a diagnostic of the pipeline, not a verified real-world event.",
+    "Invented for a demonstration, and no observation of this game: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data."
+   ],
+   "uncertainty": "2 verified source(s) answered for this game; 5 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  },
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "cc600051-5a1b-458f-8cd0-cf1324bc44df",
+   "slug": "counter-strike-2",
+   "name": "Counter-Strike 2",
+   "as_of": "2026-10-20T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 2
+   },
+   "simulated_readiness": "insufficient_evidence",
+   "simulated_facts": {
+    "moving_up": [],
+    "moving_down": [
+     "wikimedia_readership"
+    ],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 6
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "available",
+     "standing": "verified",
+     "latest_observed_at": "2026-10-05T02:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-19T00:00:00Z",
+     "freshness": "fresh"
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "stale",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T08:45:20Z",
+     "freshness": "stale"
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "available",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T11:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "youtube_data",
+     "kind": "creator_supply",
+     "state": "incomplete",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T10:00:00Z",
+     "freshness": null
+    },
+    {
+     "source": "reddit_data",
+     "kind": "community_interest",
+     "state": "incomplete",
+     "standing": "synthetic",
+     "latest_observed_at": "2026-10-20T09:00:00Z",
+     "freshness": null
+    }
+   ],
+   "movements": [
+    {
+     "family": "wikimedia_readership",
+     "source": "wikimedia_pageviews",
+     "standing": "synthetic",
+     "direction": "down",
+     "log_lift": -1.6054498712561447,
+     "robust_z": -32.108997425122894,
+     "observed_through": "2026-10-19T00:00:00Z"
+    }
+   ],
+   "events": [],
+   "angles": [],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "[SYNTHETIC] Incomplete sample. The sample held 0 video(s): 0 supported as being about this game (from 0 channel(s)), 0 uncertain, 0 excluded. The sample did not run to its end, so even the supported count is partial. Total competition is unknown.",
+   "community": "[SYNTHETIC] Incomplete sample. The sample held 0 post(s): 0 supported as being about this game (in 0 communit(ies)), 0 uncertain, 0 excluded; 0 candidate angle(s). The searches did not run to their end.",
+   "why_now": [],
+   "unconfirmed": [],
+   "caveats": [
+    "wikimedia_readership is DOWN against its own history (synthetic)",
+    "steam_current_players is stale: its latest observation is not current",
+    "youtube_data's sample is incomplete",
+    "reddit_data's sample is incomplete",
+    "total creator competition is unknown: a sample is a lower bound",
+    "SYNTHETIC, counted for nothing: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data"
+   ],
+   "missing": [
+    "Creator supply is a bounded sample (incomplete), not the market: total creator competition is unknown, and nothing calibrated says whether what was sampled is much or little.",
+    "Community interest is a bounded sample (incomplete): what these searches showed being discussed, not how much interest exists. 0 candidate angle(s), none validated as an opportunity.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "No demand family has a current, verified observation of this game: wikimedia_pageviews is available but SYNTHETIC, so it counts for nothing; steam_current_players is stale but SYNTHETIC, so it counts for nothing.",
+    "3 source record(s) name this game and are quarantined. They contribute nothing until they are resolved.",
+    "Not publishable under the current source policies: igdb, steam_catalogue, steam_current_players, steam_news, youtube_data, reddit_data.",
+    "The event intelligence above was computed from announcements that are synthetic. It is a diagnostic of the pipeline, not a verified real-world event.",
+    "Invented for a demonstration, and no observation of this game: wikimedia_pageviews, steam_current_players, steam_news, youtube_data, reddit_data."
+   ],
+   "uncertainty": "2 verified source(s) answered for this game; 5 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  },
+  {
+   "rules_version": "creator_opportunity_rules_v1",
+   "canonical_game_id": "d1c9712e-1691-49c0-be37-a3ea0dd06760",
+   "slug": "minecraft",
+   "name": "Minecraft",
+   "as_of": "2026-10-20T12:00:00Z",
+   "readiness": "insufficient_evidence",
+   "facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 0
+   },
+   "simulated_readiness": "insufficient_evidence",
+   "simulated_facts": {
+    "moving_up": [],
+    "moving_down": [],
+    "disagreement": false,
+    "timely_event": false,
+    "angle": false,
+    "coverage_known": false,
+    "sources_answering": 0
+   },
+   "sources": [
+    {
+     "source": "igdb",
+     "kind": "catalogue_metadata",
+     "state": "unresolved",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_catalogue",
+     "kind": "catalogue_metadata",
+     "state": "unknown",
+     "standing": "verified",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "wikimedia_pageviews",
+     "kind": "demand_signal",
+     "state": "missing",
+     "standing": "synthetic",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_current_players",
+     "kind": "demand_signal",
+     "state": "unknown",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "steam_news",
+     "kind": "event_evidence",
+     "state": "unknown",
+     "standing": "none",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "youtube_data",
+     "kind": "creator_supply",
+     "state": "missing",
+     "standing": "synthetic",
+     "latest_observed_at": null,
+     "freshness": null
+    },
+    {
+     "source": "reddit_data",
+     "kind": "community_interest",
+     "state": "missing",
+     "standing": "synthetic",
+     "latest_observed_at": null,
+     "freshness": null
+    }
+   ],
+   "movements": [],
+   "events": [],
+   "angles": [],
+   "angle_status": "not_yet_established",
+   "creator_coverage": "[SYNTHETIC] Not queried: no search for this game had been made by this moment. Nothing is known about its creator supply. That is not low competition.",
+   "community": "[SYNTHETIC] Not queried: no community search for this game had been made by this moment. Nothing is known about what is discussed. That is not low interest.",
+   "why_now": [],
+   "unconfirmed": [],
+   "caveats": [
+    "total creator competition is unknown: a sample is a lower bound",
+    "SYNTHETIC, counted for nothing: wikimedia_pageviews, youtube_data, reddit_data"
+   ],
+   "missing": [
+    "No current creator-supply sample is held for this game (not_queried), so how many videos already cover it is unknown. Unknown is not low competition.",
+    "No current community sample is held for this game (not_queried), so what players discuss is unknown. Unknown is not low interest.",
+    "No opportunity score exists. metaspike_score_v0 reads pageviews alone and is reported unchanged; it is not a recommendation.",
+    "No demand family has a current, verified observation of this game: wikimedia_pageviews is missing but SYNTHETIC, so it counts for nothing; steam_current_players is unknown.",
+    "Event intelligence is unavailable: no source has looked for this game's events. That is not the same as no events.",
+    "1 source record(s) name this game and are quarantined. They contribute nothing until they are resolved.",
+    "Not publishable under the current source policies: igdb.",
+    "Invented for a demonstration, and no observation of this game: wikimedia_pageviews, youtube_data, reddit_data."
+   ],
+   "uncertainty": "0 verified source(s) answered for this game; 3 synthetic and 0 unverified source(s) are shown and not counted. No thresholds in this rubric have been validated against outcomes, so no readiness here is a calibrated likelihood."
+  }
+ ],
+ "summary": "No real recommendation can be justified: no game has verified evidence that says 'now'."
+}

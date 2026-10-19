@@ -1,0 +1,609 @@
+{
+  "$defs": {
+    "Direction": {
+      "enum": [
+        "up",
+        "down",
+        "flat",
+        "unknown"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "EventNote": {
+      "additionalProperties": false,
+      "description": "An event bearing on timing. Its title, written by its publisher, is not copied.",
+      "properties": {
+        "event_id": {
+          "title": "Event Id",
+          "type": "string"
+        },
+        "event_type": {
+          "title": "Event Type",
+          "type": "string"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        },
+        "starts_at": {
+          "format": "date-time",
+          "title": "Starts At",
+          "type": "string"
+        },
+        "time_precision": {
+          "title": "Time Precision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "event_type",
+        "starts_at",
+        "time_precision",
+        "phase",
+        "standing"
+      ],
+      "title": "EventNote",
+      "type": "object"
+    },
+    "EvidenceKind": {
+      "description": "What a source is evidence OF. Kinds are never blended into one another.",
+      "enum": [
+        "catalogue_metadata",
+        "demand_signal",
+        "event_evidence",
+        "creator_supply",
+        "community_interest"
+      ],
+      "title": "EvidenceKind",
+      "type": "string"
+    },
+    "EvidenceState": {
+      "enum": [
+        "available",
+        "stale",
+        "missing",
+        "inapplicable",
+        "unknown",
+        "unresolved",
+        "not_collected",
+        "not_integrated",
+        "incomplete"
+      ],
+      "title": "EvidenceState",
+      "type": "string"
+    },
+    "Facts": {
+      "additionalProperties": false,
+      "description": "The rubric's answers, from the evidence it was allowed to count.",
+      "properties": {
+        "angle": {
+          "default": false,
+          "title": "Angle",
+          "type": "boolean"
+        },
+        "coverage_known": {
+          "default": false,
+          "title": "Coverage Known",
+          "type": "boolean"
+        },
+        "disagreement": {
+          "default": false,
+          "title": "Disagreement",
+          "type": "boolean"
+        },
+        "moving_down": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceFamily"
+          },
+          "title": "Moving Down",
+          "type": "array"
+        },
+        "moving_up": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SourceFamily"
+          },
+          "title": "Moving Up",
+          "type": "array"
+        },
+        "sources_answering": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Sources Answering",
+          "type": "integer"
+        },
+        "timely_event": {
+          "default": false,
+          "title": "Timely Event",
+          "type": "boolean"
+        }
+      },
+      "title": "Facts",
+      "type": "object"
+    },
+    "MovementNote": {
+      "additionalProperties": false,
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "family": {
+          "$ref": "#/$defs/SourceFamily"
+        },
+        "log_lift": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Log Lift"
+        },
+        "observed_through": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Through"
+        },
+        "robust_z": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Robust Z"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        }
+      },
+      "required": [
+        "family",
+        "source",
+        "standing",
+        "direction"
+      ],
+      "title": "MovementNote",
+      "type": "object"
+    },
+    "OpportunityAssessment": {
+      "additionalProperties": false,
+      "properties": {
+        "angle_status": {
+          "enum": [
+            "established",
+            "not_yet_established"
+          ],
+          "title": "Angle Status",
+          "type": "string"
+        },
+        "angles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VideoAngle"
+          },
+          "title": "Angles",
+          "type": "array"
+        },
+        "as_of": {
+          "format": "date-time",
+          "title": "As Of",
+          "type": "string"
+        },
+        "canonical_game_id": {
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "caveats": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Caveats",
+          "type": "array"
+        },
+        "community": {
+          "title": "Community",
+          "type": "string"
+        },
+        "creator_coverage": {
+          "title": "Creator Coverage",
+          "type": "string"
+        },
+        "events": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/EventNote"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "facts": {
+          "$ref": "#/$defs/Facts"
+        },
+        "missing": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Missing",
+          "type": "array"
+        },
+        "movements": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/MovementNote"
+          },
+          "title": "Movements",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "readiness": {
+          "$ref": "#/$defs/Readiness"
+        },
+        "rules_version": {
+          "const": "creator_opportunity_rules_v1",
+          "default": "creator_opportunity_rules_v1",
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "simulated_facts": {
+          "$ref": "#/$defs/Facts"
+        },
+        "simulated_readiness": {
+          "$ref": "#/$defs/Readiness"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceNote"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "uncertainty": {
+          "title": "Uncertainty",
+          "type": "string"
+        },
+        "unconfirmed": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Statement"
+          },
+          "title": "Unconfirmed",
+          "type": "array"
+        },
+        "why_now": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Statement"
+          },
+          "title": "Why Now",
+          "type": "array"
+        }
+      },
+      "required": [
+        "canonical_game_id",
+        "slug",
+        "name",
+        "as_of",
+        "readiness",
+        "facts",
+        "simulated_readiness",
+        "simulated_facts",
+        "sources",
+        "angle_status",
+        "creator_coverage",
+        "community",
+        "uncertainty"
+      ],
+      "title": "OpportunityAssessment",
+      "type": "object"
+    },
+    "Readiness": {
+      "enum": [
+        "evidence_supported_candidate",
+        "provisional_watchlist",
+        "insufficient_evidence"
+      ],
+      "title": "Readiness",
+      "type": "string"
+    },
+    "ShortlistEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "ahead_of_next": {
+          "title": "Ahead Of Next",
+          "type": "string"
+        },
+        "canonical_game_id": {
+          "title": "Canonical Game Id",
+          "type": "string"
+        },
+        "position": {
+          "minimum": 1,
+          "title": "Position",
+          "type": "integer"
+        },
+        "readiness": {
+          "$ref": "#/$defs/Readiness"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        }
+      },
+      "required": [
+        "position",
+        "canonical_game_id",
+        "slug",
+        "readiness",
+        "ahead_of_next"
+      ],
+      "title": "ShortlistEntry",
+      "type": "object"
+    },
+    "SourceFamily": {
+      "enum": [
+        "wikimedia_readership",
+        "steam_players",
+        "news_coverage",
+        "search_interest",
+        "official_events",
+        "creator_supply"
+      ],
+      "title": "SourceFamily",
+      "type": "string"
+    },
+    "SourceNote": {
+      "additionalProperties": false,
+      "description": "One source's standing for the game, as the evidence reading gave it.",
+      "properties": {
+        "freshness": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Freshness"
+        },
+        "kind": {
+          "$ref": "#/$defs/EvidenceKind"
+        },
+        "latest_observed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latest Observed At"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        },
+        "state": {
+          "$ref": "#/$defs/EvidenceState"
+        }
+      },
+      "required": [
+        "source",
+        "kind",
+        "state",
+        "standing"
+      ],
+      "title": "SourceNote",
+      "type": "object"
+    },
+    "Standing": {
+      "description": "Whether an input is a real observation. A different question from availability.",
+      "enum": [
+        "verified",
+        "unverified",
+        "synthetic",
+        "none"
+      ],
+      "title": "Standing",
+      "type": "string"
+    },
+    "Statement": {
+      "additionalProperties": false,
+      "properties": {
+        "references": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "standing"
+      ],
+      "title": "Statement",
+      "type": "object"
+    },
+    "VideoAngle": {
+      "additionalProperties": false,
+      "description": "A specific thing a video could address, with what supports it.",
+      "properties": {
+        "about": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "About",
+          "type": "array"
+        },
+        "addresses": {
+          "title": "Addresses",
+          "type": "string"
+        },
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        },
+        "confirmed": {
+          "title": "Confirmed",
+          "type": "boolean"
+        },
+        "origin": {
+          "enum": [
+            "community",
+            "event"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "references": {
+          "items": {
+            "type": "string"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        },
+        "timely": {
+          "title": "Timely",
+          "type": "boolean"
+        },
+        "timely_reason": {
+          "title": "Timely Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin",
+        "addresses",
+        "references",
+        "timely",
+        "timely_reason",
+        "standing",
+        "confirmed",
+        "assumptions"
+      ],
+      "title": "VideoAngle",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "as_of": {
+      "format": "date-time",
+      "title": "As Of",
+      "type": "string"
+    },
+    "assessments": {
+      "items": {
+        "$ref": "#/$defs/OpportunityAssessment"
+      },
+      "title": "Assessments",
+      "type": "array"
+    },
+    "contains_synthetic": {
+      "title": "Contains Synthetic",
+      "type": "boolean"
+    },
+    "contains_unverified": {
+      "title": "Contains Unverified",
+      "type": "boolean"
+    },
+    "distribution": {
+      "const": "private_development_only",
+      "default": "private_development_only",
+      "title": "Distribution",
+      "type": "string"
+    },
+    "entries": {
+      "items": {
+        "$ref": "#/$defs/ShortlistEntry"
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "rules_version": {
+      "const": "creator_opportunity_rules_v1",
+      "default": "creator_opportunity_rules_v1",
+      "title": "Rules Version",
+      "type": "string"
+    },
+    "simulated_entries": {
+      "items": {
+        "$ref": "#/$defs/ShortlistEntry"
+      },
+      "title": "Simulated Entries",
+      "type": "array"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    }
+  },
+  "required": [
+    "as_of",
+    "contains_synthetic",
+    "contains_unverified",
+    "entries",
+    "simulated_entries",
+    "assessments",
+    "summary"
+  ],
+  "title": "OpportunityShortlist",
+  "type": "object"
+}

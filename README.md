@@ -241,7 +241,9 @@ uv sync
 
 `uv run metaspike evaluate-resolver` evaluates the resolver on the frozen golden
 set and fails if it makes a single false automatic merge. `uv run metaspike
-generate-catalogue` resolves recorded source records into a catalogue state file.
+generate-catalogue --stage private_development` resolves recorded source records into a
+LOCAL catalogue state file. It is not the production catalogue; every source of the
+records must clear the stated stage, and a provenance file beside the state says so.
 
 `uv run --env-file .env metaspike probe-sources` makes one small authenticated
 call per catalogue source and reports the field names and vocabularies it sees. It
@@ -286,6 +288,81 @@ violation, `6` a catalogue source was unavailable (for example missing credentia
 
 The Wikimedia User-Agent identifies MetaSpike with a contact URL. Override the
 contact with the `METASPIKE_CONTACT` environment variable. No secret is needed.
+
+## Private developer UI
+
+`apps/dev-ui/` is a local, private interface over the published artifacts: the
+leaderboard, a page per game with its history, source health and the methodology. It
+reads the artifact bundle and computes nothing itself. It is internal development, it
+is not deployed, and score v0 is not the final opportunity score.
+
+```
+cd apps/dev-ui
+npm install
+npm run data:replay     # offline: recorded responses only
+npm run dev             # http://localhost:3000
+```
+
+See [apps/dev-ui/README.md](apps/dev-ui/README.md).
+
+## Event intelligence (internal, uncalibrated)
+
+`src/metaspike/events/` is a source-independent engine for dated events: append-only
+observations, deterministic identity and revisions, a versioned Event Heat
+(`event_heat_rules_v1`) and an upcoming radar. No event source is collected yet, so for
+every game it publishes "unavailable", which is never the same as zero. It is not part
+of `metaspike_score_v0`. See [docs/event-intelligence.md](docs/event-intelligence.md).
+
+## Historical validation (internal)
+
+`src/metaspike/validation/` checks past rankings against what followed, with no
+look-ahead: `uv run metaspike backtest --replay tests/fixtures/wikimedia
+--recorded-through 2026-10-03 --from 2026-07-07 --to 2026-10-05` (offline; `--from` and
+`--to` are the days recommendations are simulated on, at 00:00 UTC, each seeing only
+what its source had published by then). On the recorded fixture the evidence status is
+`framework_only`: six games show that the method works, and nothing about whether the
+score predicts demand. See
+[docs/historical-validation.md](docs/historical-validation.md).
+
+## Event sources (internal, private development only)
+
+`src/metaspike/event_sources/` reads announcements from a source and decides which are
+events. The one source is Steam News, through the documented keyless method
+`ISteamNews/GetNewsForApp/v2`. A post is evidence, not an event: it becomes a
+candidate, and a candidate is promoted to an event observation only when a
+deterministic rule set (`event_classification_rules_v1`) establishes both its type and
+its timing. Everything else stays a candidate and never reaches Event Heat.
+
+`uv run metaspike ingest-events --replay tests/fixtures/steam_news --apps 730 570` runs
+it offline on synthetic fixtures. Nothing Steam-derived is cleared for public or
+commercial use. See [docs/event-sources.md](docs/event-sources.md).
+
+## Catalogue expansion (internal, offline evaluation only)
+
+Broad catalogue discovery is off in production. `uv run metaspike evaluate-catalogue
+--stage private_development` answers, offline and in memory, what a broad catalogue
+would hold from the recorded source records: what would be admitted, quarantined or
+kept as a related product, and which monitoring sources could be asked about each
+entity. It calls no source, stores nothing and requires every source's policy to clear
+the stated stage. See [docs/catalogue-expansion.md](docs/catalogue-expansion.md).
+
+`uv run metaspike evidence --as-of <ISO time>` reads, offline, what the given local
+inputs held about each game at that moment: its identity, each source's coverage and
+freshness, movements against each source's own history, known events, and what is
+missing. It is a private reading, not an artifact, and is never published. See
+[docs/multi-source-evidence.md](docs/multi-source-evidence.md).
+
+With `--synthetic-scenario` or `--creator-supply-dir` the reading also carries a
+creator-supply sample: YouTube-shaped responses parsed offline, each video associated
+with a game or not, and the sample described without ever being called the market.
+MetaSpike has never called YouTube; see
+[docs/youtube-creator-supply.md](docs/youtube-creator-supply.md). With
+`--synthetic-scenario` or `--community-dir` it also carries a community-interest sample
+from Reddit-shaped posts, with themes and candidate angles; MetaSpike has never called
+Reddit; see [docs/reddit-community-interest.md](docs/reddit-community-interest.md).
+`--opportunities` reads the same evidence through `creator_opportunity_rules_v1` and
+prints a private, explained shortlist; on today's real data it justifies nothing. See
+[docs/creator-opportunity-intelligence.md](docs/creator-opportunity-intelligence.md).
 
 ## Architecture
 
