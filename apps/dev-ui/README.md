@@ -59,6 +59,33 @@ Both generators run `uv run metaspike evidence ... --opportunities --json --out 
 and write to `<repo>/.metaspike/private/opportunities/{verified,synthetic}.json`, which is
 git-ignored and not under any served directory.
 
+### All recorded sources (integrated view)
+
+```
+npm run opportunities:integrated
+METASPIKE_PRIVATE_OPPORTUNITIES=1 npm run dev
+# http://127.0.0.1:3000/opportunities?view=integrated
+```
+
+This view reads every genuine recorded input together, at 2026-10-06 01:30 UTC:
+
+- the pinned IGDB and Steam app-list catalogue records;
+- the pinned Wikimedia pageviews;
+- the one recorded Steam player response, for app 730. It is replayed into a fresh
+  private store and dated when Steam gave it.
+
+**On the board:**
+
+- a notice that these are recorded sources and not live data, and that unverified
+  inputs count for nothing;
+- for each game, every demand and event source, with its state and origin.
+
+**On each game page,** the source table shows kind, state, latest observation, freshness
+and origin.
+
+Readiness stays verified-only, so today every game abstains. See
+`docs/multisource-integration.md`.
+
 ### Creator decision brief
 
 Each game's page (`/opportunities/<slug>`) opens with a **creator decision brief**. It
@@ -260,7 +287,7 @@ src/test/       one real replay bundle and the stand-in fetch that serves it
 
 ## Tests
 
-`npm test` runs 179 tests. They cover what would mislead silently: manifest and path
+`npm test` runs 242 tests. They cover what would mislead silently: manifest and path
 resolution, the base URL, rejection of schema-invalid and mismatched data, rank order,
 search and filters, null features (absent, never zero), unranked reasons, score and
 confidence formatting, history gaps staying gaps, event intelligence in its
