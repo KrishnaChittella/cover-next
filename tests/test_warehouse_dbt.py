@@ -338,6 +338,7 @@ def test_the_project_parses_for_the_offline_and_the_bigquery_target(
             "sample_slot_timeline",
             "sample_coverage_daily",
             "source_health_daily",
+            "period_due_day_status",
         }
         for name, node in models.items():
             assert node["schema"] == ("ms_staging" if name.startswith("stg_") else "ms_marts")
@@ -683,7 +684,7 @@ def test_the_daily_selector_builds_every_model(dbt_ready: None, tmp_path: Path) 
         )
     }
     assert {"ms_staging.stg_period_observations", "ms_staging.stg_source_records"} <= built_tables
-    assert SOURCE and len(built_tables) == 9
+    assert SOURCE and len(built_tables) == 10
 
 
 # --- full refresh rebuilds ALL retained history ----------------------------------------------
@@ -936,13 +937,14 @@ def test_a_routine_four_day_collection_is_ordinary_work_for_the_period_models(
     build(path, selector="periods")  # and again: the same thirteen rows
     assert staged(path) == rows
 
-    # The period selection builds the period models and the run log, and nothing else.
+    # The period selection builds the period models, the run log and the due-day status
+    # (so a late recovery always rebuilds it), and nothing else.
     built_now = {name for (name,) in query(
         path, "select table_name from information_schema.tables where table_schema = 'ms_staging'"
     )}  # fmt: skip
     assert built_now == {"stg_period_observations", "stg_collection_runs"}
-    assert query(path, "select count(*) from information_schema.tables "
-                       "where table_schema = 'ms_marts'") == [(0,)]  # fmt: skip
+    marts = "select table_name from information_schema.tables where table_schema = 'ms_marts'"
+    assert query(path, marts) == [("period_due_day_status",)]
 
 
 def test_older_period_data_is_still_late_and_is_rebuilt_from_where_it_reaches(

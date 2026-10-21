@@ -50,9 +50,10 @@ uv run pytest -q tests/test_warehouse_dbt.py
 Data tests live in `warehouse/tests/*.sql` (a test fails when its query returns rows)
 and in `schema.yml`. A failing dbt test fails the warehouse job, which fires the
 existing "warehouse failed" email alert. This is how production data checks work: add a
-SQL test, not a new job or alert. Good checks: every tracked target has its due period
-within 36 h; no duplicate logical keys; daily row count not far below the 7-day median;
-a collector receipt in the last 26 h.
+SQL test, not a new job or alert. Good checks: no planned period still `missing` 36 h
+after its tick (`period_due_day_status`; a late recovery stays on record as `late` and
+does not fail); no duplicate logical keys; daily row count not far below the 7-day
+median; a collector receipt in the last 26 h.
 
 Each new BigQuery statement is billed at least 10 MiB, so prefer one test that checks
 several things over many tiny ones.

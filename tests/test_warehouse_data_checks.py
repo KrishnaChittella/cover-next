@@ -8,26 +8,38 @@ in test_warehouse_dbt.py, and is skipped the same way unless MS_REQUIRE_DBT=1.
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from metaspike.jobs import runlog
+from metaspike.jobs.collect import collect_wikimedia_job, seed_bootstrap_markers
+from metaspike.jobs.dispatch import dispatch
+from metaspike.jobs.targets import bootstrap_targets
+from metaspike.jobs.warehouse_job import warehouse
+from metaspike.scheduling.config import PRODUCTION
+from metaspike.sources.wikimedia import SOURCE_ID as WIKIMEDIA
 from metaspike.warehouse.landing import Table, encode_rows, timestamp
 from metaspike.warehouse.tables import TableRef
+from tests.test_c2_scheduling import Clock, Pageviews, arm, dispatcher, ordered_runtime
 from tests.test_warehouse_dbt import (
     AS_OF,
     PAGEVIEWS,
     PROJECT,
     _dbt,
+    build,
     copy_to_duckdb,
+    copy_to_duckdb_raw,
     dbt_ready,  # noqa: F401  (a fixture, used through pytestmark)
     ledger_row,
     naive,
+    query,
 )
-from tests.warehouse_support import World, world
+from tests.warehouse_support import World, real_policy, runtime_for, world
 
 pytestmark = pytest.mark.usefixtures("dbt_ready")
 
@@ -163,10 +175,6 @@ BREAKS: dict[str, tuple[str, Break]] = {
         "assert_every_due_day_arrived_in_time",
         lambda: healthy(silent=(ARTICLES[2], tuple(TICK_DAYS[3:]))),
     ),
-    "a due day that only arrived with a later, overlapping window": (
-        "assert_every_due_day_arrived_in_time",
-        lambda: healthy(silent=(ARTICLES[1], tuple(TICK_DAYS[2:5]))),
-    ),
     "yesterday collecting a quarter of the usual rows": (
         "assert_daily_rows_are_not_far_below_the_weekly_median",
         lambda: healthy(thin_day=TICK_DAYS[-1]),
@@ -231,3 +239,175 @@ def test_the_checks_are_tagged_so_only_the_daily_selector_runs_them() -> None:
             tags is not None and "'daily'" in tags.group(1) and "'production_data'" in tags.group(1)
         )
         assert "'hourly'" not in tags.group(1) and "'periods'" not in tags.group(1), name
+
+
+# --- late recovery: an SLA breach on record, not a failure every day -------------------------
+
+STATUS = (
+    "select cast(slot_start as date), status from ms_marts.period_due_day_status "
+    "where source_native_id = '{article}' order by 1"
+)
+
+
+def statuses(path: Path, article: str) -> dict[str, str]:
+    return {
+        f"{day:%Y-%m-%d}": status for day, status in query(path, STATUS.format(article=article))
+    }
+
+
+def test_a_due_day_recovered_after_its_deadline_is_kept_as_late_and_passes(
+    tmp_path: Path,
+) -> None:
+    # Article1 is asked for and silent on 3, 4 and 5 October. The 6 October run's
+    # four-day window brings back its due days of 1, 2 and 3 October: the first two
+    # after their deadline, the third within it.
+    code, log = daily_build(healthy(silent=(ARTICLES[1], tuple(TICK_DAYS[2:5]))), tmp_path)
+    assert code == 0, log[-3000:]
+    assert "assert_every_due_day_arrived_in_time" not in failed_checks(log)
+    seen = statuses(tmp_path / "warehouse.duckdb", ARTICLES[1])
+    assert {day: seen[day] for day in ("2026-10-01", "2026-10-02", "2026-10-03")} == {
+        "2026-10-01": "late",
+        "2026-10-02": "late",
+        "2026-10-03": "on_time",
+    }
+    assert set(statuses(tmp_path / "warehouse.duckdb", ARTICLES[0]).values()) <= {
+        "on_time",
+        "pending",
+    }
+
+
+def test_missing_fails_until_it_is_recovered_then_it_is_late_and_passes(tmp_path: Path) -> None:
+    w = healthy(silent=(ARTICLES[2], tuple(TICK_DAYS[3:])))
+    path = tmp_path / "warehouse.duckdb"
+    code, log = daily_build(w, tmp_path)
+    assert code != 0 and failed_checks(log) == {"assert_every_due_day_arrived_in_time"}
+    assert statuses(path, ARTICLES[2])["2026-10-02"] == "missing"
+    assert statuses(path, ARTICLES[2])["2026-10-06"] == "pending"  # its deadline is ahead
+
+    # A repair run, an hour before the build, brings every missing day back.
+    repaired_at = AS_OF - timedelta(hours=1)
+    rows = [
+        period_row(ARTICLES[2], datetime(2026, 10, day, tzinfo=UTC), repaired_at, 1.0, "repair")
+        for day in range(2, 7)
+    ]
+    w.writer.land(Table.PERIOD_OBSERVATIONS, PAGEVIEWS, "repair", repaired_at, rows)
+    w.load_everything("load-repair")
+    copy_to_duckdb_raw(w, path)  # an incremental build over what dbt already built
+    variables = json.dumps({"run_as_of": f"{naive(AS_OF):%Y-%m-%d %H:%M:%S}"})
+    for _ in range(2):  # and the day after, nothing about it fails again
+        done = _dbt(
+            "build", "--target", "offline", "--selector", "daily", "--vars", variables,
+            database=path, check=False,
+        )  # fmt: skip
+        assert done.returncode == 0, done.stdout[-3000:]
+    seen = statuses(path, ARTICLES[2])
+    assert [seen[f"2026-10-0{day}"] for day in range(2, 7)] == ["late"] * 4 + ["on_time"]
+
+
+def test_a_late_breach_stays_on_record_after_it_leaves_the_check_window(tmp_path: Path) -> None:
+    code, log = daily_build(healthy(silent=(ARTICLES[1], tuple(TICK_DAYS[2:5]))), tmp_path)
+    assert code == 0, log[-2000:]
+    path = tmp_path / "warehouse.duckdb"
+    # Three weeks later an ordinary incremental run, which reads only its recent window.
+    build(path, as_of=AS_OF + timedelta(days=21), selector="daily", checks=False)
+    assert statuses(path, ARTICLES[1])["2026-10-01"] == "late"
+    assert statuses(path, ARTICLES[1])["2026-10-02"] == "late"
+
+
+# --- the steady-state day, end to end: collect at 12:00, load and check at 13:00 -------------
+
+
+class OfflineDbt:
+    """What the warehouse job asks dbt for, run against DuckDB instead of BigQuery."""
+
+    def __init__(self, w: World, path: Path, *, real: bool) -> None:
+        self.w, self.path, self.real = w, path, real
+        self.selectors: list[str] = []
+        self.log = ""
+
+    def __call__(self, arguments: Sequence[str], environment: Mapping[str, str]) -> int:
+        selector = arguments[arguments.index("--selector") + 1]
+        self.selectors.append(selector)
+        if not self.real:
+            return 0
+        if self.path.exists():
+            copy_to_duckdb_raw(self.w, self.path)
+        else:
+            copy_to_duckdb(self.w, self.path)
+        variables = arguments[arguments.index("--vars") + 1]
+        done = _dbt(
+            "build", "--target", "offline", "--selector", selector, "--vars", variables,
+            database=self.path, check=False,
+        )  # fmt: skip
+        self.log = done.stdout
+        return done.returncode
+
+
+def test_steady_state_collects_at_twelve_then_loads_and_checks_at_thirteen(
+    tmp_path: Path,
+) -> None:
+    start = datetime(2026, 10, 6, tzinfo=UTC)  # a Tuesday
+    clock = Clock(start)
+    w = world(clock, policy_for=real_policy)
+    ids = [t.source_native_id for t in bootstrap_targets(start).targets]
+    seed_bootstrap_markers(
+        w.operations, WIKIMEDIA, ids, days=90, data_object="x", content_sha256="a" * 64,
+        collection_run_id="first", completed_at=start,
+    )  # fmt: skip
+    arm(w.operations, start + timedelta(days=10))
+    path = tmp_path / "warehouse.duckdb"
+    days = 8
+    started: dict[tuple[int, int], list[str]] = {}
+    builds: list[tuple[int, int, str, int]] = []
+    for day in range(days):
+        for hour in range(24):
+            clock.moment = (start + timedelta(days=day)).replace(hour=hour, second=9)
+            # Each job runs as its command does: between its 'started' and 'finished'
+            # run records, which the collector receipt check reads.
+            runtime, _, starter = dispatcher(w, clock, run_id=f"tick-{clock.moment:%m%d%H}")
+            ran = runlog.run_job(
+                runtime, runlog.landed(runtime, "dispatch"), partial(dispatch, runtime, starter)
+            )
+            assert ran == runlog.EXIT_OK
+            if starter.started:
+                started[(day, hour)] = list(starter.started)
+            for job in starter.started:
+                clock.moment += timedelta(minutes=2)
+                run_id = f"{job}-{clock.moment:%m%d%H}"
+                if job == "ms-wikimedia":
+                    collector, _ = ordered_runtime(w, clock, run_id)
+                    ran = runlog.run_job(
+                        collector,
+                        runlog.landed(collector, WIKIMEDIA),
+                        partial(collect_wikimedia_job, collector, Pageviews),  # type: ignore[arg-type]
+                        source=WIKIMEDIA,
+                    )
+                    assert ran == runlog.EXIT_OK
+                else:
+                    assert job == "ms-warehouse"
+                    w.now = clock
+                    job_runtime, _ = runtime_for(w, job, run_id=run_id)
+                    dbt = OfflineDbt(w, path, real=day >= days - 2)
+                    ran = runlog.run_job(
+                        job_runtime,
+                        runlog.direct(job_runtime),
+                        partial(warehouse, job_runtime, dbt),
+                    )
+                    builds.append((day, hour, dbt.selectors[-1], ran))
+                    assert ran == runlog.EXIT_OK, dbt.log[-3000:]
+                    if dbt.real:
+                        assert set(re.findall(r"PASS (\w+)", dbt.log)) >= CHECKS
+    # One collection at 12:00 and one warehouse run at 13:00, every day, and nothing else.
+    assert PRODUCTION.period_hour == 12 and PRODUCTION.warehouse_daily_hour == 13
+    assert started == {
+        **{(day, 12): ["ms-wikimedia"] for day in range(days)},
+        **{(day, 13): ["ms-warehouse"] for day in range(days)},
+    }
+    # The 13:00 run is the daily selection, which is the one that runs the checks; the
+    # last two were real dbt builds (a first build, then an incremental one).
+    assert builds == [(day, 13, "daily", 0) for day in range(days)]
+    final = query(
+        path, "select status, count(*) from ms_marts.period_due_day_status group by 1 order by 1"
+    )
+    # Every planned day arrived with the collection that asked for it.
+    assert dict(final) == {"on_time": 14 * days}
