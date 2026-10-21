@@ -145,3 +145,28 @@ Finished PR #3: the image scan's CRITICAL certifi finding is fixed. The 36 h due
 
 ## Not done / next
 - No merge, deploy or GCP write. Criteria 10 and 11 of the C2-F alert audit are still unresolved.
+
+---
+
+# 2026-10-21 23:31 UTC — Wikimedia activation preflight; YouTube secret adoption (PR #4)
+
+## What
+A read-only production preflight for Wikimedia steady state; nothing in GCP or GitHub was changed. Also opened PR #4, which adopts the hand-made `youtube-data-api-key` container into Terraform: import, no reader, no version.
+
+## Changed
+- PR #4 `infra/prod/secrets.tf`: the container in the map with `[]` readers, plus an `import` block.
+- PR #4 `infra/prod/tests/*.tftest.hcl`, `tests/test_cloud_foundation.py`: a fourth container with no reader; `override_resource` for the import.
+
+## Checks
+- Preflight: all 7 jobs on the trial image `…49b836bdb979c754` (no collector fix). Scheduler ENABLED with the window `0 * 12-18 10 *`. Control record gen `1791684706340016` expired 18 Oct. The four `SOAK_*` variables are still set, `SCHEDULER_PAUSED=false`, budget $20.
+- Local lock-free plan of PR #3 infra: 3 in-place updates (scheduler → `0 * * * *`, silence alert on, volume threshold 31 → 60). No destroy and no IAM. The real plan also updates the image on all 7 jobs.
+- PR #4 plan: 1 import and 1 label-bookkeeping update, 0 destroy. `terraform test` 25 passed; cloud-foundation tests 58 passed.
+- PR #4 CI: the image scan **fails**, because `main` still has certifi 2026.7.22. The fix is in PR #3.
+
+## Owner action
+- Merge PR #3, delete `SOAK_MONTH`, `SOAK_START_DAY`, `SOAK_END_DAY`, `SOAK_DAILY_EXECUTION_CEILING`, then say go. I run the deploy plan for your apply approval.
+- Then approve, separately: the control record (draft validated, armed to 2026-11-22T23:30Z) and the 16 Oct repair.
+- PR #4: after the activation apply, rebase onto `main`, then an infra-only plan and your apply approval.
+
+## Not done / next
+- Nothing applied, merged or enabled. YouTube collection is off. C2-F criteria 9, 10 and 11 are unchanged (fail, unresolved, unresolved).
