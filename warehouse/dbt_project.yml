@@ -37,6 +37,17 @@ vars:
   rebuild_from_periods: null
   rebuild_from_records: null
   rebuild_from_runs: null
+  # Production data checks (tests tagged production_data). Enabling a source in
+  # production adds it here, which is why that needs the owner's approval too.
+  # Sources a collector receipt is required for, and the hours it may be silent.
+  # On in production. Offline tests of the models themselves turn it off.
+  production_data_checks: true
+  receipt_required_sources: ["wikimedia_pageviews"]
+  receipt_max_age_hours: 26
+  # A period source's due day must be present this long after the tick that asked.
+  due_day_max_hours: 36
+  # Yesterday's rows may fall to this share of the 7-day median before it is a failure.
+  row_count_min_share: 0.5
 
 models:
   metaspike_warehouse:

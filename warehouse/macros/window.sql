@@ -126,3 +126,10 @@
     {%- endfor %}
   )
 {%- endmacro %}
+
+{#- Data tests look further back than a model's window (a due day is judged 36 hours after
+    its tick, and the day it names is two days older still), but a read is still bounded
+    on the partition column: `days` before today, to the start of that UTC day. -#}
+{% macro ms_check_window_start(days) -%}
+  {{ ms_day(ms_sub_days(ms_now(), days)) }}
+{%- endmacro %}

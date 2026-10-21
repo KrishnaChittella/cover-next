@@ -36,6 +36,18 @@ models:
           - not_null:
               config: {where: "day >= __window_start__"}
 
+  - name: period_due_day_status
+    description: >
+      Per planned period, whether it arrived by its deadline: on_time, late (recovered
+      after the deadline, kept as an SLA breach), missing or pending. Operational.
+    columns:
+      - name: status
+        tests:
+          - accepted_values:
+              arguments:
+                values: [on_time, late, missing, pending]
+              config: {where: "slot_start >= __window_start__"}
+
   - name: source_health_daily
     description: Per source and UTC day, how its attempts ended. Operational, not a signal.
     columns:

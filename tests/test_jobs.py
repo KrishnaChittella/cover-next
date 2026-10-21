@@ -694,6 +694,12 @@ def test_late_period_data_widens_a_run_that_would_build_only_sample_models() -> 
     assert dbt.selector() == "daily" == summary["selector"]
 
 
+def test_the_job_and_the_dispatcher_agree_on_the_daily_hour() -> None:
+    from metaspike.scheduling.config import PRODUCTION
+
+    assert PRODUCTION.warehouse_daily_hour == warehouse_job.DAILY_HOUR
+
+
 def test_the_selection_is_the_smallest_that_builds_what_changed() -> None:
     choose = warehouse_job.choose_selector
     none: frozenset[str] = frozenset()

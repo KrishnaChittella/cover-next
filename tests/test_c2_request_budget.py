@@ -53,6 +53,7 @@ from tests.test_c2_scheduling import Starter, arm, article
 from tests.warehouse_support import World, real_policy, runtime_for, world
 
 TUESDAY = datetime(2026, 10, 6, tzinfo=UTC)
+PERIOD_HOUR = PRODUCTION.period_hour
 RETRY = RetryConfig(max_attempts=4, base_delay_seconds=0.0, max_delay_seconds=0.0)
 IDS = [t.source_native_id for t in bootstrap_targets(TUESDAY).targets]
 VERSION = policy_version(real_policy(WIKIMEDIA))
@@ -124,7 +125,7 @@ def filled(w: World) -> None:
 def supervised(
     wire: Wire, limit: int, retry: RetryConfig = RETRY
 ) -> tuple[Any, list[dict[str, Any]], World]:
-    clock = At(TUESDAY.replace(hour=3, minute=5))
+    clock = At(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     filled(w)
     runtime, log = runtime_for(w, "ms-wikimedia")
@@ -327,7 +328,7 @@ def test_a_transient_failure_is_still_retried_while_attempts_remain() -> None:
 def test_a_stand_in_with_no_transport_is_charged_one_attempt_for_each_fetch() -> None:
     from tests.test_c2_scheduling import Pageviews
 
-    clock = At(TUESDAY.replace(hour=3, minute=5))
+    clock = At(TUESDAY.replace(hour=PERIOD_HOUR, minute=5))
     w = world(clock, policy_for=real_policy)
     filled(w)
     runtime, _ = runtime_for(w, "ms-wikimedia")
@@ -368,14 +369,14 @@ def test_a_control_cap_of_fourteen_cannot_produce_a_twenty_two_attempt_order() -
         TUESDAY + timedelta(days=1),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_requests_per_day=14)},
     )
-    dispatched(w, clock, 3)
+    dispatched(w, clock, PERIOD_HOUR)
     order = current_order(w)
     assert len(order.targets) == 14 and order.max_requests == 14  # not 22
     assert counters(w, TUESDAY).requests == {WIKIMEDIA: 14}
     # Without the lower cap the same order carries retry room, and reserves all of it.
     free = world(clock, policy_for=real_policy)
     arm(free.operations, TUESDAY + timedelta(days=1))
-    dispatched(free, clock, 3)
+    dispatched(free, clock, PERIOD_HOUR)
     assert current_order(free).max_requests == 22
     assert counters(free, TUESDAY).requests == {WIKIMEDIA: 22}
 
@@ -389,7 +390,7 @@ def test_an_order_never_carries_more_attempts_than_the_day_has_left(cap: int) ->
         TUESDAY + timedelta(days=1),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_requests_per_day=cap)},
     )
-    dispatched(w, clock, 3)
+    dispatched(w, clock, PERIOD_HOUR)
     order = current_order(w)
     assert order.max_requests <= cap and len(order.targets) <= order.max_requests
     assert len(order.targets) == min(14, cap) and order.max_requests == min(22, cap)
@@ -420,7 +421,7 @@ def test_reservations_over_several_executions_never_exceed_the_days_ceiling() ->
     arm(w.operations, TUESDAY + timedelta(days=1))
     reserved: list[int] = []
     issued: list[WorkOrder] = []
-    for hour in range(3, 12):
+    for hour in range(PERIOD_HOUR, PERIOD_HOUR + 9):
         started = dispatched(w, clock, hour, config).started
         total = counters(w, TUESDAY).requests.get(WIKIMEDIA, 0)
         reserved.append(total)
@@ -460,7 +461,7 @@ def test_an_order_issued_with_no_spare_attempts_still_names_no_more_targets_than
         TUESDAY + timedelta(days=1),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_requests_per_day=14)},
     )
-    dispatched(w, clock, 3)
+    dispatched(w, clock, PERIOD_HOUR)
     order = current_order(w)
     with pytest.raises(ValueError):
         WorkOrder.model_validate({**order.model_dump(), "max_requests": 0})
@@ -492,7 +493,7 @@ def test_an_order_for_fourteen_attempts_sends_fourteen_and_says_what_it_did_not_
         TUESDAY + timedelta(days=2),
         sources={WIKIMEDIA: SourceSwitch(enabled=True, max_requests_per_day=14)},
     )
-    dispatched(w, clock, 3)
+    dispatched(w, clock, PERIOD_HOUR)
     order = current_order(w)
     wire = Wire({name_of(sorted(IDS)[0]): [503], name_of(sorted(IDS)[1]): ["timeout"]})
     summary = ordered(w, clock, wire)
@@ -526,7 +527,7 @@ def test_a_real_rate_limit_under_an_order_still_opens_the_breaker() -> None:
     w = world(clock, policy_for=real_policy)
     filled(w)
     arm(w.operations, TUESDAY + timedelta(days=2))
-    dispatched(w, clock, 3)
+    dispatched(w, clock, PERIOD_HOUR)
     order = current_order(w)
     summary = ordered(w, clock, Wire({"*": [429] * 40}))
     assert summary["halted_by"] == "rate_limited" and summary["outbound_attempts"] == 4

@@ -160,14 +160,18 @@ def test_terraform_refuses_to_unpause_without_a_window_in_finite_soak_mode() -> 
         assert f'run "{run}"' in tests, run
 
 
-def test_the_deploy_workflow_cannot_choose_steady_state() -> None:
+def test_the_deploy_workflow_plans_steady_state_and_takes_no_soak_window() -> None:
     deploy = (REPO / ".github" / "workflows" / "deploy.yml").read_text()
-    assert "schedule_mode" not in deploy and "steady_state" not in deploy
+    assert '-var "schedule_mode=steady_state"' in deploy
+    # Running is still a separate decision, made by the SCHEDULER_PAUSED variable alone.
     assert "scheduler_paused=false" not in deploy.replace(" ", "")
-    # The window comes from repository variables, all of them or none.
+    assert "scheduler_paused=${{ vars.SCHEDULER_PAUSED }}" in deploy
+    # Terraform refuses a window with steady_state, so the workflow does not build one,
+    # and says so plainly if a SOAK_* variable is still set.
+    assert "soak_window={month=" not in deploy and "-var soak" not in deploy
     for name in ("SOAK_MONTH", "SOAK_START_DAY", "SOAK_END_DAY", "SOAK_DAILY_EXECUTION_CEILING"):
         assert f"vars.{name}" in deploy, name
-    assert "soak_window={month=" in deploy and "soak_daily_execution_ceiling=" in deploy
+    assert "steady_state takes no soak window" in deploy
 
 
 def test_a_day_of_week_is_refused_because_it_would_widen_the_window() -> None:
