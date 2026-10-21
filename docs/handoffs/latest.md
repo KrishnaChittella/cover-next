@@ -116,3 +116,32 @@ A supervised Steam players recorder, built and tested offline only:
 Any live run needs separate owner approval.
 
 STOP. Awaiting review.
+
+---
+
+# 2026-10-21 22:35 UTC — PR #3 finished (`ci/steady-state-hardening`, CI green on `33775f9`)
+
+## What
+Finished PR #3: the image scan's CRITICAL certifi finding is fixed. The 36 h due-day check now fails only on periods still missing; late recoveries are kept as SLA breaches. The 12:00 collection / 13:00 warehouse day is tested end to end.
+
+## Changed
+- `uv.lock`, `warehouse/uv.lock`: certifi 2026.7.22 → 2026.10.19 (GHSA-6q48-6c7w-9gw2).
+- `.github/workflows/ci.yml`: the `application` job's limit goes from 20 to 30 min (the suite takes ~20 min; a passing run was cancelled).
+- `warehouse/models/marts/period_due_day_status.sql` (new): `on_time`, `late`, `missing` or `pending` per planned period.
+- `warehouse/tests/assert_every_due_day_arrived_in_time.sql`: fails on `missing` only.
+- `tests/test_warehouse_data_checks.py`: late, missing-then-repaired and kept-breach cases, plus an 8-day dispatcher → collector → warehouse → real dbt run.
+- `docs/wikimedia-2026-10-16-gap.md`: the 14 bad 16 Oct markers (confirmed by a read-only listing) and the repair options.
+
+## Checks
+- ruff, mypy (248 files): pass.
+- CI full suite: 1690 passed. Image scan: pass. Terraform tests: 25 + 5 passed.
+
+## Owner action
+- Delete the `SOAK_*` repository variables.
+- Decide on the three `*_VERSION` secret variables.
+- Merge, then deploy (plan → apply).
+- Write a new control record.
+- Repair 16 Oct (doc option B). Until then, every 13:00 warehouse run fails, through 30 Oct.
+
+## Not done / next
+- No merge, deploy or GCP write. Criteria 10 and 11 of the C2-F alert audit are still unresolved.
