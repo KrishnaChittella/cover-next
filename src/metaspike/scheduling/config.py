@@ -62,7 +62,7 @@ class DispatchConfig(FrozenModel):
     schedule_hour: int = Field(default=2, ge=0, le=23)
     warehouse_job: str = "ms-warehouse"
     # UTC hour of the warehouse run that happens whether or not anything landed.
-    warehouse_daily_hour: int = Field(default=4, ge=0, le=23)
+    warehouse_daily_hour: int = Field(default=13, ge=0, le=23)
     long_tail_cohorts: int = Field(default=24, ge=1, le=24)
     max_period_cohorts: int = Field(default=24, ge=1, le=24)
     max_pins: int = Field(default=50, ge=0)

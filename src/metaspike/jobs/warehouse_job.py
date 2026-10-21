@@ -41,9 +41,11 @@ LOOKBACK_DAYS = 3
 PERIOD_LOOKBACK_DAYS = 7
 LOOKBACK_BY_GROUP = {"periods": PERIOD_LOOKBACK_DAYS}
 PENDING_OBJECT = "warehouse/pending_rebuild.json"
-# The run at this UTC hour builds everything, whatever arrived. It follows the daily
-# period collection, so one run a day normally does both.
-DAILY_HOUR = 4
+# The run at this UTC hour builds everything, whatever arrived, and is the one that runs
+# the production data checks. It is the hour after the 12:00 period collection, so the
+# run that loads that day's data is also the one that checks it. Must equal
+# DispatchConfig.warehouse_daily_hour (a test holds them together).
+DAILY_HOUR = 13
 SELECTOR_ENV = "METASPIKE_DBT_SELECTOR"
 LOAD_DAYS_ENV = "METASPIKE_LOAD_DAYS"
 DBT_ENV = "METASPIKE_DBT"

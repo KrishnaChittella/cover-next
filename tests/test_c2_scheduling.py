@@ -845,8 +845,9 @@ def test_a_day_starts_one_collection_and_one_warehouse_run_and_nothing_else() ->
     w = world(clock, policy_for=real_policy)
     arm(w.operations, TUESDAY + timedelta(days=2))
     started = run_day(w, clock, range(24), collector=receipt_for(w, Outcome.SUCCEEDED))
+    # The daily warehouse run is the hour after collection: one run loads and checks.
+    assert PRODUCTION.warehouse_daily_hour == NEXT_HOUR
     assert {h: j for h, j in started.items() if j} == {
-        PRODUCTION.warehouse_daily_hour: ["ms-warehouse"],
         PERIOD_HOUR: ["ms-wikimedia"],
         NEXT_HOUR: ["ms-warehouse"],
     }
