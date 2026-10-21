@@ -5,6 +5,11 @@
 
 mock_provider "google" {}
 
+# The adopted YouTube secret container is imported, and a mock provider cannot import.
+override_resource {
+  target = google_secret_manager_secret.this["youtube-data-api-key"]
+}
+
 variables {
   project_id           = "test-project"
   image                = "us-central1-docker.pkg.dev/test-project/metaspike/metaspike@sha256:0000000000000000000000000000000000000000000000000000000000000000"

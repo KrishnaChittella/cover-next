@@ -10,6 +10,9 @@ locals {
     "steam-web-api-key"  = ["ms-steam-players", "ms-catalogue"]
     "igdb-client-id"     = ["ms-catalogue"]
     "igdb-client-secret" = ["ms-catalogue"]
+    # Created by hand by the owner, adopted by the import below. No reader yet: access
+    # is granted only to the identity of the YouTube collector, once that is designed.
+    "youtube-data-api-key" = []
   }
 
   secret_readers = flatten([
@@ -17,6 +20,13 @@ locals {
       for identity in identities : { secret = secret, identity = identity }
     ]
   ])
+}
+
+# The YouTube container existed before Terraform managed it. Adopting it changes only
+# Terraform state: the container, its versions and its value are left exactly as they are.
+import {
+  to = google_secret_manager_secret.this["youtube-data-api-key"]
+  id = "projects/${var.project_id}/secrets/youtube-data-api-key"
 }
 
 resource "google_secret_manager_secret" "this" {

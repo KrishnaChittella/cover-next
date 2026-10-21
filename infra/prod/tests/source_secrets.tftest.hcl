@@ -5,6 +5,11 @@
 
 mock_provider "google" {}
 
+# The adopted YouTube secret container is imported, and a mock provider cannot import.
+override_resource {
+  target = google_secret_manager_secret.this["youtube-data-api-key"]
+}
+
 variables {
   project_id           = "test-project"
   image                = "us-central1-docker.pkg.dev/test-project/metaspike/metaspike@sha256:0000000000000000000000000000000000000000000000000000000000000000"
@@ -28,8 +33,8 @@ run "default_has_no_source_secret_reference_anywhere" {
   }
 
   assert {
-    condition     = join(",", sort(keys(google_secret_manager_secret.this))) == "igdb-client-id,igdb-client-secret,steam-web-api-key"
-    error_message = "The three secret containers are still planned."
+    condition     = join(",", sort(keys(google_secret_manager_secret.this))) == "igdb-client-id,igdb-client-secret,steam-web-api-key,youtube-data-api-key"
+    error_message = "The four secret containers are still planned."
   }
 
   assert {
