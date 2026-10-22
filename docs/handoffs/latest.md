@@ -267,3 +267,27 @@ Merged PR #6 (Steam recorder) and, with the owner's approval, PR #4. Applied PR 
 ## Not done / next
 - After 13:30 UTC: the Wikimedia verification (12:00 collection, 13:00 dbt, `period_due_day_status`, alerts, cost).
 - YouTube and Steam collection are off; no source permission changed.
+
+---
+
+# 2026-10-22 20:52 UTC — Wikimedia verification: expected row-count failure on 22 Oct
+
+## What
+Read-only check of today's runs. Collection is healthy. The 13:00 warehouse run failed one dbt data check because nothing was collected on 21 Oct, as predicted. No production change.
+
+## Changed
+- Nothing in production or code. This entry only.
+
+## Checks
+- 12:00 `ms-wikimedia-bqhq8`: succeeded, slot 20 Oct already marked, 0 requests, 0 rows (correct skip after the repair).
+- 13:00 `ms-warehouse-vd29d`: exit 1 on both attempts. Load succeeded (repair's 70 rows in staging). dbt `PASS=30 ERROR=1 SKIP=3`: `assert_daily_rows_are_not_far_below_the_weekly_median` (21 Oct 0 rows vs median 56). Skipped `period_due_day_status`, its accepted-values test and `assert_every_due_day_arrived_in_time`.
+- Alert "warehouse load or build failed" opened 13:10:48 and auto-resolved 14:13:17. That was the owner's notification.
+- Dispatcher 02:00–20:00 all succeeded. Scheduler ENABLED hourly. Control record generation `1792632354008756` unchanged. The only GitHub failure today was the 03:38 PR #6 CI, since fixed.
+- Mart logic run read-only: 10–15 Oct `on_time`, 16 Oct `late` (first seen 22 Oct 01:38), 20 Oct `on_time`. 17–19 Oct were never planned, so not judged. No `missing`.
+- Unverified: today's cost.
+
+## Owner action
+- None. Re-running today would fail the same way.
+
+## Not done / next
+- After 13:30 UTC on 23 Oct: confirm the row-count test passes (22 Oct 70 rows vs median 42) and the mart is built with 16 Oct `late`. This depends on the 12:00 run collecting slot 21 Oct.
