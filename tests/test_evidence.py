@@ -1195,6 +1195,8 @@ def test_the_evidence_layer_adds_no_rule_of_its_own() -> None:
         "src/metaspike/pageview_recorder.py",
         # U6.6's offline readiness report reads pinned digests and acquisition terms.
         "src/metaspike/source_readiness.py",
+        # The supervised Steam recorder does the same as U6.7's, for player counts.
+        "src/metaspike/steam_players_recorder.py",
     ]
     assert BROAD_DISCOVERY_ENABLED is False
 
