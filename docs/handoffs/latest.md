@@ -196,3 +196,25 @@ Applied the reviewed steady-state plan to production, after PR #3 merged (`65df0
 ## Not done / next
 - Not checked yet: the first 12:00 collection, the 13:00 dbt checks, `period_due_day_status`, alerts and cost.
 - PR #4 (YouTube secret adoption) is untouched. C2-F criteria 9, 10 and 11 are unchanged.
+
+---
+
+# 2026-10-22 01:26 UTC — Wikimedia control record armed
+
+## What
+Wrote the owner-approved control record, which turns on Wikimedia-only steady-state collection. The first collection is at 12:00 UTC today, and the warehouse run with its dbt checks at 13:00.
+
+## Changed (production)
+- `gs://metaspike-prod-kc-ops/dispatch/control.json`: conditional on gen `1791684706340016`; new gen **`1792632354008756`** (01:25:54 UTC).
+- Content: enabled, armed until 2026-11-22T23:30Z, 1 start per tick, 3 executions a day, `wikimedia_pageviews` only (22 requests a day, 14 targets per execution), no pins.
+
+## Checks
+- The read-back matches the approved draft byte for byte. The dispatcher's own parser accepts it and reports it as armed now.
+
+## Owner action
+- Approve the 16 Oct repair (doc option B, `METASPIKE_WIKIMEDIA_DAYS=5` on 22 Oct, before 12:00 UTC). Until it runs, the 13:00 warehouse run fails on the 16 Oct `missing` slot, through 30 Oct.
+- Merge PR #5 (handoff docs).
+
+## Not done / next
+- Not checked yet: the 12:00 collection, the 13:00 dbt checks, `period_due_day_status`, alerts and cost.
+- PR #4 is untouched. C2-F criteria 9, 10 and 11 are unchanged.
