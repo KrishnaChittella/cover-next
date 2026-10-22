@@ -291,3 +291,32 @@ Read-only check of today's runs. Collection is healthy. The 13:00 warehouse run 
 
 ## Not done / next
 - After 13:30 UTC on 23 Oct: confirm the row-count test passes (22 Oct 70 rows vs median 42) and the mart is built with 16 Oct `late`. This depends on the 12:00 run collecting slot 21 Oct.
+
+---
+
+# 2026-10-22 22:20 UTC — First live API reads, identity regression set, v2 event rules, warehouse demand reader
+
+## What
+Started live development (PR #10 merged). Ran the owner-approved bounded probes, fixed the one bug they exposed, and connected genuine inputs end to end: warehouse demand + Steam players + Steam News events → evidence → opportunities. Every game honestly reads INSUFFICIENT (inputs unpinned; frozen v1 rules ignore decaying patches).
+
+## Source calls (all local, private_development, UNVERIFIED, outputs in ../MetaSpike-live, nothing committed raw)
+- Steam players (key from .env): 22:02 one request (app 570) failed locally with a gzip double-decode (PR #11 fixes it); 22:04 plan `plan_838b3102…` 8/8 recorded, inspection intact. **9 requests total, one slot.** CS2 718,524; Dota 2 700,154; Rust 83,691; Helldivers 2 38,736; BG3 34,902; Elden Ring 18,738; Tarkov 13,210; NMS 11,091. `cache-control max-age` 194–900 s: counts are cached up to 15 min. Digest `6632b8bc…` (not pinned).
+- Steam News (no key): 22:04–22:07, **8 requests**, 8 apps, 40 posts. v1 promoted 0 (not official 24, no type 10, patch size 4, not occurrence 2). Feeds include third-party press (RPS, PC Gamer, PlayGround.ru).
+- IGDB (Twitch credentials from .env): 22:05, **8 HTTP requests** (1 token + 7 queries), 139 game records, 35 uid links.
+- YouTube: project quota read (Service Usage API, read-only): 10,000 units/day; search.list 100/day. No API call (no key in .env). Twitch: not called (needs a policy PR first).
+- BigQuery (read-only, own data): export of 1,960 Wikimedia rows, 14 articles, 8 Jul–20 Oct, digest `79ef9ba2…`.
+
+## PRs
+- #11 merged `f008881`: recording transport decodes a compressed answer once.
+- #12 identity regression (139 real IGDB records): uid collides across sources (570, 730, …); 0 title-only merges; reworks/shared names apart; storefront duplicates quarantined; contested: Prey Evil attached to Prey (2006) via IGDB port link.
+- #13 `event_classification_rules_v2` + `ingest-events --reclassify`: real posts 0 → 5 promoted (all official patches, minor at the lower bound). v1 byte-identical.
+- #14 `export-wikimedia-warehouse` + `evidence --wikimedia-warehouse`, point in time.
+
+## Owner action
+- Decide whether to pin digests after review: Steam players `6632b8bc…`, warehouse export `79ef9ba2…` (makes them VERIFIED inputs).
+- Add `METASPIKE_YOUTUBE_API_KEY` to .env yourself to unblock the approved YouTube probe.
+
+## Not done / next
+- `creator_opportunity_rules_v2`: a recent official patch as a reaction-content cause (v1 counts only upcoming/active; minor_patch duration 0).
+- Bounded Steam News recorder (replay files + acquisition records, pinnable); Twitch policy + 3-request probe; brief schema + UI.
+- 23 Oct after 13:30 UTC: Wikimedia/dbt verification.
