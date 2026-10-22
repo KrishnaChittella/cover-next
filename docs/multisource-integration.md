@@ -93,17 +93,17 @@ the following, in order:
    printed or committed. The registration should identify the MetaSpike /
    krishnachittella.dev application, which the policy names as a collection
    condition.
-3. **A supervised Steam recorder: not built.** `metaspike sample` without `--replay`
-   calls Steam live today, and writes samples but **no acquisition record and no
-   replay-format recording**. The same pattern as `record-pageviews` is needed:
-   - plan by default;
-   - `--live --confirm PLAN_ID`;
-   - the body written as `current_players_<app>.json`;
-   - `acquisition_record_v1` per response;
-   - `--inspect`.
-   
-   Without it a live answer can never become verified, because there is nothing
-   reviewable to pin.
+3. **A supervised Steam recorder: built, offline-tested, never run live.**
+   `metaspike record-steam-players` (`src/metaspike/steam_players_recorder.py`):
+   - plans by default, for the current 15-minute slot; the plan id covers the slot;
+   - at most 8 eligible bootstrap apps, 8 requests, one attempt each;
+   - `--live --confirm PLAN_ID`, inside the same slot, with the key in
+     `METASPIKE_STEAM_WEB_API_KEY`;
+   - writes `current_players_<app>.json` in the replay envelope, plus `body_text`;
+   - writes one `acquisition_record_v1` per kept response;
+   - `--inspect` checks the files, replays them and reports the digest.
+
+   An answer that arrives after the slot ends is not kept.
 4. **Review, then pin.** The owner reviews the recording and approves pinning its digest.
    It is then added to `PINNED_RECORDINGS` in a reviewed commit. Only then is a Steam
    observation verified.
