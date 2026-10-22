@@ -10,6 +10,9 @@ locals {
     "steam-web-api-key"  = ["ms-steam-players", "ms-catalogue"]
     "igdb-client-id"     = ["ms-catalogue"]
     "igdb-client-secret" = ["ms-catalogue"]
+    # Created by hand by the owner, adopted by the import below. No reader yet: access
+    # is granted only to the identity of the YouTube collector, once that is designed.
+    "youtube-data-api-key" = []
   }
 
   secret_readers = flatten([
@@ -17,6 +20,13 @@ locals {
       for identity in identities : { secret = secret, identity = identity }
     ]
   ])
+}
+
+# The YouTube container existed before Terraform managed it. Adopting it changes only
+# Terraform state: the container, its versions and its value are left exactly as they are.
+import {
+  to = google_secret_manager_secret.this["youtube-data-api-key"]
+  id = "projects/${var.project_id}/secrets/youtube-data-api-key"
 }
 
 resource "google_secret_manager_secret" "this" {
@@ -35,6 +45,20 @@ resource "google_secret_manager_secret" "this" {
 
   labels = {
     system = "metaspike"
+  }
+
+  # Two guards against deleting a live secret, and with it the key it holds.
+  #   deletion_protection  kept in Terraform STATE: the provider refuses any apply or
+  #                        destroy that would delete the secret, even after its block
+  #                        or map entry has been removed from this file.
+  #   prevent_destroy      kept in this FILE: a plan that would destroy or replace any
+  #                        instance (a removed map entry included) fails before apply.
+  # Retiring a secret on purpose is therefore two reviewed applies: first set
+  # deletion_protection = false and lift prevent_destroy, then remove the entry.
+  deletion_protection = true
+
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

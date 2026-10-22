@@ -78,14 +78,23 @@ def test_terraform_holds_no_secret_value_and_creates_no_secret_version() -> None
         assigned = re.findall(
             r"(?i)\w*(?:password|secret|api_key|token)\w*\s*=\s*\"([^\"]*)\"", text
         )
-        assert set(assigned) <= {"steam-web-api-key", "igdb-client-id", "igdb-client-secret"}
+        assert set(assigned) <= {
+            "steam-web-api-key",
+            "igdb-client-id",
+            "igdb-client-secret",
+            "youtube-data-api-key",
+        }
     secrets = code(read(PROD / "secrets.tf"))
-    assert set(re.findall(r'"((?:steam|igdb)-[a-z-]+)"\s*=', secrets)) == {
+    assert set(re.findall(r'"((?:steam|igdb|youtube)-[a-z-]+)"\s*=', secrets)) == {
         "steam-web-api-key",
         "igdb-client-id",
         "igdb-client-secret",
+        "youtube-data-api-key",
     }
     assert "igdb-access-token" not in secrets and "oauth" not in secrets.lower()
+    # A live secret cannot be deleted by accident: protected in state and in the file.
+    assert re.search(r"deletion_protection\s*=\s*true", secrets)
+    assert re.search(r"lifecycle\s*\{\s*prevent_destroy\s*=\s*true\s*\}", secrets)
 
 
 def test_project_billing_and_github_identifiers_are_variables_not_values() -> None:
@@ -171,6 +180,7 @@ def test_the_dispatcher_cannot_read_any_source_secret() -> None:
         "steam-web-api-key": {"ms-steam-players", "ms-catalogue"},
         "igdb-client-id": {"ms-catalogue"},
         "igdb-client-secret": {"ms-catalogue"},
+        "youtube-data-api-key": set(),  # no reader until a YouTube collector exists
     }
     allowed = set().union(*readers.values())
     assert allowed == {"ms-steam-players", "ms-catalogue"}
