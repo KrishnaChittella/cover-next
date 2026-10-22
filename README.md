@@ -60,6 +60,20 @@ Preserve the codebase's invariants: missing ≠ zero; unknown permission ≠ app
 
 ---
 
+## Current development decision — live API integration (22 October 2026)
+
+**The theoretical/offline foundation has been built. MetaSpike is now prioritizing bounded, real API experiments and parallel integration against genuine data**, while retaining deterministic offline tests as safeguards. Waiting for one source's scheduled collection must not block event intelligence, canonical identity testing, creator briefs, or UI work. Do not start another prolonged soak.
+
+**Our November 5 full-development target** focuses on a working event → canonical game UUID → observed multi-source evidence → why-now / video-angle / creator-fit brief → creator UI workflow, tested with real responses. A completed adapter or passing synthetic fixture is not proof that a source works live; likewise a working API key is not permission to retain or publicly republish arbitrary source data.
+
+**Parallel work starts now:** (A) bounded real Steam/IGDB/YouTube/source-feasibility probes and actual quotas; (B) cross-source UUID validation and ambiguous identities; (C) point-in-time warehouse evidence plus event-first opportunity rules; (D) creator brief contract and user interface; (E) independent GCP/data-quality operations. Each lane uses small PRs, verifiable outputs and no unnecessary dependence on tomorrow's Wikimedia job.
+
+**Real API work is encouraged, not silently activated.** Define small experiments, confirm current source access conditions and exact project quotas, obtain the required per-probe owner authorization, record real payload shapes and provenance, and isolate private results from public artifacts. Existing source restrictions, credential safety, low-cost limits and production plan/apply approval gates remain in force.
+
+Read [Live API validation and parallel development](docs/live-api-parallel-development.md) for the actual source experiments, owners' approval points, tests, milestones, and how we proceed if Wikimedia's next dbt check fails. This supersedes older *workflow advice* that treats offline development or the historical C2-F audit as a blocker; it does not erase historical evidence.
+
+---
+
 ## Status
 
 **Internal engineering foundation. Not a product release.** MetaSpike has one
