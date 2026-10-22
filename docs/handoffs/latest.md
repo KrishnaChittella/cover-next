@@ -243,3 +243,27 @@ The owner-approved 16 Oct repair ran in production. Separately, PR #6 adds `meta
 ## Not done / next
 - After 13:30 UTC: check the 12:00 collection, the 13:00 dbt run, `period_due_day_status` and alerts. A row-count failure is expected for 21 Oct (0 rows); 16 Oct should become `late`, likely on the 23 Oct run.
 - PR #4 is untouched. Steam `private_collection` is still uncleared.
+
+---
+
+# 2026-10-22 07:09 UTC — PR #6 and PR #4 merged; secret containers protected and YouTube secret adopted
+
+## What
+Merged PR #6 (Steam recorder) and, with the owner's approval, PR #4. Applied PR #4's infrastructure-only plan: all four Secret Manager containers are protected from deletion, and `youtube-data-api-key` is under Terraform. The owner granted auto-merge for routine code, test and docs PRs with green CI.
+
+## Changed
+- `main`: `f8586b2` (PR #6), then `26d9df2` (PR #4 at `09a6360`).
+- Production: plan run `39731593423` (reused image `d1f07a77…`), SHA-256 `6989e183987d1b5dde00bb35f05f79a55702e600ba716b6285d0bc26041e7a43`. Applied by run `39735710234`: 1 imported, 0 added, 4 changed, 0 destroyed. The hash was checked.
+- `secrets.tf`: `deletion_protection = true` (in state) and `prevent_destroy` on all four containers. A throwaway plan that removed one entry failed with `Instance cannot be destroyed`.
+
+## Checks
+- PR #4 CI: 1713 passed, dependency audits, image and Terraform tests (25 + 5) pass.
+- After the apply: all four have `deletion_protection=true` in state. YouTube version 2 is enabled. IAM is identical to before (YouTube has no reader). All 7 jobs have the same generation and image. Dispatcher ticks at 05:00, 06:00 and 07:00 succeeded; control record unchanged.
+- Unverifiable: data-access audit logging is off, so "no value read" rests on the plan's scope, not on logs.
+
+## Owner action
+- Approve one supervised Steam session when ready (see the 04:36 entry).
+
+## Not done / next
+- After 13:30 UTC: the Wikimedia verification (12:00 collection, 13:00 dbt, `period_due_day_status`, alerts, cost).
+- YouTube and Steam collection are off; no source permission changed.
