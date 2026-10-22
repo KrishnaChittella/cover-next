@@ -242,3 +242,68 @@ def _read(
         previous[candidate.key] = candidate
     source_store.add_candidates(candidates)
     return candidates, observations, taken_back
+
+
+def reclassify(
+    source: str,
+    resolver: Resolver,
+    source_store: EventSourceStore,
+    event_store: EventStore,
+    *,
+    rules: EventClassificationRules,
+    source_game_ids: Sequence[str] | None = None,
+    stage: DeploymentStage = DeploymentStage.PRIVATE_DEVELOPMENT,
+    as_of: datetime | None = None,
+) -> IngestReport:
+    """Read the post versions already kept under `rules`, sending nothing.
+
+    A new rules version is applied to what was observed, not to what is fetched again: each
+    item keeps the time it was observed, and its candidate names the rules version that read
+    it. A version already read under these rules is not read twice.
+    """
+    done = {c.item_version_id for c in source_store.latest_candidates(rules_version=rules.version)}
+    items = [
+        item
+        for item in source_store.latest_items(as_of)
+        if item.source == source
+        and item.item_version_id not in done
+        and (source_game_ids is None or item.game.value in source_game_ids)
+    ]
+    created, observations, taken_back = _read(items, resolver, source_store, event_store, rules)
+    appended = event_store.append(observations)
+    withdrawn = event_store.append(taken_back)
+    promoted = [c for c in created if c.status is PromotionStatus.PROMOTED]
+    return IngestReport(
+        source=source,
+        rules_version=rules.version,
+        stage=stage,
+        targets=(),
+        requests=0,
+        fetches_ok=0,
+        fetches_failed=0,
+        fetches_not_sent=0,
+        posts_observed=len(items),
+        posts_rejected=0,
+        new_post_versions=0,
+        candidates_created=len(created),
+        candidates_classified=sum(candidate.classified for candidate in created),
+        candidates_promoted=len(promoted),
+        candidates_not_promoted=len(created) - len(promoted),
+        refusals=dict(sorted(Counter(r.value for c in created for r in c.refusals).items())),
+        promoted_event_types=dict(
+            sorted(
+                Counter(
+                    c.proposed_event_type.value for c in promoted if c.proposed_event_type
+                ).items()
+            )
+        ),
+        observations_appended=appended,
+        withdrawals_appended=withdrawn,
+        coverage_checks_recorded=0,
+        observed_envelope_fields=(),
+        observed_item_fields=(),
+        observed_feed_names=dict(
+            sorted(Counter(item.feed_name or "(none)" for item in items).items())
+        ),
+        observed_tags=dict(sorted(Counter(tag for item in items for tag in item.tags).items())),
+    )

@@ -137,3 +137,35 @@ def test_the_cli_offers_both_versions_and_defaults_to_v1() -> None:
     }
     args = cli._parser().parse_args(["ingest-events", "--replay", "x", "--apps", "1"])
     assert args.rules == "event_classification_rules_v1"
+
+
+def test_kept_posts_are_reclassified_under_v2_without_a_request(tmp_path: Any) -> None:
+    """A post kept under v1 is read again under v2 from the store: same observation time,
+    a v2 candidate, a promoted event, and nothing sent. Reading again does nothing new."""
+    from metaspike.event_sources.ingest import reclassify
+    from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY
+    from metaspike.event_sources.store import EventSourceStore
+    from metaspike.events.store import EventStore
+
+    sources = EventSourceStore(tmp_path / "sources")
+    events = EventStore(tmp_path / "events")
+    kept = item_of("Example Game Update", tags=["patchnotes"])
+    sources.add_items([kept], STEAM_NEWS_POLICY)
+    v1_reading = classify(kept, BINDINGS[APP], source_cleared=True)
+    sources.add_candidates([v1_reading])
+    assert v1_reading.status is PromotionStatus.NOT_PROMOTED
+
+    def resolver(game: Any) -> Any:
+        return BINDINGS.get(game.value)
+
+    report = reclassify("steam_news", resolver, sources, events, rules=V2)
+    assert report.requests == 0 and report.posts_observed == 1
+    assert report.candidates_promoted == 1 and report.observations_appended == 1
+    (observation,) = events.observations()
+    assert observation.observed_at == kept.observed_at
+    v2 = sources.latest_candidates(rules_version="event_classification_rules_v2")
+    assert [c.status for c in v2] == [PromotionStatus.PROMOTED]
+    # The v1 reading is still there, unchanged.
+    assert sources.latest_candidates(rules_version="event_classification_rules_v1") == (v1_reading,)
+    again = reclassify("steam_news", resolver, sources, events, rules=V2)
+    assert again.posts_observed == 0 and len(events.observations()) == 1

@@ -53,7 +53,7 @@ from metaspike.event_sources.candidates import (
     EVENT_CLASSIFICATION_RULES_V1,
     EVENT_CLASSIFICATION_RULES_V2,
 )
-from metaspike.event_sources.ingest import IngestReport, ingest
+from metaspike.event_sources.ingest import IngestReport, ingest, reclassify
 from metaspike.event_sources.registry import (
     EVENT_SOURCE_POLICIES,
     build_steam_news,
@@ -493,6 +493,11 @@ def _parser() -> argparse.ArgumentParser:
     mode = events.add_mutually_exclusive_group(required=True)
     mode.add_argument("--replay", type=Path, metavar="DIR", help="answer from recorded files")
     mode.add_argument("--live", action="store_true", help="call the source: a bounded probe")
+    mode.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="read the posts already kept in --event-sources-dir under --rules; sends nothing",
+    )
     events.add_argument("--apps", type=int, nargs="+", required=True, metavar="APPID")
     events.add_argument("--count", type=int, default=DEFAULT_COUNT, help=f"posts, 1-{MAX_COUNT}")
     events.add_argument(
@@ -838,6 +843,18 @@ def _ingest_events(args: argparse.Namespace) -> int:
     apps = [str(app) for app in dict.fromkeys(args.apps)]
     records = _recorded(args.recorded)
     bindings = steam_app_bindings(generate_catalogue(records, as_of=_now()), records)
+    if args.reclassify:
+        report = reclassify(
+            STEAM_NEWS_POLICY.source,
+            steam_news_resolver(bindings),
+            EventSourceStore(args.event_sources_dir),
+            EventStore(args.events_dir),
+            rules=EVENT_RULES[args.rules],
+            source_game_ids=apps,
+        )
+        _print_ingest(report, live=False, budget=0, reclassified=True)
+        print(f"\nSource store: {args.event_sources_dir}   Event store: {args.events_dir}")
+        return EXIT_OK
     if args.live:
         if len(apps) > LIVE_EVENT_PROBE_MAX_APPS:
             return _fail(
@@ -874,8 +891,12 @@ def _ingest_events(args: argparse.Namespace) -> int:
     return EXIT_OK if report.fetches_failed == 0 else EXIT_SOURCE_UNAVAILABLE
 
 
-def _print_ingest(report: IngestReport, live: bool, budget: int) -> None:
+def _print_ingest(
+    report: IngestReport, live: bool, budget: int, reclassified: bool = False
+) -> None:
     mode = "LIVE probe" if live else "offline replay"
+    if reclassified:
+        mode = "reclassification of kept posts, nothing sent"
     print(f"Event ingestion ({mode}): {report.source}, {report.rules_version}")
     print(f"  endpoint: GET {NEWS_URL}  (no key; body and author never read)")
     print(
