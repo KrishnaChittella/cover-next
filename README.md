@@ -8,6 +8,58 @@ This repository is the data-intelligence pipeline behind that question. It is a
 separate project from the portfolio site that will eventually display its output
 at `krishnachittella.dev/metaspike`.
 
+## Product charter — why MetaSpike exists
+
+**MetaSpike is a creator decision-support product, not merely a gaming trends dashboard or a collection of APIs.** It helps gaming creators decide **which game, event and specific video topic to cover; why that topic matters now; whether an audience is likely to care; and what evidence supports (or weakens) the opportunity.** It aims to help creators avoid being trapped in one declining game and identify *adjacent* games or events that suit their existing audience, format and strengths. It does **not** promise views, virality or guaranteed channel growth.
+
+### The decision MetaSpike must support
+
+A useful opportunity brief should answer:
+
+1. **What happened?** Identify a dated, attributable event (release, patch, announcement, tournament, community development, unusual attention change) or a genuinely emerging trend. Events are first-class entities; a game title alone is not an actionable reason to post.
+2. **Why now?** Explain timeliness and what changed against appropriate earlier baselines. Distinguish a newly emerging opportunity from a late, saturated, stale or merely popular game.
+3. **Is there evidence of audience attention?** Corroborate *different kinds* of interest with independent sources where available, rather than assuming any one metric predicts views.
+4. **What content angle?** Suggest specific, feasible creator-facing angles—e.g. update explainer, challenge, guide, review, discovery, reaction—with an explicit event/topic connection and evidence. Do not invent gameplay facts or imply that low observed video supply proves demand.
+5. **For which creator?** Consider audience overlap, creator niche, format, skills, access to the game and switching costs. A useful recommendation for a multiplayer comedy creator may be unsuitable for a strategy-guide channel.
+6. **How sure are we?** Show provenance, observation windows, source freshness, relevance/matching limits, contradictory signals, missing coverage and reasons to abstain. Do not manufacture confidence or make unverified data look current.
+
+### Evidence sources are instruments, not the product
+
+| Source or source family | Potential evidence role; never assume more than the available data proves |
+| --- | --- |
+| **Official developer/publisher news, patch notes and events** | Explain *what happened* and when; ground the topic/event. |
+| **Steam** | Sampled concurrent-player activity or catalogue identity, where permitted. Not total cross-platform players or guaranteed YouTube demand. |
+| **Twitch** | Live-viewing and streaming attention, if access, terms and collection limits permit. Not a complete measure of all audience interest. |
+| **Wikimedia** | Public curiosity/search-adjacent pageview attention; not gaming-player counts or video-view demand. |
+| **YouTube** | *Optional creator-supply and content-response evidence*: observed videos about a specific game/event/topic, publication windows, topic relevance, public video statistics, and coverage. Search results may be incomplete; totalResults is not an exact count. Collection, aggregation, retention, scoring and public display must meet YouTube's applicable permissions. |
+| **IGDB and Steam catalogue** | Canonical game identity, releases and metadata where permitted; not demand on their own. |
+| **PlayStation, Xbox and other accessible ecosystems** | Potential store charts, releases, updates and public interest signals only where reliable access and legal reuse exist. Do **not** assume open player-count APIs. |
+| **Future sources** | Add only for demonstrable information gain, usable provenance, rights and affordable operation—not to maximize API count. |
+
+**No source is mandatory.** If YouTube is unavailable, the product should still be able to flag an event supported by other evidence, while stating that creator competition/coverage is **unknown**. If a source fails, isolate its failure; never turn missing into zero, invent an observation or claim a source-independent confidence score. Avoid double-counting correlated evidence as independent corroboration.
+
+### Event-first opportunity research, not purposeless polling
+
+Conceptual flow: **observe events and attention changes → bind them to a canonical game → investigate audience demand and creator coverage around the event time → identify and qualify video angles → evaluate audience/creator fit → explain evidence and uncertainty → recommend, monitor or abstain.**
+
+For event-specific YouTube research, potential inputs include game ID, event ID/type, event timestamp, topic/query, before/after windows, observed and deduplicated returned video IDs, upload times, retrieval times, observed performance, topic-match quality and the exact collection method. Keep source observations distinct from MetaSpike's interpretations. **A sampled video count is not the total number of videos made.** Repeated observations and derived aggregates need a retention/rights design before collection or publication.
+
+### Product acceptance questions
+
+A feature or new source earns its place only if it improves at least one of these outcomes: **detects a relevant opportunity sooner, improves evidence quality, produces a more useful specific video angle, better assesses creator fit, reduces false recommendations, or lowers time/cost for creators.** Test against what a creator could learn manually; reject integrations that offer no incremental decision value.
+
+The target experience includes discovering adjacent games, deciding whether to continue a current game's coverage, and understanding why a previously promising event is no longer timely. The *why now* explanation is as important as the recommendation.
+
+### Non-negotiable boundaries and current maturity
+
+This is the **product contract and roadmap**, not a claim that all capabilities are deployed. Existing identity resolution, evidence/provenance, baselines, opportunity logic, offline replay/UI and Wikimedia production collection are foundations. Personalized creator fit, broad cross-platform event discovery, verified YouTube creator-supply intelligence and actionable multi-source recommendations are **not yet established as working public features**. Steam supervised recording exists but unattended Steam collection is not cleared. The current README's older phase-by-phase status below is retained as historical engineering context; see `docs/handoffs/latest.md` and deployed-state checks for current operational truth.
+
+Preserve the codebase's invariants: missing ≠ zero; unknown permission ≠ approval; no title-only identity merge; time-correct evidence; provenance and uncertainty; frozen rule versions untouched. Keep private/internal/source-restricted data out of public recommendations unless a separately reviewed policy clearance permits it. Favor low-cost, bounded collection and automatic verification over prolonged soaks. Production activations, credentials, IAM, public launch and rule changes require their existing review gates.
+
+**For any coding agent (Claude Code, Grok, ChatGPT or future contributors):** treat this section as the stable statement of *what and who we are building for*. Before proposing a source, score, UI view or pipeline expansion, trace its usefulness back to a creator decision above. Do not silently redefine MetaSpike as a generic game-ranking, social listening, YouTube analytics, or dashboard product.
+
+---
+
 ## Status
 
 **Internal engineering foundation. Not a product release.** MetaSpike has one
