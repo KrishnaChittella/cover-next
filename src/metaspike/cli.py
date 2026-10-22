@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import tempfile
 import time as time_module
@@ -72,7 +73,11 @@ from metaspike.evidence.assemble import (
     publication_refusal,
 )
 from metaspike.evidence.model import NO_INPUT, InputProvenance, Origin
-from metaspike.evidence.provenance import local_store_provenance, recording_provenance
+from metaspike.evidence.provenance import (
+    local_store_provenance,
+    recording_digest,
+    recording_provenance,
+)
 from metaspike.evidence.render import render
 from metaspike.evidence.synthetic import (
     PAGEVIEW_PATTERNS,
@@ -160,6 +165,14 @@ from metaspike.sources.steam_players import (
     SOURCE_ID as STEAM_PLAYERS_SOURCE,
 )
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, build_client
+from metaspike.sources.wikimedia_warehouse import (
+    MAX_BYTES_BILLED,
+    TABLE,
+    export_from_bq_json,
+    export_query,
+    load_export,
+    warehouse_registry,
+)
 from metaspike.storage.base import StoragePolicyError
 from metaspike.storage.local import LocalObservationStore
 from metaspike.storage.samples import LocalSampleStore
@@ -606,6 +619,13 @@ def _parser() -> argparse.ArgumentParser:
         metavar="YYYY-MM-DD",
         help="the last day the pageview recording holds (required with --wikimedia-replay)",
     )
+    evidence.add_argument(
+        "--wikimedia-warehouse",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="a production warehouse export (export-wikimedia-warehouse), read point in time",
+    )
     evidence.add_argument("--sample-store", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--events-dir", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--event-sources-dir", type=Path, default=None, metavar="DIR")
@@ -723,6 +743,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     audit.add_argument("--json", action="store_true", help="print the audit as JSON")
     audit.set_defaults(handler=_audit_bootstrap_bindings)
+
+    warehouse_export = commands.add_parser(
+        "export-wikimedia-warehouse",
+        help="READ-ONLY: export production Wikimedia pageviews from BigQuery to a local file",
+        description=(
+            "Runs one bounded read-only `bq query` (one source, one metric, a day range, "
+            f"at most {MAX_BYTES_BILLED:,} bytes billed) with your gcloud credentials and "
+            "writes the rows to a NEW directory. Calls no source. The export is UNVERIFIED "
+            "until its digest is pinned."
+        ),
+    )
+    warehouse_export.add_argument("--first-day", type=date.fromisoformat, required=True)
+    warehouse_export.add_argument("--last-day", type=date.fromisoformat, required=True)
+    warehouse_export.add_argument("--project", default="metaspike-prod-kc")
+    warehouse_export.add_argument("--out", type=Path, required=True, metavar="DIR")
+    warehouse_export.set_defaults(handler=_export_wikimedia_warehouse)
 
     schemas = commands.add_parser("export-schemas", help="write JSON Schemas for the artifacts")
     schemas.add_argument("--schemas-dir", type=Path, default=DEFAULT_SCHEMAS_DIR)
@@ -1040,6 +1076,37 @@ def _validate_artifacts(args: argparse.Namespace) -> int:
     print(
         f"Artifacts OK: run {manifest.run_id}, schema {manifest.schema_version}, "
         f"{manifest.ranked_count} ranked of {manifest.game_count} games."
+    )
+    return EXIT_OK
+
+
+def _export_wikimedia_warehouse(args: argparse.Namespace) -> int:
+    """One bounded read-only query; the rows go to a new local directory."""
+    if args.last_day < args.first_day:
+        return _fail(EXIT_INVALID_CATALOGUE, "--last-day is before --first-day")
+    if args.out.exists():
+        return _fail(EXIT_INVALID_CATALOGUE, f"{args.out} already exists")
+    first, last = args.first_day.isoformat(), args.last_day.isoformat()
+    command = [
+        "bq",
+        "query",
+        f"--project_id={args.project}",
+        "--use_legacy_sql=false",
+        f"--maximum_bytes_billed={MAX_BYTES_BILLED}",
+        "--format=json",
+        "--max_rows=100000",
+        export_query(first, last),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return _fail(EXIT_SOURCE_UNAVAILABLE, f"bq query failed: {result.stderr.strip()[:300]}")
+    export = export_from_bq_json(
+        result.stdout, project=args.project, first_day=first, last_day=last, exported_at=_now()
+    )
+    path = export.write(args.out)
+    print(
+        f"Exported {len(export.rows)} rows of {TABLE} ({first} to {last}) to {path}; "
+        f"digest {recording_digest(args.out)} (UNVERIFIED until pinned)"
     )
     return EXIT_OK
 
@@ -1720,6 +1787,11 @@ def _evidence(args: argparse.Namespace) -> int:
             f"{args.out} is inside the published artifacts directory; a game evidence "
             "report is private and is never written there",
         )
+    if args.wikimedia_replay is not None and args.wikimedia_warehouse is not None:
+        return _fail(
+            EXIT_INVALID_CATALOGUE,
+            "--wikimedia-replay and --wikimedia-warehouse exclude each other",
+        )
     if (args.wikimedia_replay is None) != (args.recorded_through is None):
         return _fail(
             EXIT_INVALID_CATALOGUE,
@@ -1764,6 +1836,25 @@ def _evidence(args: argparse.Namespace) -> int:
             require_usable_recording(pageviews, as_of)
         except RecordingRefused as error:
             return _fail(EXIT_SOURCE_POLICY, str(error))
+    if args.wikimedia_warehouse is not None:
+        # Production observations, each visible only once the warehouse had observed it.
+        # The window ends on the latest day due at --as-of under the source's lag.
+        export = load_export(args.wikimedia_warehouse)
+        last_due = latest_due_period(
+            Granularity.DAILY, as_of, WIKIMEDIA_PAGEVIEWS_POLICY.operations.expected_publication_lag
+        )
+        wikimedia = collect(
+            state.catalogue,
+            warehouse_registry(export),
+            window_ending(last_due.date()),
+            observed_at=as_of,
+            clock=lambda: as_of,
+        )
+        pageviews = recording_provenance(
+            [args.wikimedia_warehouse],
+            f"production warehouse export of {export.table}, {export.first_day} to "
+            f"{export.last_day}, exported {export.exported_at.isoformat()}",
+        )
 
     def stores(
         samples_dir: Path | None,
