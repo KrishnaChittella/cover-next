@@ -18,6 +18,7 @@ Three rules hold the layers apart:
 from collections import Counter
 from collections.abc import Sequence
 from datetime import datetime
+from typing import Any
 
 from pydantic import Field
 
@@ -171,7 +172,6 @@ def ingest(
             )
         )
     items = [item for page in fetches for item in page.items]
-    promoted = [c for c in created if c.status is PromotionStatus.PROMOTED]
     return IngestReport(
         source=adapter.source,
         rules_version=rules.version,
@@ -184,18 +184,7 @@ def ingest(
         posts_observed=len(items),
         posts_rejected=sum(len(page.rejected) for page in fetches),
         new_post_versions=new_versions,
-        candidates_created=len(created),
-        candidates_classified=sum(candidate.classified for candidate in created),
-        candidates_promoted=len(promoted),
-        candidates_not_promoted=len(created) - len(promoted),
-        refusals=dict(sorted(Counter(r.value for c in created for r in c.refusals).items())),
-        promoted_event_types=dict(
-            sorted(
-                Counter(
-                    c.proposed_event_type.value for c in promoted if c.proposed_event_type
-                ).items()
-            )
-        ),
+        **_reading_counts(created, items),
         observations_appended=appended,
         withdrawals_appended=withdrawn,
         coverage_checks_recorded=covered,
@@ -205,10 +194,6 @@ def ingest(
         observed_item_fields=tuple(
             sorted({name for page in fetches for name in page.observed_item_fields})
         ),
-        observed_feed_names=dict(
-            sorted(Counter(item.feed_name or "(none)" for item in items).items())
-        ),
-        observed_tags=dict(sorted(Counter(tag for item in items for tag in item.tags).items())),
     )
 
 
@@ -272,7 +257,6 @@ def reclassify(
     created, observations, taken_back = _read(items, resolver, source_store, event_store, rules)
     appended = event_store.append(observations)
     withdrawn = event_store.append(taken_back)
-    promoted = [c for c in created if c.status is PromotionStatus.PROMOTED]
     return IngestReport(
         source=source,
         rules_version=rules.version,
@@ -285,25 +269,35 @@ def reclassify(
         posts_observed=len(items),
         posts_rejected=0,
         new_post_versions=0,
-        candidates_created=len(created),
-        candidates_classified=sum(candidate.classified for candidate in created),
-        candidates_promoted=len(promoted),
-        candidates_not_promoted=len(created) - len(promoted),
-        refusals=dict(sorted(Counter(r.value for c in created for r in c.refusals).items())),
-        promoted_event_types=dict(
+        **_reading_counts(created, items),
+        observations_appended=appended,
+        withdrawals_appended=withdrawn,
+        coverage_checks_recorded=0,
+        observed_envelope_fields=(),
+        observed_item_fields=(),
+    )
+
+
+def _reading_counts(
+    created: Sequence[EventCandidate], items: Sequence[SourceItem]
+) -> dict[str, Any]:
+    """What a pass read and made of it, in counts: shared by ingestion and reclassification."""
+    promoted = [c for c in created if c.status is PromotionStatus.PROMOTED]
+    return {
+        "candidates_created": len(created),
+        "candidates_classified": sum(candidate.classified for candidate in created),
+        "candidates_promoted": len(promoted),
+        "candidates_not_promoted": len(created) - len(promoted),
+        "refusals": dict(sorted(Counter(r.value for c in created for r in c.refusals).items())),
+        "promoted_event_types": dict(
             sorted(
                 Counter(
                     c.proposed_event_type.value for c in promoted if c.proposed_event_type
                 ).items()
             )
         ),
-        observations_appended=appended,
-        withdrawals_appended=withdrawn,
-        coverage_checks_recorded=0,
-        observed_envelope_fields=(),
-        observed_item_fields=(),
-        observed_feed_names=dict(
+        "observed_feed_names": dict(
             sorted(Counter(item.feed_name or "(none)" for item in items).items())
         ),
-        observed_tags=dict(sorted(Counter(tag for item in items for tag in item.tags).items())),
-    )
+        "observed_tags": dict(sorted(Counter(tag for item in items for tag in item.tags).items())),
+    }

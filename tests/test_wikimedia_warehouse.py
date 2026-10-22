@@ -1,8 +1,10 @@
 """Wikimedia pageviews read from a production warehouse export, point in time."""
 
 import json
+import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -149,3 +151,179 @@ def test_evidence_refuses_two_pageview_inputs_at_once(tmp_path: Path) -> None:
         ]
     )
     assert code != 0
+
+
+# --- the CLI, end to end ---------------------------------------------------------------
+
+HELLDIVERS = "en.wikipedia.org/Helldivers_2"
+
+
+def helldivers_row(day: str, views: str, observed: str) -> dict[str, str | None]:
+    return {**bq_row(day, views, observed), "source_identifier": HELLDIVERS}
+
+
+HELLDIVERS_ROWS = [
+    helldivers_row("2026-10-18", "800.0", "2026-10-20 12:00:00"),
+    helldivers_row("2026-10-19", "810.0", "2026-10-21 12:00:00"),
+    # Due at 00:00 on 22 Oct, but only observed at 01:38.
+    helldivers_row("2026-10-20", "795.0", "2026-10-22 01:38:01"),
+]
+
+
+def evidence_json(
+    export_dir: Path, as_of: str, capsys: pytest.CaptureFixture[str]
+) -> dict[str, Any]:
+    capsys.readouterr()
+    code = cli.main(
+        [
+            "evidence",
+            "--as-of",
+            as_of,
+            "--game",
+            "helldivers-2",
+            "--wikimedia-warehouse",
+            str(export_dir),
+            "--json",
+        ]
+    )
+    assert code == 0
+    (game,) = json.loads(capsys.readouterr().out)["games"]
+    (source,) = [s for s in game["sources"] if s["source"] == "wikimedia_pageviews"]
+    found: dict[str, Any] = source
+    return found
+
+
+def test_evidence_reads_the_warehouse_point_in_time_and_unverified(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    export_of(HELLDIVERS_ROWS).write(tmp_path / "export")
+    # At 01:00 the due day, 20 Oct, had not been observed: the latest day known is 19 Oct,
+    # and the reading says stale rather than pretending the due day is there.
+    before = evidence_json(tmp_path / "export", "2026-10-22T01:00:00+00:00", capsys)
+    assert before["state"] == "stale"
+    assert before["latest_observed_at"] == "2026-10-20T00:00:00Z"
+    # At 02:00 it had.
+    after = evidence_json(tmp_path / "export", "2026-10-22T02:00:00+00:00", capsys)
+    assert after["state"] == "available"
+    assert after["latest_observed_at"] == "2026-10-21T00:00:00Z"
+    for reading in (before, after):
+        provenance = reading["provenance"]
+        assert provenance["origin"] == "unverified_files"
+        assert provenance["standing"] == "unverified"
+        assert "production warehouse export" in provenance["note"]
+
+
+def test_synthetic_data_never_replaces_a_supplied_warehouse_export(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    export_of(HELLDIVERS_ROWS).write(tmp_path / "export")
+    code = cli.main(
+        [
+            "evidence",
+            "--as-of",
+            "2026-10-22T02:00:00+00:00",
+            "--wikimedia-warehouse",
+            str(tmp_path / "export"),
+            "--synthetic-scenario",
+        ]
+    )
+    assert code != 0
+    assert "--wikimedia-warehouse" in capsys.readouterr().err
+
+
+def test_an_answer_at_the_row_limit_plus_one_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from metaspike.sources import wikimedia_warehouse
+
+    assert f"LIMIT {wikimedia_warehouse.EXPORT_MAX_ROWS + 1}" in export_query(
+        "2026-10-01", "2026-10-21"
+    )
+    monkeypatch.setattr(wikimedia_warehouse, "EXPORT_MAX_ROWS", 2)
+    assert len(export_of(ROWS[:2]).rows) == 2
+    with pytest.raises(ValueError, match="may be incomplete"):
+        export_of(ROWS[:3])
+
+
+class FakeBq:
+    """Stands in for `bq`: records the command, answers as told. Nothing is run."""
+
+    def __init__(self, returncode: int, stdout: str, stderr: str = "") -> None:
+        self.answer = (returncode, stdout, stderr)
+        self.commands: list[list[str]] = []
+
+    def __call__(self, command: list[str], **_: object) -> object:
+        self.commands.append(command)
+        code, out, err = self.answer
+        return subprocess.CompletedProcess(command, code, out, err)
+
+
+def export_cli(out: Path) -> int:
+    return cli.main(
+        [
+            "export-wikimedia-warehouse",
+            "--first-day",
+            "2026-10-01",
+            "--last-day",
+            "2026-10-21",
+            "--out",
+            str(out),
+        ]
+    )
+
+
+def test_the_export_command_writes_a_bounded_read_only_query(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from metaspike.sources import wikimedia_warehouse
+
+    bq = FakeBq(0, json.dumps(HELLDIVERS_ROWS))
+    monkeypatch.setattr(subprocess, "run", bq)
+    assert export_cli(tmp_path / "export") == 0
+    (command,) = bq.commands
+    assert command[:2] == ["bq", "query"]
+    assert f"--maximum_bytes_billed={MAX_BYTES_BILLED}" in command
+    assert f"--max_rows={wikimedia_warehouse.EXPORT_MAX_ROWS + 1}" in command
+    assert command[-1] == export_query("2026-10-01", "2026-10-21")
+    assert len(load_export(tmp_path / "export").rows) == 3
+    assert "UNVERIFIED until pinned" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "reason"),
+    [
+        (1, "", "bq query failed"),
+        (0, "{}", "did not print a list"),
+        (0, "not json", "export refused"),
+    ],
+)
+def test_a_failed_or_malformed_export_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    returncode: int,
+    stdout: str,
+    reason: str,
+) -> None:
+    monkeypatch.setattr(subprocess, "run", FakeBq(returncode, stdout, "access denied"))
+    assert export_cli(tmp_path / "export") != 0
+    assert reason in capsys.readouterr().err
+    assert not (tmp_path / "export").exists()
+
+
+def test_a_truncated_export_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from metaspike.sources import wikimedia_warehouse
+
+    monkeypatch.setattr(wikimedia_warehouse, "EXPORT_MAX_ROWS", 2)
+    monkeypatch.setattr(subprocess, "run", FakeBq(0, json.dumps(HELLDIVERS_ROWS)))
+    assert export_cli(tmp_path / "export") != 0
+    assert "may be incomplete" in capsys.readouterr().err
+    assert not (tmp_path / "export").exists()
+
+
+def test_the_export_never_overwrites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bq = FakeBq(0, "[]")
+    monkeypatch.setattr(subprocess, "run", bq)
+    (tmp_path / "export").mkdir()
+    assert export_cli(tmp_path / "export") != 0
+    assert bq.commands == []

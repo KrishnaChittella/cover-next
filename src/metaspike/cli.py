@@ -169,6 +169,7 @@ from metaspike.sources.steam_players import (
 )
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, build_client
 from metaspike.sources.wikimedia_warehouse import (
+    EXPORT_MAX_ROWS,
     MAX_BYTES_BILLED,
     TABLE,
     export_from_bq_json,
@@ -646,6 +647,12 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument("--sample-store", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--events-dir", type=Path, default=None, metavar="DIR")
     evidence.add_argument("--event-sources-dir", type=Path, default=None, metavar="DIR")
+    evidence.add_argument(
+        "--event-rules",
+        choices=sorted(EVENT_RULES),
+        default=EVENT_CLASSIFICATION_RULES_V1.version,
+        help="the classification rules the events, their counts and refusals are read under",
+    )
     evidence.add_argument(
         "--creator-supply-dir",
         type=Path,
@@ -1128,15 +1135,18 @@ def _export_wikimedia_warehouse(args: argparse.Namespace) -> int:
         "--use_legacy_sql=false",
         f"--maximum_bytes_billed={MAX_BYTES_BILLED}",
         "--format=json",
-        "--max_rows=100000",
+        f"--max_rows={EXPORT_MAX_ROWS + 1}",
         export_query(first, last),
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         return _fail(EXIT_SOURCE_UNAVAILABLE, f"bq query failed: {result.stderr.strip()[:300]}")
-    export = export_from_bq_json(
-        result.stdout, project=args.project, first_day=first, last_day=last, exported_at=_now()
-    )
+    try:
+        export = export_from_bq_json(
+            result.stdout, project=args.project, first_day=first, last_day=last, exported_at=_now()
+        )
+    except ValueError as error:
+        return _fail(EXIT_SOURCE_UNAVAILABLE, f"export refused, nothing written: {error}")
     path = export.write(args.out)
     print(
         f"Exported {len(export.rows)} rows of {TABLE} ({first} to {last}) to {path}; "
@@ -1802,6 +1812,7 @@ def _evidence(args: argparse.Namespace) -> int:
     if as_of.tzinfo is None:
         return _fail(EXIT_INVALID_CATALOGUE, "--as-of must carry a UTC offset")
     given = [
+        args.wikimedia_warehouse,
         args.sample_store,
         args.events_dir,
         args.event_sources_dir,
@@ -1811,7 +1822,7 @@ def _evidence(args: argparse.Namespace) -> int:
     if args.synthetic_scenario and any(path is not None for path in given):
         return _fail(
             EXIT_INVALID_CATALOGUE,
-            "--synthetic-scenario replaces --sample-store, --events-dir, "
+            "--synthetic-scenario replaces --wikimedia-warehouse, --sample-store, --events-dir, "
             "--event-sources-dir, --creator-supply-dir and --community-dir; synthetic and "
             "stored evidence are never mixed",
         )
@@ -1925,6 +1936,7 @@ def _evidence(args: argparse.Namespace) -> int:
             samples_provenance=NO_INPUT if samples_dir is None else origin_of(str(samples_dir)),
             events=None if events_dir is None else EventStore(events_dir),
             event_sources=None if sources_dir is None else EventSourceStore(sources_dir),
+            event_rules_version=args.event_rules,
             events_provenance=NO_INPUT
             if events_dir is None and sources_dir is None
             else origin_of(", ".join(str(p) for p in (events_dir, sources_dir) if p is not None)),

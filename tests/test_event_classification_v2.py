@@ -6,6 +6,8 @@ three-part version number filed as patch notes, and an untagged "Patch 1.2.0.0".
 """
 
 import hashlib
+import json
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -25,7 +27,10 @@ from tests.test_event_sources import (
     APP,
     BINDINGS,
     PINNED_RULES_FINGERPRINT,
+    PUBLISHED,
+    envelope,
     item_of,
+    post,
 )
 
 V1 = EVENT_CLASSIFICATION_RULES_V1
@@ -169,3 +174,116 @@ def test_kept_posts_are_reclassified_under_v2_without_a_request(tmp_path: Any) -
     assert sources.latest_candidates(rules_version="event_classification_rules_v1") == (v1_reading,)
     again = reclassify("steam_news", resolver, sources, events, rules=V2)
     assert again.posts_observed == 0 and len(events.observations()) == 1
+
+
+def _helldivers_store(root: Any) -> tuple[Any, Any]:
+    """The real contradiction of 22 Oct 2026, with a synthetic title of the same shape: an
+    official Helldivers 2 post filed as patch notes, '<Operation>: 7.2.1', which v1 refuses
+    (size not stated) and v2 promotes. Both readings kept in one store, as --reclassify
+    left them."""
+    from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY, parse_news, steam_app
+    from metaspike.event_sources.store import EventSourceStore
+
+    parsed = parse_news(
+        envelope(
+            [post("77", "Operation Something: 7.2.1", tags=["patchnotes"], app=553850)], app=553850
+        ),
+        steam_app(553850),
+        PUBLISHED + timedelta(hours=1),
+        "fetch_" + "0" * 32,
+    )
+    sources_dir, events_dir = root / "sources", root / "events"
+    EventSourceStore(sources_dir).add_items(parsed.items, STEAM_NEWS_POLICY)
+    for version in ("event_classification_rules_v1", "event_classification_rules_v2"):
+        args = ["ingest-events", "--reclassify", "--rules", version, "--apps", "553850"]
+        args += ["--event-sources-dir", str(sources_dir), "--events-dir", str(events_dir)]
+        assert cli.main(args) == 0
+    return sources_dir, events_dir
+
+
+def _helldivers_reading(
+    sources_dir: Any, events_dir: Any, version: str, capsys: Any
+) -> dict[str, Any]:
+    capsys.readouterr()
+    code = cli.main(
+        [
+            "evidence",
+            "--as-of",
+            (PUBLISHED + timedelta(hours=2)).isoformat(),
+            "--game",
+            "helldivers-2",
+            "--events-dir",
+            str(events_dir),
+            "--event-sources-dir",
+            str(sources_dir),
+            "--event-rules",
+            version,
+            "--json",
+        ]
+    )
+    assert code == 0
+    (game,) = json.loads(capsys.readouterr().out)["games"]
+    found: dict[str, Any] = game
+    return found
+
+
+@pytest.mark.parametrize(
+    ("version", "events", "promoted", "refusal"),
+    [
+        ("event_classification_rules_v1", 0, 0, "patch_size_not_established"),
+        ("event_classification_rules_v2", 1, 1, None),
+    ],
+)
+def test_events_their_counts_and_refusals_are_read_under_one_version(
+    tmp_path: Any, capsys: Any, version: str, events: int, promoted: int, refusal: str | None
+) -> None:
+    """Before the fix, the v2 event was listed while the counts beside it, read under v1,
+    said nothing was promoted and gave v1's refusal for the same post."""
+    sources_dir, events_dir = _helldivers_store(tmp_path)
+    game = _helldivers_reading(sources_dir, events_dir, version, capsys)
+    contributions = game["events"]["contributions"]
+    assert len(contributions) == events
+    assert game["candidates"]["promoted"] == promoted
+    assert game["candidates"]["total"] == 1
+    assert (refusal in game["candidates"]["refusals"]) is (refusal is not None)
+    if events:
+        assert contributions[0]["evaluation"]["event_type"] == "minor_patch"
+
+
+def test_a_withdrawal_belongs_to_the_version_that_made_and_took_back_the_event(
+    tmp_path: Any,
+) -> None:
+    from metaspike.event_sources.candidates import observations_under
+    from metaspike.event_sources.ingest import reclassify
+    from metaspike.event_sources.steam_news import STEAM_NEWS_POLICY
+    from metaspike.event_sources.store import EventSourceStore
+    from metaspike.events.model import EventStatus
+    from metaspike.events.store import EventStore
+    from tests.test_event_sources import NOW
+
+    sources = EventSourceStore(tmp_path / "sources")
+    events = EventStore(tmp_path / "events")
+
+    def resolver(game: Any) -> Any:
+        return BINDINGS.get(game.value)
+
+    first = item_of("Example Game Update", tags=["patchnotes"])
+    sources.add_items([first], STEAM_NEWS_POLICY)
+    for rules in (V1, V2):
+        reclassify("steam_news", resolver, sources, events, rules=rules)
+    # The publisher retitles the post: no longer read as a patch by either version.
+    second = item_of(
+        "Example Game feedback survey", tags=["patchnotes"], observed=NOW + timedelta(hours=1)
+    )
+    sources.add_items([second], STEAM_NEWS_POLICY)
+    for rules in (V1, V2):
+        reclassify("steam_news", resolver, sources, events, rules=rules)
+
+    stored, every = events.observations(), sources.candidates()
+    under_v2 = observations_under(stored, every, V2.version)
+    assert [o.status for o in under_v2] == [EventStatus.SCHEDULED, EventStatus.WITHDRAWN]
+    # v1 never promoted the post, so it has neither the event nor its withdrawal.
+    assert observations_under(stored, every, V1.version) == ()
+    # An observation from a source that makes no candidates is never filtered out.
+    other = stored[0].model_copy(update={"source": "elsewhere"})
+    assert other in observations_under((*stored, other), every, V1.version)
