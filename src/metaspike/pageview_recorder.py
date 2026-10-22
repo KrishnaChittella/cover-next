@@ -366,12 +366,18 @@ class RecordingTransport(httpx.BaseTransport):
         requested_at = self._clock()
         self.attempts += 1
         response = self._inner.handle_request(request)
-        body = response.read()
+        body = response.read()  # decoded: what is recorded and digested
         received_at = self._clock()
         self.captured.append(_Captured(request, requested_at, received_at, response, body))
-        return httpx.Response(
-            response.status_code, headers=response.headers, content=body, request=request
-        )
+        # The body is already decoded, so the answer handed on must not claim an encoding
+        # (a gzip answer from Steam, 22 Oct 2026, was otherwise decoded twice and failed).
+        # The recording keeps the original headers from `response`.
+        headers = [
+            (name, value)
+            for name, value in response.headers.multi_items()
+            if name.lower() not in {"content-encoding", "content-length"}
+        ]
+        return httpx.Response(response.status_code, headers=headers, content=body, request=request)
 
     def close(self) -> None:
         self._inner.close()
