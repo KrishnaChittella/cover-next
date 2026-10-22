@@ -49,7 +49,10 @@ from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
 from metaspike.domain.timeseries import Granularity
-from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1
+from metaspike.event_sources.candidates import (
+    EVENT_CLASSIFICATION_RULES_V1,
+    EVENT_CLASSIFICATION_RULES_V2,
+)
 from metaspike.event_sources.ingest import IngestReport, ingest
 from metaspike.event_sources.registry import (
     EVENT_SOURCE_POLICIES,
@@ -184,6 +187,9 @@ DEFAULT_EVENT_SOURCES_DIR = Path(".metaspike/event-sources")
 # A supervised live look at an event source: never more than this many apps, and never
 # more than one request for each.
 LIVE_EVENT_PROBE_MAX_APPS = 3
+EVENT_RULES = {
+    rules.version: rules for rules in (EVENT_CLASSIFICATION_RULES_V1, EVENT_CLASSIFICATION_RULES_V2)
+}
 DEFAULT_GOLDEN_SET = Path("tests/fixtures/resolution_golden.json")
 DEFAULT_RECORDED_CATALOGUE = Path("tests/fixtures/catalogue")
 DEFAULT_RECORDED_DIRECTORIES = (
@@ -497,6 +503,12 @@ def _parser() -> argparse.ArgumentParser:
         help="walk back up to N pages per app with the documented enddate (replay only)",
     )
     events.add_argument("--observed-at", type=datetime.fromisoformat, default=None)
+    events.add_argument(
+        "--rules",
+        choices=sorted(EVENT_RULES),
+        default=EVENT_CLASSIFICATION_RULES_V1.version,
+        help="the classification rules version (default: v1, the frozen one)",
+    )
     events.add_argument(
         "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
     )
@@ -854,6 +866,7 @@ def _ingest_events(args: argparse.Namespace) -> int:
             EventSourceStore(args.event_sources_dir),
             EventStore(args.events_dir),
             stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+            rules=EVENT_RULES[args.rules],
             backfill_requests=args.backfill_requests,
         )
     _print_ingest(report, live=args.live, budget=requests)

@@ -313,6 +313,62 @@ EVENT_CLASSIFICATION_RULES_V1 = EventClassificationRules(
     max_days_ahead=180,
 )
 
+RULES_VERSION_V2 = "event_classification_rules_v2"
+
+_SIZE_UNSTATED = (
+    "The size of the patch is not stated, so it is classified at the lower bound, as a "
+    "minor patch: a missed major patch understates a cause, it never invents one."
+)
+
+# Version 2, from the first live Steam News reads (22 Oct 2026: 8 apps, 40 posts, none
+# promoted by v1). Every v1 rule is kept as it was. Two rules are added for the commonest
+# real shape v1 refused: an official post that is plainly a shipped patch but does not
+# say how big it is ("<Game> Update" filed as patch notes; "Patch 1.2.0.0").
+EVENT_CLASSIFICATION_RULES_V2 = EVENT_CLASSIFICATION_RULES_V1.model_copy(
+    update={
+        "version": RULES_VERSION_V2,
+        "rules": (
+            *EVENT_CLASSIFICATION_RULES_V1.rules,
+            ClassificationRule(
+                rule_id="patch_notes_size_unstated",
+                event_type=EventType.MINOR_PATCH,
+                required_tags=("patchnotes",),
+                title_phrases=(
+                    ("update",),
+                    ("patch",),
+                    (NUMBER, NUMBER, NUMBER),
+                ),
+                publication_time_anchoring=True,
+                anchoring_needs_live_phrase=False,
+                evidence=(
+                    "publisher's own patch-notes tag, and 'update', 'patch' or a three-part "
+                    "version number in the title; size not stated"
+                ),
+                rationale=_SIZE_UNSTATED,
+            ),
+            ClassificationRule(
+                rule_id="official_patch_number",
+                event_type=EventType.MINOR_PATCH,
+                title_phrases=(("patch", NUMBER), ("hotfix", NUMBER)),
+                publication_time_anchoring=True,
+                anchoring_needs_live_phrase=False,
+                evidence="'patch' or 'hotfix' followed by a version number, in the official feed",
+                rationale=(
+                    "A numbered patch posted by the publisher describes a build that has "
+                    "shipped. " + _SIZE_UNSTATED
+                ),
+            ),
+        ),
+    }
+)
+
+# Rules that only apply when no rule that states a size matched: a title that says
+# "major update" is a major patch, not also a size-unstated one. Keyed by version, so
+# version 1 (which has none) reads exactly as it always has.
+_FALLBACK_RULES: dict[str, frozenset[str]] = {
+    RULES_VERSION_V2: frozenset({"patch_notes_size_unstated", "official_patch_number"}),
+}
+
 
 class GameBinding(FrozenModel):
     """The catalogue binding a source game id resolves through. Never a title match."""
@@ -539,6 +595,9 @@ def classify(
         if all(tag in item.tags for tag in rule.required_tags)
         and any(has_phrase(tokens, phrase) for phrase in rule.title_phrases)
     ]
+    fallback = _FALLBACK_RULES.get(rules.version, frozenset())
+    if any(rule.rule_id not in fallback for rule in matched):
+        matched = [rule for rule in matched if rule.rule_id not in fallback]
     against = sorted(present.intersection(rules.not_an_occurrence_words))
     types = {rule.event_type for rule in matched}
     rule: ClassificationRule | None = None
