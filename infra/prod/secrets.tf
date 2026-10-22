@@ -46,6 +46,20 @@ resource "google_secret_manager_secret" "this" {
   labels = {
     system = "metaspike"
   }
+
+  # Two guards against deleting a live secret, and with it the key it holds.
+  #   deletion_protection  kept in Terraform STATE: the provider refuses any apply or
+  #                        destroy that would delete the secret, even after its block
+  #                        or map entry has been removed from this file.
+  #   prevent_destroy      kept in this FILE: a plan that would destroy or replace any
+  #                        instance (a removed map entry included) fails before apply.
+  # Retiring a secret on purpose is therefore two reviewed applies: first set
+  # deletion_protection = false and lift prevent_destroy, then remove the entry.
+  deletion_protection = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # The dispatcher, the Wikimedia collector, the warehouse, features and parity jobs, the

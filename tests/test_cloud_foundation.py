@@ -92,6 +92,9 @@ def test_terraform_holds_no_secret_value_and_creates_no_secret_version() -> None
         "youtube-data-api-key",
     }
     assert "igdb-access-token" not in secrets and "oauth" not in secrets.lower()
+    # A live secret cannot be deleted by accident: protected in state and in the file.
+    assert re.search(r"deletion_protection\s*=\s*true", secrets)
+    assert re.search(r"lifecycle\s*\{\s*prevent_destroy\s*=\s*true\s*\}", secrets)
 
 
 def test_project_billing_and_github_identifiers_are_variables_not_values() -> None:

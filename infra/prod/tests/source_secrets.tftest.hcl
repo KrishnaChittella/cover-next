@@ -38,6 +38,11 @@ run "default_has_no_source_secret_reference_anywhere" {
   }
 
   assert {
+    condition     = alltrue([for name, secret in google_secret_manager_secret.this : secret.deletion_protection == true])
+    error_message = "Every secret container is protected from deletion in Terraform state."
+  }
+
+  assert {
     condition = join(" ", sort(keys(google_secret_manager_secret_iam_member.reader))) == join(" ", [
       "ms-catalogue:igdb-client-id",
       "ms-catalogue:igdb-client-secret",
