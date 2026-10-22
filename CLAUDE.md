@@ -4,6 +4,10 @@ Answers one question for gaming creators: **which game has the strongest content
 opportunity right now, and why?** A Python data pipeline on GCP that will publish static
 JSON for a website at `krishnachittella.dev/metaspike`. Owner: Krishna Chittella.
 
+## Product contract (for every coding agent)
+
+Read [the README's Product charter](README.md#product-charter--why-metaspike-exists) before designing scores, source integrations, roadmaps or UI. **MetaSpike helps gaming creators choose a specific game/event/video angle, decide why to cover it now and how it fits their audience, and see the supporting evidence and uncertainty.** It is not an API collection project or a generic popularity leaderboard. Cross-source data is complementary and optional: official events ground the reason, Steam/Twitch/Wikimedia may indicate different kinds of interest, YouTube may describe creator coverage **only where permissions allow**, and game catalogues establish identity. Missing inputs are unknown, not zero. Never claim a video opportunity is underserved or guaranteed to grow without defensible evidence. Preserve current-source clearance and low-cost production boundaries. Treat personalization and broad discovery as product objectives, not features already proven in production. This charter is the shared contract for Claude Code, Grok, ChatGPT and other agents.
+
 ## Working mode (current)
 
 - **Ship small and often:** develop, test, deploy, repeat. No soaks. Automatic checks
