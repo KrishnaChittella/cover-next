@@ -22,6 +22,7 @@ ways, the answer is no.
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from datetime import date as Date
 from enum import StrEnum
@@ -836,3 +837,42 @@ def withdrawal(previous: EventObservation, observed_at: datetime) -> EventObserv
         GameBinding(canonical_game_id=previous.canonical_game_id),
     )
     return observe(report, view, observed_at)
+
+
+def observations_under(
+    observations: Iterable[EventObservation],
+    candidates: Iterable[EventCandidate],
+    rules_version: str,
+) -> tuple[EventObservation, ...]:
+    """The stored observations that one version of the rules stands behind.
+
+    An event store can hold what several rules versions promoted from the same posts, and
+    an observation does not say which version made it. A reading under one version keeps:
+
+      - an observation a candidate of that version promoted;
+      - a withdrawal of such an event, when that version's latest reading of the post
+        no longer promotes it;
+      - every observation from a source that makes no candidates (not ours to filter).
+
+    `candidates` are all candidates known at the moment read, of every version.
+    """
+    stored = tuple(observations)
+    every = tuple(candidates)
+    classified = {c.source for c in every}
+    mine = [c for c in every if c.rules_version == rules_version]
+    promoted = {c.observation_id for c in mine if c.observation_id is not None}
+    latest: dict[tuple[str, str], EventCandidate] = {}
+    for candidate in sorted(mine, key=lambda c: c.observed_at):
+        latest[candidate.key] = candidate
+    events = {(o.source, o.source_event_id) for o in stored if o.observation_id in promoted}
+
+    def kept(observation: EventObservation) -> bool:
+        if observation.source not in classified or observation.observation_id in promoted:
+            return True
+        if observation.status is not EventStatus.WITHDRAWN or observation.source_event_id is None:
+            return False
+        key = (observation.source, observation.source_event_id)
+        reading = latest.get(key)
+        return key in events and reading is not None and reading.observation_id is None
+
+    return tuple(o for o in stored if kept(o))

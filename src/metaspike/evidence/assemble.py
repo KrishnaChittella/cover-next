@@ -52,7 +52,7 @@ from metaspike.domain.signals import EntitySignals, Signal
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
 from metaspike.domain.timeseries import Granularity, TimeWindow
-from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1
+from metaspike.event_sources.candidates import EVENT_CLASSIFICATION_RULES_V1, observations_under
 from metaspike.event_sources.gate import require_event_source
 from metaspike.event_sources.steam_news import SOURCE_ID as STEAM_NEWS_SOURCE
 from metaspike.event_sources.store import EventSourceStore
@@ -61,6 +61,7 @@ from metaspike.events.heat import EventIntelligence, coverage_of
 from metaspike.events.intelligence import assess_events
 from metaspike.events.model import CoverageCheck, EventRecord
 from metaspike.events.radar import upcoming_radar
+from metaspike.events.reconcile import reconcile
 from metaspike.events.rules import EVENT_HEAT_RULES_V1
 from metaspike.events.store import EventStore
 from metaspike.evidence.model import (
@@ -204,6 +205,8 @@ class EvidenceInputs:
     events: EventStore | None = None
     event_sources: EventSourceStore | None = None
     events_provenance: InputProvenance = NO_INPUT
+    # The classification rules the event list, promoted counts and refusals are read under.
+    event_rules_version: str = EVENT_CLASSIFICATION_RULES_V1.version
     creator_supply: CreatorSupplyStore | None = None
     creator_supply_provenance: InputProvenance = NO_INPUT
     community: CommunityStore | None = None
@@ -370,16 +373,21 @@ class _Assessment:
         self.names = {entry.canonical_game_id: entry for entry in self.catalogue_names}
         self.event_records: tuple[EventRecord, ...] = ()
         self.event_checks: tuple[CoverageCheck, ...] = ()
-        if inputs.events is not None:
-            self.event_records = inputs.events.events(as_of)
-            self.event_checks = inputs.events.checks(as_of)
+        version = inputs.event_rules_version
         self.candidates = (
             ()
             if inputs.event_sources is None
-            else inputs.event_sources.latest_candidates(
-                as_of, EVENT_CLASSIFICATION_RULES_V1.version
-            )
+            else inputs.event_sources.latest_candidates(as_of, version)
         )
+        if inputs.events is not None:
+            observations = inputs.events.observations(as_of)
+            if inputs.event_sources is not None:
+                # One rules version for the events, their counts and their refusals.
+                observations = observations_under(
+                    observations, inputs.event_sources.candidates(as_of), version
+                )
+            self.event_records = reconcile(observations, as_of)
+            self.event_checks = inputs.events.checks(as_of)
 
     def view(self, source: str) -> PolicyView:
         return policy_view(_policy(self.inputs, source), _purpose(source), self.inputs.stage)

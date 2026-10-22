@@ -36,6 +36,9 @@ EXPORT_FILE = "wikimedia_warehouse_export.json"
 TABLE = "ms_staging.stg_period_observations"
 # A bounded read: one source, one metric, a partition filter, and a bytes cap.
 MAX_BYTES_BILLED = 50_000_000
+# An export holds at most this many rows. The query asks for one more: if it arrives, the
+# answer was cut short somewhere and the export is refused rather than written incomplete.
+EXPORT_MAX_ROWS = 100_000
 COLUMNS = (
     "source_identifier",
     "canonical_game_id",
@@ -57,7 +60,8 @@ def export_query(first_day: str, last_day: str) -> str:
         f"AND granularity = '{Granularity.DAILY.value}' "
         f"AND period_start >= TIMESTAMP('{first_day}') "
         f"AND period_start < TIMESTAMP_ADD(TIMESTAMP('{last_day}'), INTERVAL 1 DAY) "
-        "ORDER BY source_identifier, period_start, observed_at"
+        "ORDER BY source_identifier, period_start, observed_at "
+        f"LIMIT {EXPORT_MAX_ROWS + 1}"
     )
 
 
@@ -111,8 +115,15 @@ def export_from_bq_json(
     exported_at: datetime,
 ) -> WarehouseExport:
     """An export from the JSON `bq query --format=json` printed for `export_query`."""
+    answer = json.loads(output or "[]")
+    if not isinstance(answer, list):
+        raise ValueError("bq did not print a list of rows")
+    if len(answer) > EXPORT_MAX_ROWS:
+        raise ValueError(
+            f"more than {EXPORT_MAX_ROWS} rows: the answer may be incomplete; export fewer days"
+        )
     rows = []
-    for raw in json.loads(output or "[]"):
+    for raw in answer:
         value = raw.get("value")
         rows.append(
             ExportRow(
