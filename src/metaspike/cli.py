@@ -18,6 +18,7 @@ from time import perf_counter
 import httpx
 from pydantic import ValidationError
 
+from metaspike import steam_players_recorder as steam_recorder
 from metaspike.catalogue.bindings import audit_bootstrap_bindings
 from metaspike.catalogue.eligibility import (
     SourceEligibility,
@@ -138,7 +139,7 @@ from metaspike.sources.catalogue_sources import (
     default_limiter_pool,
     register_catalogue_sources,
 )
-from metaspike.sources.credentials import STEAM_WEB_API_KEY_ENV, Secret
+from metaspike.sources.credentials import STEAM_WEB_API_KEY_ENV, Secret, secret_from_env
 from metaspike.sources.igdb import LOOKUP_TABLES
 from metaspike.sources.limiter import FileQuotaLedger, LimiterPool, RateLimiter
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
@@ -416,6 +417,55 @@ def _parser() -> argparse.ArgumentParser:
     )
     recorder.add_argument("--json", action="store_true", help="print JSON")
     recorder.set_defaults(handler=_record_pageviews)
+
+    steam = commands.add_parser(
+        "record-steam-players",
+        help="plan (default), or with explicit owner opt-in make, a supervised Steam "
+        "concurrent-player recording for one slot; or inspect one",
+        description=(
+            "Supervised and private. By default this only PLANS: it prints the exact "
+            "requests for the current 15-minute slot and sends nothing. Sending them needs "
+            "--live and --confirm with the plan's id, inside the same slot, the key in "
+            f"{STEAM_WEB_API_KEY_ENV}, and is for an owner authorised to do so. A recording "
+            "is UNVERIFIED until reviewed and pinned; nothing here pins. --inspect reads a "
+            "recording back and checks it."
+        ),
+    )
+    steam.add_argument(
+        "--app",
+        action="append",
+        default=None,
+        metavar="APPID",
+        help=f"an eligible bootstrap Steam app; repeatable; at most {steam_recorder.MAX_APPS}",
+    )
+    steam.add_argument("--all-eligible", action="store_true", help="every eligible bootstrap app")
+    steam.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    steam.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    steam.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="a new local directory for the recording; it must not exist",
+    )
+    steam.add_argument(
+        "--live",
+        action="store_true",
+        help="SEND the planned requests to Steam. Owner use only, with --confirm",
+    )
+    steam.add_argument(
+        "--confirm",
+        default=None,
+        metavar="PLAN_ID",
+        help="the plan id printed by the plan; --live refuses without the matching id",
+    )
+    steam.add_argument(
+        "--inspect", type=Path, default=None, metavar="DIR", help="check a recording"
+    )
+    steam.add_argument("--json", action="store_true", help="print JSON")
+    steam.set_defaults(handler=_record_steam_players)
     run.set_defaults(handler=_run)
 
     check = commands.add_parser("validate-artifacts", help="validate published artifacts")
@@ -1926,6 +1976,72 @@ def _record_pageviews(args: argparse.Namespace) -> int:
         print(result.manifest.model_dump_json(indent=1))
     else:
         print(render_manifest(result.manifest, result.directory), end="")
+    return EXIT_OK if result.manifest.status.value == "complete" else EXIT_COLLECTION_FAILED
+
+
+def _record_steam_players(args: argparse.Namespace) -> int:
+    """Plan a supervised Steam session; make it only on explicit opt-in; or inspect one."""
+    if args.inspect is not None:
+        if args.live or args.app or args.all_eligible or args.out is not None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--inspect takes nothing else")
+        inspection = steam_recorder.inspect_recording(args.inspect)
+        if args.json:
+            print(inspection.model_dump_json(indent=1))
+        else:
+            print(steam_recorder.render_inspection(inspection), end="")
+        # 0: intact, complete, ready for owner review. 3: intact but partial or failed,
+        # diagnostic only. 4: the files do not hold together.
+        if inspection.problems:
+            return EXIT_INVALID_OUTPUT
+        return EXIT_OK if inspection.review_ready else EXIT_COLLECTION_FAILED
+    if args.app and args.all_eligible:
+        return _fail(EXIT_INVALID_CATALOGUE, "--app and --all-eligible cannot be combined")
+    if args.out is None:
+        return _fail(EXIT_INVALID_CATALOGUE, "--out names the new recording directory")
+    records = _recorded(args.recorded)
+    try:
+        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    except IncompleteRecords as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
+    planned_at = _now()
+    apps = args.app or (
+        [
+            t.source_native_id
+            for t in sampling_targets(
+                state, steam_eligibility(state, records, as_of=planned_at), bootstrap_scope(),
+                as_of=planned_at,
+            )
+        ]
+        if args.all_eligible
+        else []
+    )  # fmt: skip
+    try:
+        plan = steam_recorder.plan_recording(state, records, apps, planned_at, args.out)
+    except RecorderRefused as error:
+        return _fail(EXIT_SOURCE_POLICY, str(error))
+    if not args.live:
+        if args.confirm is not None:
+            return _fail(EXIT_INVALID_CATALOGUE, "--confirm is only meaningful with --live")
+        print(plan.model_dump_json(indent=1) if args.json else steam_recorder.render_plan(plan))
+        return EXIT_OK
+    if args.confirm != plan.plan_id:
+        return _fail(
+            EXIT_SOURCE_POLICY,
+            "--live needs --confirm with this slot's plan id "
+            f"({plan.plan_id}); review the plan first. Nothing was sent.",
+        )
+    try:
+        key = secret_from_env(STEAM_WEB_API_KEY_ENV)
+    except SourceError as error:
+        return _fail(EXIT_SOURCE_UNAVAILABLE, f"{error.message}. Nothing was sent.")
+    try:
+        result = steam_recorder.record_players(plan, _live_transport(), key, _now, _recorder_sleep)
+    except RecorderRefused as error:
+        return _fail(EXIT_SOURCE_POLICY, str(error))
+    if args.json:
+        print(result.manifest.model_dump_json(indent=1))
+    else:
+        print(steam_recorder.render_manifest(result.manifest, result.directory), end="")
     return EXIT_OK if result.manifest.status.value == "complete" else EXIT_COLLECTION_FAILED
 
 
