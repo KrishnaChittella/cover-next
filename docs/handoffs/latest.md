@@ -218,3 +218,28 @@ Wrote the owner-approved control record, which turns on Wikimedia-only steady-st
 ## Not done / next
 - Not checked yet: the 12:00 collection, the 13:00 dbt checks, `period_due_day_status`, alerts and cost.
 - PR #4 is untouched. C2-F criteria 9, 10 and 11 are unchanged.
+
+---
+
+# 2026-10-22 04:36 UTC — 16 Oct repaired; Steam supervised recorder (PR #6)
+
+## What
+The owner-approved 16 Oct repair ran in production. Separately, PR #6 adds `metaspike record-steam-players`, a supervised Steam recorder that plans by default and records only on confirmation. Built and tested offline only; it has never run live.
+
+## Changed
+- Production: one execution `ms-wikimedia-2r4zt` (01:35–01:38 UTC), `WORK_ORDERS=supervised`, `WIKIMEDIA_DAYS=5`, due slot 20 Oct. 14 requests, 14/14 collected, 70 rows covering 16–20 Oct. 14 new slot markers for 20 Oct; the 14 bad 16 Oct markers are untouched.
+- PR #6 `src/metaspike/steam_players_recorder.py`: plan, record, check and inspect. At most 8 eligible apps, one 15-minute slot (in the plan id), 8 requests, no retry. Kept as replay envelope plus `body_text`, with an `acquisition_record_v1` record each. Answers that arrive after the slot ends are dropped.
+- PR #6 `src/metaspike/cli.py`: the `record-steam-players` command. `tests/test_steam_players_recorder.py`: 23 tests. `tests/test_evidence.py`: allowlist updated.
+
+## Checks
+- ruff, mypy (250 files): pass. Recorder tests 23 passed; related suites 135 passed.
+- PR #6 CI on `030a101`: 1713 passed; image and infrastructure pass.
+- 02:00 dispatcher tick: one execution, succeeded, no jobs started.
+
+## Owner action
+- Review and merge PR #6.
+- Then approve one supervised Steam session (8 apps, 1 slot, 8 requests), with the key in your shell and its registration naming MetaSpike / krishnachittella.dev.
+
+## Not done / next
+- After 13:30 UTC: check the 12:00 collection, the 13:00 dbt run, `period_due_day_status` and alerts. A row-count failure is expected for 21 Oct (0 rows); 16 Oct should become `late`, likely on the 23 Oct run.
+- PR #4 is untouched. Steam `private_collection` is still uncleared.
