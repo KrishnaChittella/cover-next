@@ -170,3 +170,51 @@ A read-only production preflight for Wikimedia steady state; nothing in GCP or G
 
 ## Not done / next
 - Nothing applied, merged or enabled. YouTube collection is off. C2-F criteria 9, 10 and 11 are unchanged (fail, unresolved, unresolved).
+
+---
+
+# 2026-10-22 01:22 UTC — Wikimedia steady state deployed; collection not yet enabled
+
+## What
+Applied the reviewed steady-state plan to production, after PR #3 merged (`65df008`). The new image (collector fix, certifi 2026.10.19) and the hourly scheduler are live. Collection stays off, because the control record is still expired.
+
+## Changed (production)
+- Plan run `39697004948`, SHA-256 `ad51e8dadfc5a63a7ef93e9ebd5282749ccd531bdb55faebe614588f01e27ec9`. Applied by run `39701900753`: 0 added, 10 changed, 0 destroyed. The hash was checked and there was no drift.
+- All 7 Cloud Run jobs moved from `sha256:a8680b2b…c754` to `sha256:d1f07a77…67a3`. No secret references.
+- Scheduler `ms-dispatch-15m`: `0 * * * *`, ENABLED. First tick 2026-10-22 02:00 UTC.
+- Alerts: "dispatcher has not succeeded for 3 hours" turned on; volume threshold 31 → 60.
+- The four `SOAK_*` repository variables were deleted by the owner.
+
+## Checks
+- deploy verify (full suite, Terraform, image smoke and scan): pass, on both the plan run and the apply run.
+- Live read-back: images, `METASPIKE_IMAGE`, scheduler and both alert policies match the plan.
+
+## Owner action
+- Approve the control record write: gen `1791684706340016`, armed until 2026-11-22T23:30Z, Wikimedia only, 22 requests a day.
+- Approve the 16 Oct repair (doc option B; `METASPIKE_WIKIMEDIA_DAYS=5` if run on 22 Oct). It must run before 12:00 UTC on the day it runs.
+
+## Not done / next
+- Not checked yet: the first 12:00 collection, the 13:00 dbt checks, `period_due_day_status`, alerts and cost.
+- PR #4 (YouTube secret adoption) is untouched. C2-F criteria 9, 10 and 11 are unchanged.
+
+---
+
+# 2026-10-22 01:26 UTC — Wikimedia control record armed
+
+## What
+Wrote the owner-approved control record, which turns on Wikimedia-only steady-state collection. The first collection is at 12:00 UTC today, and the warehouse run with its dbt checks at 13:00.
+
+## Changed (production)
+- `gs://metaspike-prod-kc-ops/dispatch/control.json`: conditional on gen `1791684706340016`; new gen **`1792632354008756`** (01:25:54 UTC).
+- Content: enabled, armed until 2026-11-22T23:30Z, 1 start per tick, 3 executions a day, `wikimedia_pageviews` only (22 requests a day, 14 targets per execution), no pins.
+
+## Checks
+- The read-back matches the approved draft byte for byte. The dispatcher's own parser accepts it and reports it as armed now.
+
+## Owner action
+- Approve the 16 Oct repair (doc option B, `METASPIKE_WIKIMEDIA_DAYS=5` on 22 Oct, before 12:00 UTC). Until it runs, the 13:00 warehouse run fails on the 16 Oct `missing` slot, through 30 Oct.
+- Merge PR #5 (handoff docs).
+
+## Not done / next
+- Not checked yet: the 12:00 collection, the 13:00 dbt checks, `period_due_day_status`, alerts and cost.
+- PR #4 is untouched. C2-F criteria 9, 10 and 11 are unchanged.
