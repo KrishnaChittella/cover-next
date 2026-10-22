@@ -269,8 +269,11 @@
           "$ref": "#/$defs/Readiness"
         },
         "rules_version": {
-          "const": "creator_opportunity_rules_v1",
           "default": "creator_opportunity_rules_v1",
+          "enum": [
+            "creator_opportunity_rules_v1",
+            "creator_opportunity_rules_v2"
+          ],
           "title": "Rules Version",
           "type": "string"
         },
@@ -578,8 +581,11 @@
       "type": "array"
     },
     "rules_version": {
-      "const": "creator_opportunity_rules_v1",
       "default": "creator_opportunity_rules_v1",
+      "enum": [
+        "creator_opportunity_rules_v1",
+        "creator_opportunity_rules_v2"
+      ],
       "title": "Rules Version",
       "type": "string"
     },

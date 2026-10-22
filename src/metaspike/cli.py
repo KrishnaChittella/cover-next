@@ -98,6 +98,7 @@ from metaspike.opportunity.history import (
 )
 from metaspike.opportunity.history_synthetic import SYNTHETIC_HISTORY, synthetic_history
 from metaspike.opportunity.render import render_shortlist
+from metaspike.opportunity.rules import OPPORTUNITY_RULES_VERSION, RULES_VERSIONS
 from metaspike.opportunity.rules import shortlist as opportunity_shortlist
 from metaspike.pageview_recorder import (
     MAX_GAMES,
@@ -683,8 +684,14 @@ def _parser() -> argparse.ArgumentParser:
     evidence.add_argument(
         "--opportunities",
         action="store_true",
-        help="read the evidence through creator_opportunity_rules_v1 and print a "
+        help="read the evidence through the creator-opportunity rules and print a "
         "private, explained shortlist instead of the evidence report",
+    )
+    evidence.add_argument(
+        "--opportunity-rules",
+        choices=RULES_VERSIONS,
+        default=OPPORTUNITY_RULES_VERSION,
+        help="the creator-opportunity rules version (default: v1, the frozen one)",
     )
     evidence.add_argument("--json", action="store_true", help="print the report as JSON")
     evidence.add_argument(
@@ -2025,7 +2032,7 @@ def _evidence(args: argparse.Namespace) -> int:
         report = assess_evidence(inputs, as_of, games)
 
     if args.opportunities:
-        found = opportunity_shortlist(report)
+        found = opportunity_shortlist(report, args.opportunity_rules)
         listed = found.model_dump_json(indent=1)
         if args.out is not None:
             args.out.parent.mkdir(parents=True, exist_ok=True)

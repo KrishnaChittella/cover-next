@@ -1,9 +1,11 @@
 // The private creator-opportunity report, as `metaspike evidence --opportunities --json`
-// writes it (`creator_opportunity_rules_v1`). Not part of the public artifact contract.
+// writes it (`creator_opportunity_rules_v1` or `_v2`). Not part of the public artifact contract.
 // The schema in report.schema.json is generated from the Python model and is the
 // authority; these types describe what the interface reads from a validated report.
 
 export const OPPORTUNITY_RULES_VERSION = "creator_opportunity_rules_v1";
+// Version 2 adds a reaction window and the event-first candidate; both are read the same way.
+export const OPPORTUNITY_RULES_VERSIONS: readonly string[] = [OPPORTUNITY_RULES_VERSION, "creator_opportunity_rules_v2"];
 
 export type Readiness = "evidence_supported_candidate" | "provisional_watchlist" | "insufficient_evidence";
 export type Standing = "verified" | "unverified" | "synthetic" | "none";

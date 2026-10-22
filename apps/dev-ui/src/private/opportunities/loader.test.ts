@@ -72,9 +72,12 @@ describe("loading a private opportunity report", () => {
     expect(absent).toMatchObject({ kind: "absent", view: "synthetic" });
     const garbage = await loadOpportunityReport("verified", ON, reader({ "verified.json": "{not json" }), APP);
     expect(garbage.kind).toBe("invalid");
-    const later = { ...recorded, rules_version: "creator_opportunity_rules_v2" };
+    const later = { ...recorded, rules_version: "creator_opportunity_rules_v3" };
     const unsupported = await loadOpportunityReport("verified", ON, reader({ "verified.json": JSON.stringify(later) }), APP);
-    expect(unsupported).toMatchObject({ kind: "unsupported_version", version: "creator_opportunity_rules_v2" });
+    expect(unsupported).toMatchObject({ kind: "unsupported_version", version: "creator_opportunity_rules_v3" });
+    const v2 = { ...recorded, rules_version: "creator_opportunity_rules_v2" };
+    const second = await loadOpportunityReport("verified", ON, reader({ "verified.json": JSON.stringify(v2) }), APP);
+    expect(second.kind).toBe("ok");
     const good = await loadOpportunityReport("verified", ON, reader({ "verified.json": JSON.stringify(recorded) }), APP);
     expect(good.kind).toBe("ok");
   });
