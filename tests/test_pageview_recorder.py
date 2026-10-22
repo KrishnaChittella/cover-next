@@ -1096,3 +1096,28 @@ def test_unverified_and_synthetic_pageviews_are_never_counted_as_verified(
         assert report.inputs["wikimedia_pageviews"].standing is provenance_.standing
         for game in report.games:
             assert "wikimedia_readership" not in {f.value for f in game.verified_demand_families}
+
+
+def test_a_compressed_answer_is_decoded_once_and_recorded_decoded() -> None:
+    """A gzip answer off the network (still encoded, unread) reaches the client and the
+    recording as its decoded body. Found live on 22 Oct 2026: Steam answered gzip and the
+    decoded body was handed on with content-encoding still set, so it failed to decode."""
+    import gzip
+
+    body = b'{"response": {"player_count": 12345, "result": 1}}'
+
+    def network(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "application/json"},
+            stream=httpx.ByteStream(gzip.compress(body)),
+        )
+
+    recording = pageview_recorder.RecordingTransport(
+        httpx.MockTransport(network), lambda: datetime(2026, 10, 22, tzinfo=UTC)
+    )
+    with httpx.Client(transport=recording) as client:
+        answer = client.get("https://example.invalid/x")
+    assert answer.content == body and answer.json()["response"]["player_count"] == 12345
+    assert [captured.body for captured in recording.captured] == [body]
+    assert recording.attempts == 1
