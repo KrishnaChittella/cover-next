@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from metaspike.creator_sources.association import AssociationState, GameNames, associate
 from metaspike.creator_sources.store import CreatorSupplyStore
 from metaspike.creator_sources.youtube import (
     RETENTION_DAYS,
@@ -56,25 +57,37 @@ def _wikipedia(store: DiscoveryStore, game: WikidataGame, day: date) -> dict[str
 
 
 def _youtube(
-    searches: Sequence[SearchFetch], details: dict[str, VideoDetail], game_id: str, now: datetime
+    searches: Sequence[SearchFetch],
+    details: dict[str, VideoDetail],
+    game: GameNames,
+    catalogue: Sequence[GameNames],
+    now: datetime,
 ) -> dict[str, Any]:
     """This week's most-watched relevant videos, each with its own figures.
 
     Individual videos only: YouTube's Developer Policies forbid derived metrics (III.E.4.h)
     and combining data across content owners (III.E.2), so no median, total or count of
-    videos is computed here.
+    videos is computed here. A video is shown only when the association rule supports it:
+    the title or tags name this game, YouTube classifies it as gaming, and no other tracked
+    game is named. A search for "Anthem" also returns songs called anthems.
     """
     fresh = [
         s
         for s in searches
-        if s.query.canonical_game_id == game_id
+        if s.query.canonical_game_id == game.canonical_game_id
         and s.status is FetchStatus.OK
         and s.retrieved_at >= now - timedelta(days=RETENTION_DAYS)
     ]
     if not fresh:
         return {"state": "missing"}
     latest = max(fresh, key=lambda s: s.retrieved_at)
-    videos = [details[r.video_id] for r in latest.results if r.video_id in details]
+    videos = [
+        details[r.video_id]
+        for r in latest.results
+        if r.video_id in details
+        and associate(game, catalogue, (), r.title, details[r.video_id]).state
+        is AssociationState.SUPPORTED
+    ]
     ranked = sorted(
         (v for v in videos if v.view_count is not None),
         key=lambda v: v.view_count or 0,
@@ -110,8 +123,9 @@ def build_site_data(
         for fetch in youtube.videos(now):  # oldest first: the latest detail wins
             for detail in fetch.details:
                 details[detail.video_id] = detail
+    catalogue = [GameNames.of(game_id(g.qid), display_name(g.article)) for g, _, _ in selection]
     games: list[dict[str, Any]] = []
-    for game, riser, pinned in selection:
+    for (game, riser, pinned), names in zip(selection, catalogue, strict=True):
         games.append(
             {
                 "slug": slug_of(game),
@@ -129,7 +143,7 @@ def build_site_data(
                     "new": bool(riser["new"]),
                 },
                 "wikipedia": _wikipedia(store, game, day),
-                "youtube": _youtube(searches, details, game_id(game.qid), now),
+                "youtube": _youtube(searches, details, names, catalogue, now),
             }
         )
     with_videos = sum(g["youtube"]["state"] == "ok" for g in games)
