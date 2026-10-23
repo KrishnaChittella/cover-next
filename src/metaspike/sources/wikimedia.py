@@ -193,12 +193,19 @@ class WikimediaPageviewsAdapter:
     ) -> list[Observation]:
         if signal != DAILY_PAGEVIEWS:
             raise ValueError(f"{SOURCE_ID} does not provide {signal.metric}/{signal.granularity}")
+        views_by_day = self.article_views(identifier.namespace, identifier.value, window)
+        return [
+            _observation(game, identifier, day, views, observed_at)
+            for day, views in sorted(views_by_day.items())
+        ]
+
+    def article_views(self, project: str, article: str, window: TimeWindow) -> dict[date, int]:
+        """Daily human views of one article, by day, as the API returned them."""
         url = (
-            f"{BASE_URL}/{identifier.namespace}/all-access/user/"
-            f"{quote(identifier.value, safe='')}/daily/"
+            f"{BASE_URL}/{project}/all-access/user/"
+            f"{quote(article, safe='')}/daily/"
             f"{window.start:%Y%m%d}/{window.end:%Y%m%d}"
         )
-        article = identifier.value
         response = self._http.request("GET", url, label=article)
         if response.status_code == httpx.codes.NOT_FOUND:
             raise SourceError(
@@ -207,11 +214,7 @@ class WikimediaPageviewsAdapter:
             )
         if response.status_code != httpx.codes.OK:
             raise SourceError(SourceErrorCode.HTTP_ERROR, f"{article}: HTTP {response.status_code}")
-        views_by_day = _parse(response.content, window, article)
-        return [
-            _observation(game, identifier, day, views, observed_at)
-            for day, views in sorted(views_by_day.items())
-        ]
+        return _parse(response.content, window, article)
 
 
 def _parse(content: bytes, window: TimeWindow, article: str) -> dict[date, int]:
