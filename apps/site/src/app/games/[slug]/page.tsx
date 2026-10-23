@@ -47,6 +47,11 @@ export default async function GamePage({ params }: Props) {
           </div>
           <h1>{game.name}</h1>
           <p className="sub">{trigger(game)}</p>
+          {game.story && (
+            <p className="sub">
+              Part of the <Link href={`/#${game.story.slug}`}>{game.story.name} story</Link>: several of its games are rising together.
+            </p>
+          )}
         </div>
         <Star slug={game.slug} name={game.name} />
       </section>

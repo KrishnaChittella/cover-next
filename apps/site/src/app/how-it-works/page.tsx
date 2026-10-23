@@ -22,6 +22,15 @@ export default function HowItWorks() {
         little history to have a normal level yet is shown as <strong>New</strong>.
       </p>
 
+      <h2>Studio stories</h2>
+      <p>
+        When three or more rising games share a developer or publisher on Wikidata, they are shown
+        as one story instead of filling the list. The strongest game stays in the list, and the
+        rest are tucked inside the story. A story&apos;s headline is a one-line AI summary (written
+        by Claude) of the studio&apos;s Wikipedia article. Treat it as a pointer and check the
+        article. When there is no summary, the headline is just the count.
+      </p>
+
       <h2>What each number means</h2>
       <table>
         <thead>

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { GameRow } from "@/components/GameRow";
-import { byRise, trendOf, type Game } from "@/lib/site";
+import { byRise, folded, trendOf, type Game } from "@/lib/site";
 import { useWatchlist } from "@/lib/watchlist";
 
 type Filter = "all" | "rising" | "new" | "pinned" | "watchlist";
@@ -37,6 +37,8 @@ export function GameBrowser({ games }: { games: Game[] }) {
     const needle = query.trim().toLowerCase();
     const kept = games.filter((g) => {
       if (needle && !g.name.toLowerCase().includes(needle)) return false;
+      // A studio story's other games stay findable by search, pin and watchlist.
+      if (!needle && folded(g) && (filter === "all" || filter === "rising")) return false;
       if (filter === "rising") return trendOf(g) === "rising";
       if (filter === "new") return trendOf(g) === "new";
       if (filter === "pinned") return g.pinned;

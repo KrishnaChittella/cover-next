@@ -1,12 +1,12 @@
 import Link from "next/link";
 
 import { Sparkline } from "@/components/Sparkline";
-import { byRise, formatCount, formatDay, formatRatio, trendOf, type Game, type SiteData } from "@/lib/site";
+import { byRise, folded, formatCount, formatDay, formatRatio, trendOf, type Game, type SiteData } from "@/lib/site";
 
 const STATUS_TEXT = { ok: "Live", missing: "No reading", pending: "Waiting for permission" } as const;
 
 export function LeftRail({ data }: { data: SiteData }) {
-  const movers = data.games.filter((g) => trendOf(g) === "rising").sort(byRise).slice(0, 5);
+  const movers = data.games.filter((g) => trendOf(g) === "rising" && !folded(g)).sort(byRise).slice(0, 5);
   const counts = {
     rising: data.games.filter((g) => trendOf(g) === "rising").length,
     new: data.games.filter((g) => trendOf(g) === "new").length,

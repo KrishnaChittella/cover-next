@@ -31,6 +31,9 @@ jobs:
       - name: Discover rising games (Wikidata + the day's Wikimedia pageview dump)
         # shortcut: the runner starts empty, so each run re-reads ~2,000 games' history
         # (about 12 minutes). Cache the discovery store between runs if this gets slow.
+        env:
+          # Studio-story headlines; without the key the site shows the plain count line.
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: uv run metaspike discover-games
       - name: YouTube (skipped when the key is not set)
         env:
