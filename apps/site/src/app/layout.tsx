@@ -54,7 +54,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Game metadata from <a href="https://www.igdb.com">IGDB.com</a>. Player counts from{" "}
               <a href="https://store.steampowered.com/">Steam</a>, provided by Valve via the{" "}
               <a href="https://steamcommunity.com/dev">Steam Web API</a>, as is; not endorsed by or
-              affiliated with Valve.
+              affiliated with Valve. Live
+              figures from <a href="https://www.twitch.tv/">Twitch</a> via the Twitch API; not endorsed by Twitch.
             </p>
             <p>
               A project by <a href="https://krishnachittella.dev">Krishna Chittella</a>. Source code on{" "}

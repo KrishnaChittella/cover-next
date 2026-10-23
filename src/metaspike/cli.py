@@ -59,13 +59,15 @@ from metaspike.creator_sources.youtube import (
 )
 from metaspike.discovery.catalogue import display_name, game_id
 from metaspike.discovery.catalogue import select as select_games
+from metaspike.discovery.daily import DailyHistory
 from metaspike.discovery.dump import count_views, stream_lines
 from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
-from metaspike.discovery.steam import SteamHistory
 from metaspike.discovery.steam import collect as collect_steam
 from metaspike.discovery.store import DiscoveryStore
 from metaspike.discovery.studios import fetch_studios
 from metaspike.discovery.studios import group as group_stories
+from metaspike.discovery.twitch import TwitchDaily
+from metaspike.discovery.twitch import collect as collect_twitch_daily
 from metaspike.discovery.wikidata import WIKIDATA_POLICY, fetch_games
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
@@ -249,6 +251,7 @@ DEFAULT_SAMPLE_STORE = Path(".metaspike/samples")
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
 DEFAULT_STEAM_DIR = Path(".metaspike/steam")
+DEFAULT_TWITCH_DAILY_DIR = Path(".metaspike/twitch-daily")
 DEFAULT_TWITCH_DIR = Path(".metaspike/twitch")
 DEFAULT_DISCOVERY_DIR = Path(".metaspike/discovery")
 # Daily YouTube searches spent on the top risers; pinned games are always searched too.
@@ -631,6 +634,15 @@ def _parser() -> argparse.ArgumentParser:
     steam.add_argument("--store-dir", type=Path, default=DEFAULT_STEAM_DIR)
     steam.set_defaults(handler=_collect_steam)
 
+    twitch_daily = commands.add_parser(
+        "collect-twitch-daily",
+        help="LIVE: today's Twitch live viewers and streams for every selected game with an "
+        "IGDB id, two sums per game, into the history the public site reads",
+    )
+    twitch_daily.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
+    twitch_daily.add_argument("--store-dir", type=Path, default=DEFAULT_TWITCH_DAILY_DIR)
+    twitch_daily.set_defaults(handler=_collect_twitch_daily)
+
     youtube = commands.add_parser(
         "collect-youtube",
         help="LIVE: one YouTube search per top riser and pinned game for this week's most "
@@ -674,6 +686,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     site.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
     site.add_argument("--steam-dir", type=Path, default=DEFAULT_STEAM_DIR)
+    site.add_argument("--twitch-dir", type=Path, default=DEFAULT_TWITCH_DAILY_DIR)
     site.add_argument("--creator-supply-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
     site.add_argument("--out", type=Path, required=True)
     site.set_defaults(handler=_site_data)
@@ -1807,8 +1820,34 @@ def _collect_steam(args: argparse.Namespace) -> int:
             adapter = build_steam_players(client, default_limiter_pool())
         except SourceError as error:
             return _fail(EXIT_SOURCE_UNAVAILABLE, str(error))
-        read, failed = collect_steam(adapter, apps, SteamHistory(args.store_dir), _now().date())
+        read, failed = collect_steam(adapter, apps, DailyHistory(args.store_dir), _now().date())
     print(f"Steam: {len(apps)} apps; {read} read, {failed} failed -> {args.store_dir}")
+    return EXIT_OK if failed == 0 else _fail(EXIT_SOURCE_UNAVAILABLE, "some readings failed")
+
+
+def _collect_twitch_daily(args: argparse.Namespace) -> int:
+    """Two sums per selected game on Twitch, kept under today's UTC date (owner decision)."""
+    found = _discovered(args.discovery_dir)
+    if isinstance(found, str):
+        return _fail(EXIT_INVALID_CATALOGUE, found)
+    _, _, selection = found
+    slugs = [g.igdb[0] for g, _, _ in selection if g.igdb]
+    with build_client() as client:
+        try:
+            pool = default_limiter_pool()
+            read, failed, unmapped = collect_twitch_daily(
+                build_igdb(client, pool),
+                build_twitch(client, pool),
+                slugs,
+                TwitchDaily(args.store_dir),
+                _now().date(),
+            )
+        except SourceError as error:
+            return _fail(EXIT_SOURCE_UNAVAILABLE, error.message)
+    print(
+        f"Twitch: {len(slugs)} games; {read} read, {failed} failed, "
+        f"{unmapped} with no Twitch category -> {args.store_dir}"
+    )
     return EXIT_OK if failed == 0 else _fail(EXIT_SOURCE_UNAVAILABLE, "some readings failed")
 
 
@@ -1961,17 +2000,18 @@ def _site_data(args: argparse.Namespace) -> int:
     youtube = (
         CreatorSupplyStore(args.creator_supply_dir) if args.creator_supply_dir.is_dir() else None
     )
-    steam = SteamHistory(args.steam_dir) if args.steam_dir.is_dir() else None
+    steam = DailyHistory(args.steam_dir) if args.steam_dir.is_dir() else None
+    twitch = TwitchDaily(args.twitch_dir) if args.twitch_dir.is_dir() else None
     stories = _stories(args.discovery_dir, day)
-    data = build_site_data(selection, store, day, youtube, now, stories, steam)
+    data = build_site_data(selection, store, day, youtube, now, stories, steam, twitch)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     args.out.write_text(text + "\n", encoding="utf-8")
-    sources = ("wikipedia", "youtube", "steam")
+    sources = ("wikipedia", "youtube", "steam", "twitch")
     held = {k: sum(g[k]["state"] == "ok" for g in data["games"]) for k in sources}
     print(
         f"Site data for {day}: {len(selection)} games; Wikipedia {held['wikipedia']}, "
-        f"YouTube {held['youtube']}, Steam {held['steam']} -> {args.out}"
+        f"YouTube {held['youtube']}, Steam {held['steam']}, Twitch {held['twitch']} -> {args.out}"
     )
     return EXIT_OK
 

@@ -5,8 +5,8 @@ its Wikipedia views for the last 31 days and how far its recent days rose above 
 normal level (Wikimedia, CC0) and YouTube's most-watched recent videos, one by one (shown
 with YouTube attribution, refreshed daily so nothing shown is older than YouTube's 30-day
 limit, and only while YouTube's policy clears public launch), and Steam's concurrent
-players, one reading a day (`discovery.steam`, an owner decision recorded there). Twitch
-is not in this file: Twitch has not said its figures may be shown publicly.
+players and Twitch live sums, one reading a day each (`discovery.steam`,
+`discovery.twitch`: owner decisions recorded there).
 
 Missing is never zero: a game with no reading carries a `state` and null figures.
 """
@@ -30,16 +30,19 @@ from metaspike.creator_sources.youtube import (
     VideoDetail,
 )
 from metaspike.discovery.catalogue import display_name, game_id, slug_of
+from metaspike.discovery.daily import DailyHistory
+from metaspike.discovery.daily import view as daily_view
 from metaspike.discovery.risers import WINDOW_DAYS
 from metaspike.discovery.steam import ATTRIBUTION as STEAM_ATTRIBUTION
-from metaspike.discovery.steam import SteamHistory
-from metaspike.discovery.steam import view as steam_view
 from metaspike.discovery.store import DiscoveryStore
+from metaspike.discovery.twitch import ATTRIBUTION as TWITCH_ATTRIBUTION
+from metaspike.discovery.twitch import FORUM_ANSWER as TWITCH_BASIS
+from metaspike.discovery.twitch import TwitchDaily
 from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.event_sources.candidates import words
 
-SITE_DATA_VERSION = "4"
+SITE_DATA_VERSION = "5"
 WEEK = 7
 TOP_VIDEOS = 3
 
@@ -145,7 +148,8 @@ def build_site_data(
     youtube: CreatorSupplyStore | None,
     now: datetime,
     stories: Sequence[Mapping[str, Any]] = (),
-    steam: SteamHistory | None = None,
+    steam: DailyHistory | None = None,
+    twitch: TwitchDaily | None = None,
 ) -> dict[str, Any]:
     """`stories` are `discovery.studios.group` output: each game names its story, if any."""
     story_of = {m: s for s in stories for m in s["members"]}
@@ -180,6 +184,7 @@ def build_site_data(
                 "wikipedia": _wikipedia(store, game, day),
                 "youtube": _youtube(searches, details, names, catalogue, now),
                 "steam": _steam(steam, game, now.date()),
+                "twitch": _twitch(twitch, game, now.date()),
             }
         )
     with_videos = sum(g["youtube"]["state"] == "ok" for g in games)
@@ -199,7 +204,12 @@ def build_site_data(
                 "games": sum(g["steam"]["state"] == "ok" for g in games),
                 "attribution": STEAM_ATTRIBUTION,
             },
-            "twitch": {"state": "pending"},
+            "twitch": {
+                "state": "ok" if any(g["twitch"]["state"] == "ok" for g in games) else "missing",
+                "games": sum(g["twitch"]["state"] == "ok" for g in games),
+                "attribution": TWITCH_ATTRIBUTION,
+                "basis": TWITCH_BASIS,
+            },
         },
         "stories": [
             {k: s[k] for k in ("slug", "name", "role", "article", "members")} for s in stories
@@ -208,14 +218,32 @@ def build_site_data(
     }
 
 
-def _steam(history: SteamHistory | None, game: WikidataGame, day: date) -> dict[str, Any]:
+def _steam(history: DailyHistory | None, game: WikidataGame, day: date) -> dict[str, Any]:
     # Not on Steam is a different state from not read: a console game has no count at all.
     if not game.steam:
         return {"state": "inapplicable"}
     app = game.steam[0]
     if history is None:
         return {"state": "missing", "app": app, "daily": []}
-    return steam_view(history.get(app), day, app)
+    return {"app": app} | daily_view(history.get(app), day)
+
+
+def _twitch(store: TwitchDaily | None, game: WikidataGame, day: date) -> dict[str, Any]:
+    # Without an IGDB id, or when Twitch links no category to it, nothing is guessed.
+    if not game.igdb or store is None:
+        return {"state": "missing", "daily": []}
+    slug = game.igdb[0]
+    if store.categories().get(slug) is None:
+        return (
+            {"state": "unmapped"}
+            if slug in store.categories()
+            else {"state": "missing", "daily": []}
+        )
+    shown = daily_view(store.viewers.get(slug), day)
+    if shown["state"] == "ok":
+        shown["streams_now"] = store.streams.get(slug).get(day)
+        shown["lower_bound"] = store.partial.get(slug).get(day) == 1
+    return shown
 
 
 def _story_ref(story: Mapping[str, Any] | None, slug: str) -> dict[str, Any] | None:

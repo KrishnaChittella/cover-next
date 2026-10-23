@@ -103,14 +103,14 @@ export default async function GamePage({ params }: Props) {
           {game.steam.state === "ok" ? (
             <>
               <p className="sub">
-                <span className="mono">{formatCount(game.steam.players_now)}</span> playing at today&apos;s
+                <span className="mono">{formatCount(game.steam.now)}</span> playing at today&apos;s
                 reading
                 {game.steam.normal !== null
                   ? `; lately ${formatRatio(game.steam.ratio)} its normal of ${formatCount(game.steam.normal)}.`
                   : ". A normal level needs two weeks of readings."}
               </p>
               <Chart
-                days={game.steam.daily.map((d) => ({ day: d.day, views: d.players }))}
+                days={game.steam.daily.map((d) => ({ day: d.day, views: d.value }))}
                 baseline={game.steam.normal}
                 label={`Daily Steam players for ${game.name}`}
               />
@@ -121,6 +121,35 @@ export default async function GamePage({ params }: Props) {
           <p className="sub">
             {data.sources.steam.attribution}{" "}
             <a href={`https://store.steampowered.com/app/${game.steam.app}/`}>Steam store page</a>
+          </p>
+        </section>
+      )}
+
+      {game.twitch.state !== "unmapped" && (
+        <section className="panel">
+          <h2 className="panel-title">Live on Twitch, one reading a day</h2>
+          {game.twitch.state === "ok" ? (
+            <>
+              <p className="sub">
+                {game.twitch.lower_bound ? "At least " : ""}
+                <span className="mono">{formatCount(game.twitch.now)}</span> watching across{" "}
+                <span className="mono">{formatCount(game.twitch.streams_now)}</span> live streams at today&apos;s
+                reading
+                {game.twitch.normal !== null
+                  ? `; lately ${formatRatio(game.twitch.ratio)} its normal of ${formatCount(game.twitch.normal)} viewers.`
+                  : ". A normal level needs two weeks of readings."}
+              </p>
+              <Chart
+                days={game.twitch.daily.map((d) => ({ day: d.day, views: d.value }))}
+                baseline={game.twitch.normal}
+                label={`Daily Twitch viewers for ${game.name}`}
+              />
+            </>
+          ) : (
+            <p className="missing">Not read today.</p>
+          )}
+          <p className="sub">
+            {data.sources.twitch.attribution} <a href="https://www.twitch.tv/">Twitch</a>
           </p>
         </section>
       )}
@@ -147,7 +176,6 @@ export default async function GamePage({ params }: Props) {
             </li>
           )}
         </ul>
-        <p className="sub">Twitch viewers: waiting for permission to show them.</p>
       </section>
     </div>
   );
