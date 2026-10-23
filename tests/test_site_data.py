@@ -41,7 +41,8 @@ def test_a_week_with_an_unknown_day_has_no_total(tmp_path: Path) -> None:
     assert len(shown["wikipedia"]["daily"]) == 31
 
 
-def test_youtube_is_shown_video_by_video_and_nothing_is_derived() -> None:
+def test_youtube_is_shown_video_by_video_and_only_when_it_is_about_the_game() -> None:
+    from metaspike.creator_sources.association import GameNames
     from metaspike.creator_sources.youtube import (
         FetchStatus,
         SearchFetch,
@@ -51,27 +52,40 @@ def test_youtube_is_shown_video_by_video_and_nothing_is_derived() -> None:
     )
     from metaspike.publishing.site import _youtube
 
-    game = "780b4850-6248-4a81-8fe0-7f0762376cfc"
+    game = GameNames.of("780b4850-6248-4a81-8fe0-7f0762376cfc", "Anthem")
+    other = GameNames.of("9abc9607-45ea-4441-9da2-3eb00af9d4a3", "Dragon Age")
+    catalogue = [game, other]
     moment = NOW - timedelta(hours=1)
-    ids = ["v1", "v2", "v3", "v4"]
+    videos = {
+        "v1": ("Anthem gameplay, the last mission", "20", 10),
+        "v2": ("Anthem in 2026: was it really that bad?", "20", 500),
+        "v3": ("Anthem boss fight", "20", None),  # no view count: not ranked
+        "v4": ("Anthem vs Dragon Age, which BioWare game aged better", "20", 9_000),
+        "v5": ("VCT Champions opening ceremony anthem", "10", 1_500_000),  # music
+        "v6": ("Opening ceremony highlights", "20", 2_000_000),  # never names the game
+    }
     search = SearchFetch(
         fetch_id="f",
         run_id="r",
-        query=SearchQuery(canonical_game_id=game, text="Rust"),
+        query=SearchQuery(canonical_game_id=game.canonical_game_id, text="Anthem game"),
         page_index=0,
         retrieved_at=moment,
         status=FetchStatus.OK,
         results=tuple(
-            SearchResult(video_id=i, channel_id="c", title=i, published_at=moment) for i in ids
+            SearchResult(video_id=i, channel_id="c", title=t, published_at=moment)
+            for i, (t, _, _) in videos.items()
         ),
     )
-    views = {"v1": 10, "v2": 500, "v3": None, "v4": 70}
     details = {
-        i: VideoDetail(video_id=i, channel_id="c", title=i, published_at=moment, view_count=v)
-        for i, v in views.items()
+        i: VideoDetail(
+            video_id=i, channel_id="c", title=t, published_at=moment, category_id=c, view_count=v
+        )
+        for i, (t, c, v) in videos.items()
     }
-    shown = _youtube([search], details, game, NOW)
+    shown = _youtube([search], details, game, catalogue, NOW)
     assert set(shown) == {"state", "retrieved_at", "top_videos"}  # no median, total or count
-    assert [v["id"] for v in shown["top_videos"]] == ["v2", "v4", "v1"]
+    # Music, unrelated titles and videos naming another tracked game are left out.
+    assert [v["id"] for v in shown["top_videos"]] == ["v2", "v1"]
     # Older than YouTube's 30 days: not shown at all.
-    assert _youtube([search], details, game, NOW + timedelta(days=31)) == {"state": "missing"}
+    later = NOW + timedelta(days=31)
+    assert _youtube([search], details, game, catalogue, later) == {"state": "missing"}

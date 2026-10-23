@@ -1721,7 +1721,7 @@ def test_collect_youtube_asks_once_per_game_and_never_prints_the_key(
     assert cli.main([*arguments, "--max-searches", "2"]) == cli.EXIT_OK
     searches = [r for r in sent if r.url.path.endswith("/search")]
     # Risers first, then pinned games, within the budget: Wardogs waits for the next run.
-    assert [r.url.params["q"] for r in searches] == ["Anthem", "Shattered Steel"]
+    assert [r.url.params["q"] for r in searches] == ["Anthem game", "Shattered Steel game"]
     assert all(r.url.params["key"] == key for r in sent)
     assert all(r.url.params["videoCategoryId"] == "20" for r in searches)
     assert {f.query.canonical_game_id for f in CreatorSupplyStore(store).searches()} == {

@@ -1804,7 +1804,8 @@ def _collect_youtube(args: argparse.Namespace) -> int:
     queries = [
         SearchQuery(
             canonical_game_id=game_id(game.qid),
-            text=display_name(game.article),
+            # "Anthem" alone finds songs; the word "game" keeps the search on the game.
+            text=f"{display_name(game.article)} game",
             # Relevance, not date: the newest uploads are minutes old and have no views yet.
             order="relevance",
             published_after=now - timedelta(days=args.days),
