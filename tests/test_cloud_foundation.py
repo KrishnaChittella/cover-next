@@ -782,8 +782,13 @@ def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
         "google-github-actions/setup-gcloud",
         "actions/upload-artifact",
         "actions/download-artifact",
+        # site.yml: the public site on GitHub Pages
+        "actions/setup-node",
+        "actions/configure-pages",
+        "actions/upload-pages-artifact",
+        "actions/deploy-pages",
     }
-    # One version of each action across both workflows.
+    # One version of each action across all workflows.
     versions: dict[str, set[str]] = {}
     for path in sorted(WORKFLOWS.glob("*.yml")):
         for name, sha in re.findall(r"uses:\s*([\w./-]+)@([0-9a-f]{40})", read(path)):
@@ -816,7 +821,9 @@ def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
         assert text.count("GOOGLE_APPLICATION_CREDENTIALS") == (
             1 if path.name == "deploy.yml" else 0
         )
-        assert "secrets." not in text  # nothing here needs a stored secret at all
+        # One stored secret in one place: the YouTube key for the public site's daily build.
+        allowed = ["secrets.METASPIKE_YOUTUBE_API_KEY"] if path.name == "site.yml" else []
+        assert re.findall(r"secrets\.[A-Za-z_]+", text) == allowed, path.name
         assert not re.search(r"\b[0-9A-F]{32}\b", text)
         assert not re.search(
             r"(?i)(api[_-]?key|password|token)\s*[:=]\s*[\"']?[A-Za-z0-9/+]{16,}", text

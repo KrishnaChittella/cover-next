@@ -49,6 +49,6 @@ If the scheduled check fails again: determine whether it failed at **source resp
 
 ## Handoff contract for coding agents
 
-Read the [README product charter](../README.md#product-charter--why-metaspike-exists), `CLAUDE.md`, and the latest *dated* handoff entry. Prefer the actual current `main` and live status over stale historical notes. At each meaningful milestone, record **which real endpoints were called, exact source-native IDs/queries, returned facts, quotas, acquisition standing, tests, PRs, approvals, and what remains blocked**. Do not claim an offline adapter is a running collector or that an unverified recording is trusted evidence.
+Read the [product charter](engineering.md#product-charter--why-metaspike-exists), `CLAUDE.md`, and the latest *dated* handoff entry. Prefer the actual current `main` and live status over stale historical notes. At each meaningful milestone, record **which real endpoints were called, exact source-native IDs/queries, returned facts, quotas, acquisition standing, tests, PRs, approvals, and what remains blocked**. Do not claim an offline adapter is a running collector or that an unverified recording is trusted evidence.
 
 **Non-negotiable:** real experimentation is now the priority; permission to call, permission to store, and permission to publish are separate; preserve low-cost bounded execution, no secret exposure, source isolation, evidence provenance and explicit owner-controlled deployment.
