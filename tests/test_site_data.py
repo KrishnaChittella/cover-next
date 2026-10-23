@@ -67,6 +67,13 @@ def test_youtube_is_shown_video_by_video_and_only_when_it_is_about_the_game() ->
         "v6": ("Opening ceremony highlights", "20", 2_000_000, game_topic),  # no name
         # The uploader chose Gaming for a music video; YouTube's own topic says music.
         "v7": ("GOLU ANTHEM | MUSIC VIDEO", "20", 800_000, music),
+        # An esports team song: "video game culture" is not a game.
+        "v8": (
+            "KONGRES O2H, TOMODAKI & B2F ACE ANTHEM",
+            "20",
+            700_000,
+            ("https://en.wikipedia.org/wiki/Video_game_culture",),
+        ),
     }
     search = SearchFetch(
         fetch_id="f",

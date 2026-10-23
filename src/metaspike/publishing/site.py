@@ -66,8 +66,9 @@ def _about_game(game: GameNames, catalogue: Sequence[GameNames], detail: VideoDe
     """Stricter than the association rule alone, because the site shows the video publicly.
 
     The game's name must be in the title itself (tags alone let a "Baldur's Gate 3" short
-    stand for the 1998 game), and a one-word name ("Anthem") must also carry YouTube's own
-    video-game topic: the Gaming category is set by the uploader, music videos included.
+    stand for the 1998 game), and a one-word name ("Anthem") must also carry one of YouTube's
+    own game-genre topics: the Gaming category is set by the uploader, music videos
+    included, and "video game culture" also covers esports team songs.
     """
     if associate(game, catalogue, (), detail.title, detail).state is not AssociationState.SUPPORTED:
         return False
@@ -75,7 +76,12 @@ def _about_game(game: GameNames, catalogue: Sequence[GameNames], detail: VideoDe
     if not any(title[i : i + len(name)] == name for name in game.names for i in range(len(title))):
         return False
     one_word = all(len(name) == 1 for name in game.names)
-    return not one_word or any(is_game_topic(t) for t in detail.topic_categories)
+    return not one_word or any(_genre_topic(t) for t in detail.topic_categories)
+
+
+def _genre_topic(topic_category: str) -> bool:
+    # "Video_game_culture" covers esports songs and channel talk; a genre names a game.
+    return is_game_topic(topic_category) and not topic_category.casefold().endswith("_culture")
 
 
 def _youtube(
