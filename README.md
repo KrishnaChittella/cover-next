@@ -72,6 +72,12 @@ The code still uses the project's working name, `metaspike`. The full engineerin
 overview (rules, invariants, warehouse, cloud) is in
 [docs/engineering.md](docs/engineering.md).
 
+## License
+
+The code is under the [MIT License](LICENSE). The license covers the code only, not
+the data: Wikimedia page views are CC0, and YouTube, IGDB, Steam and Twitch data stay
+under their providers' own terms. Nothing in this repository grants rights to them.
+
 ## Privacy
 
 No accounts, no cookies, no analytics. See the
