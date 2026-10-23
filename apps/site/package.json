@@ -2,7 +2,7 @@
   "name": "cover-next-site",
   "version": "0.1.0",
   "private": true,
-  "description": "Cover Next: the public static site at krishnachittella.dev/cover-next.",
+  "description": "Cover Next: the public static site at cover-next.krishnachittella.dev.",
   "type": "module",
   "engines": {
     "node": ">=20.9.0"
