@@ -1663,3 +1663,43 @@ def test_the_synthetic_scenario_is_still_deterministic(
     # No stored videos.list request carries a parameter it should not.
     for fetch in supply.store.videos():
         assert 1 <= len(fetch.requested_ids) <= MAX_IDS_PER_VIDEOS_CALL
+
+
+def test_collect_youtube_asks_once_per_game_and_never_prints_the_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = "CANARYyoutube0123456789"
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json=search_body([item("SYNvid00001")]))
+        return httpx.Response(200, json=videos_body([resource("SYNvid00001")]))
+
+    monkeypatch.setattr(
+        cli, "build_client", lambda: httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    store = tmp_path / "supply"
+    arguments = [
+        "collect-youtube",
+        "--state",
+        str(tmp_path / "state.json"),
+        "--store-dir",
+        str(store),
+    ]
+
+    monkeypatch.delenv("METASPIKE_YOUTUBE_API_KEY", raising=False)
+    assert cli.main(arguments) == cli.EXIT_SOURCE_UNAVAILABLE
+    assert not sent
+
+    monkeypatch.setenv("METASPIKE_YOUTUBE_API_KEY", key)
+    assert cli.main([*arguments, "--max-searches", "3"]) == cli.EXIT_OK
+    searches = [r for r in sent if r.url.path.endswith("/search")]
+    assert len(searches) == 3  # the rest are recorded as not sent, never over budget
+    assert all(r.url.params["key"] == key for r in sent)
+    assert all(r.url.params["videoCategoryId"] == "20" for r in searches)
+    assert len(CreatorSupplyStore(store).searches()) == 15
+    captured = capsys.readouterr()
+    assert key not in captured.out + captured.err
+    assert "searches 3 sent, 0 failed, 12 not sent" in captured.out

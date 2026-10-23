@@ -56,3 +56,5 @@ warehouse/.venv/
 warehouse/.user.yml
 *.duckdb
 *.duckdb.wal
+# Playwright CLI output (may contain credentials)
+.playwright-cli/

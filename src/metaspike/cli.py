@@ -42,9 +42,20 @@ from metaspike.catalogue.seed import CatalogueError, bootstrap_catalogue, load_s
 from metaspike.community_sources.reddit import REDDIT_DATA_POLICY
 from metaspike.community_sources.store import CommunityStore
 from metaspike.community_sources.synthetic import build_synthetic_community
+from metaspike.creator_sources.collect import collect_creator_supply
 from metaspike.creator_sources.store import CreatorSupplyStore
 from metaspike.creator_sources.synthetic import build_synthetic_creator_supply
-from metaspike.creator_sources.youtube import YOUTUBE_DATA_POLICY
+from metaspike.creator_sources.youtube import (
+    API_KEY_ENV as YOUTUBE_API_KEY_ENV,
+)
+from metaspike.creator_sources.youtube import (
+    GAMING_CATEGORY_ID,
+    SEARCH_CALLS_PER_DAY,
+    YOUTUBE_DATA_POLICY,
+    SearchQuery,
+    YouTubeAdapter,
+    YouTubeQuota,
+)
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
@@ -148,7 +159,11 @@ from metaspike.sources.catalogue_sources import (
     default_limiter_pool,
     register_catalogue_sources,
 )
-from metaspike.sources.credentials import STEAM_WEB_API_KEY_ENV, Secret, secret_from_env
+from metaspike.sources.credentials import (
+    STEAM_WEB_API_KEY_ENV,
+    Secret,
+    secret_from_env,
+)
 from metaspike.sources.igdb import LOOKUP_TABLES
 from metaspike.sources.limiter import FileQuotaLedger, LimiterPool, RateLimiter
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
@@ -214,6 +229,7 @@ DEFAULT_RECORDED_DIRECTORIES = (
 DEFAULT_CATALOGUE_STATE = Path(".metaspike/catalogue/state.json")
 DEFAULT_SAMPLE_STORE = Path(".metaspike/samples")
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
+DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
 DEFAULT_PROBE_APP = 730
 _PLAYERS_HOST = "api.steampowered.com"
 _PLAYERS_PATH = "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
@@ -582,6 +598,27 @@ def _parser() -> argparse.ArgumentParser:
         help="answer from recorded responses in DIR instead of calling Steam",
     )
     sample.set_defaults(handler=_sample)
+
+    youtube = commands.add_parser(
+        "collect-youtube",
+        help="LIVE: one YouTube search per bootstrap game for recent gaming videos, plus "
+        "their public counts, into the local creator-supply store",
+    )
+    youtube.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    youtube.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    youtube.add_argument("--store-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
+    youtube.add_argument(
+        "--days", type=int, default=7, help="only videos published in the last N days"
+    )
+    youtube.add_argument(
+        "--max-searches",
+        type=int,
+        default=20,
+        help=f"search.list calls this run may spend (daily project limit {SEARCH_CALLS_PER_DAY})",
+    )
+    youtube.set_defaults(handler=_collect_youtube)
 
     status = commands.add_parser(
         "sample-status", help="health of the local sample store; never values or secrets"
@@ -1674,6 +1711,59 @@ def _sample(args: argparse.Namespace) -> int:
     print(f"Store: {args.store_dir}")
     if report.halted_by is not None:
         return _fail(EXIT_SOURCE_UNAVAILABLE, f"run halted: {report.halted_by.value}")
+    return EXIT_OK
+
+
+def _collect_youtube(args: argparse.Namespace) -> int:
+    """One search per in-scope game; counts go to the store, never the key to the screen."""
+    if args.days < 1:
+        return _fail(EXIT_INVALID_CATALOGUE, "--days must be at least 1")
+    try:
+        quota = YouTubeQuota(search_calls=args.max_searches)
+    except ValueError as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"--max-searches: {error}")
+    try:
+        key = secret_from_env(YOUTUBE_API_KEY_ENV)
+    except SourceError as error:
+        return _fail(EXIT_SOURCE_UNAVAILABLE, str(error))
+    records = _recorded(args.recorded)
+    try:
+        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    except IncompleteRecords as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
+    now = _now()
+    scope = bootstrap_scope()
+    queries = [
+        SearchQuery(
+            canonical_game_id=game.canonical_game_id,
+            text=game.name,
+            published_after=now - timedelta(days=args.days),
+            video_category_id=GAMING_CATEGORY_ID,
+        )
+        for game in state.catalogue.games
+        if game.canonical_game_id in scope
+    ]
+    # shortcut: the quota account lives for one run; several runs a day can overspend the
+    # project's 100 search calls (YouTube then refuses, recorded as not sent). Persist a
+    # Pacific-day ledger before this runs on a schedule.
+    with build_client() as client:
+        adapter = YouTubeAdapter(client, quota, run_id=f"youtube-{now:%Y%m%dT%H%M%SZ}", api_key=key)
+        summary = collect_creator_supply(
+            adapter,
+            YOUTUBE_DATA_POLICY,
+            queries,
+            CreatorSupplyStore(args.store_dir),
+            stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+        )
+    print(
+        f"YouTube: {summary.queries} games; searches {summary.search_requests_sent} sent, "
+        f"{summary.search_requests_failed} failed, {summary.search_requests_not_sent} not sent; "
+        f"{summary.video_details_retrieved}/{summary.candidate_videos} video details; "
+        f"spent {summary.search_calls_spent} search calls, {summary.other_units_spent} units"
+    )
+    print(f"Store: {args.store_dir}")
+    if summary.search_requests_sent == 0 or summary.search_requests_failed:
+        return _fail(EXIT_SOURCE_UNAVAILABLE, "some or all searches did not succeed")
     return EXIT_OK
 
 
