@@ -14,7 +14,12 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from metaspike.creator_sources.association import AssociationState, GameNames, associate
+from metaspike.creator_sources.association import (
+    AssociationState,
+    GameNames,
+    associate,
+    is_game_topic,
+)
 from metaspike.creator_sources.store import CreatorSupplyStore
 from metaspike.creator_sources.youtube import (
     RETENTION_DAYS,
@@ -28,6 +33,7 @@ from metaspike.discovery.risers import WINDOW_DAYS
 from metaspike.discovery.store import DiscoveryStore
 from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.source_policy import DeploymentStage
+from metaspike.event_sources.candidates import words
 
 SITE_DATA_VERSION = "2"
 WEEK = 7
@@ -54,6 +60,22 @@ def _wikipedia(store: DiscoveryStore, game: WikidataGame, day: date) -> dict[str
         "last_7_days": _week(series[-WEEK:]),
         "previous_7_days": _week(series[-2 * WEEK : -WEEK]),
     }
+
+
+def _about_game(game: GameNames, catalogue: Sequence[GameNames], detail: VideoDetail) -> bool:
+    """Stricter than the association rule alone, because the site shows the video publicly.
+
+    The game's name must be in the title itself (tags alone let a "Baldur's Gate 3" short
+    stand for the 1998 game), and a one-word name ("Anthem") must also carry YouTube's own
+    video-game topic: the Gaming category is set by the uploader, music videos included.
+    """
+    if associate(game, catalogue, (), detail.title, detail).state is not AssociationState.SUPPORTED:
+        return False
+    title = words(detail.title)
+    if not any(title[i : i + len(name)] == name for name in game.names for i in range(len(title))):
+        return False
+    one_word = all(len(name) == 1 for name in game.names)
+    return not one_word or any(is_game_topic(t) for t in detail.topic_categories)
 
 
 def _youtube(
@@ -84,9 +106,7 @@ def _youtube(
     videos = [
         details[r.video_id]
         for r in latest.results
-        if r.video_id in details
-        and associate(game, catalogue, (), r.title, details[r.video_id]).state
-        is AssociationState.SUPPORTED
+        if r.video_id in details and _about_game(game, catalogue, details[r.video_id])
     ]
     ranked = sorted(
         (v for v in videos if v.view_count is not None),
