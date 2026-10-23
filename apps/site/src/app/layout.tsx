@@ -1,8 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
-import Link from "next/link";
-
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { SiteHeader } from "@/components/SiteHeader";
 
 import "./globals.css";
 
@@ -12,7 +10,7 @@ const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 export const metadata: Metadata = {
   title: { default: "Cover Next", template: "%s · Cover Next" },
   description:
-    "Which game is worth a video right now? Public readings from Wikipedia and YouTube, updated daily.",
+    "Which game is worth a video right now? Daily readings from Wikipedia, YouTube, Steam and Twitch.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
@@ -27,20 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body>
-        <header className="top">
-          <div className="wrap">
-            <Link href="/" className="brand">
-              <span className="brand-name">Cover Next</span>
-              <span className="label">What to make a video about</span>
-            </Link>
-            <nav aria-label="Main">
-              <Link href="/games/">All games</Link>
-              <Link href="/how-it-works/">How it works</Link>
-              <Link href="/privacy/">Privacy</Link>
-              <ThemeToggle />
-            </nav>
-          </div>
-        </header>
+        <SiteHeader />
         <main className="wrap main">{children}</main>
         <footer className="foot">
           <div className="wrap">

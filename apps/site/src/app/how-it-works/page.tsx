@@ -22,6 +22,19 @@ export default function HowItWorks() {
         little history to have a normal level yet is shown as <strong>New</strong>.
       </p>
 
+      <h2 id="opportunity">The opportunity meter</h2>
+      <p>
+        The meter sets audience curiosity against creator supply. Curiosity is a game&apos;s Wikipedia
+        rise against its own normal. Supply is how many Twitch viewers there are per live stream:
+        many viewers for each streamer means creators have not crowded in yet. Each half is ranked
+        among the games we track today, and the score out of 100 is the average of the two ranks.
+        Creator saturation is Low for the top third of that supply ranking, then Medium, then High.
+        A game needs both halves, and at least three live streams, to get a score; otherwise it has
+        none rather than a zero. YouTube is not part of it, because YouTube&apos;s rules do not allow
+        figures worked out from its data. The score says where a game stands today among these
+        games. It does not promise that a video will do well.
+      </p>
+
       <h2>Studio stories</h2>
       <p>
         When three or more rising games share a developer or publisher on Wikidata, they are shown
