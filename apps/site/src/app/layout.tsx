@@ -30,7 +30,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header className="top">
           <div className="wrap">
             <Link href="/" className="brand">
-              Cover<span>Next</span>
+              <span className="brand-name">Cover Next</span>
+              <span className="label">What to make a video about</span>
             </Link>
             <nav aria-label="Main">
               <Link href="/how-it-works/">How it works</Link>

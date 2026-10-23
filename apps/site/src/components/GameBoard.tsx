@@ -32,15 +32,30 @@ function byDesc(a: number | null, b: number | null): number {
   return b - a;
 }
 
+function topViews(game: Game): number | null {
+  return game.youtube.state === "ok" ? (game.youtube.top_videos[0]?.views ?? null) : null;
+}
+
+/** One plain sentence from real numbers: what moved, or what is being watched. */
+function trigger(game: Game, change: number | null): string {
+  if (change !== null && Math.abs(change) >= 0.2) {
+    return `Wikipedia views ${formatChange(change)}`;
+  }
+  const top = game.youtube.state === "ok" ? game.youtube.top_videos[0] : undefined;
+  if (top) return `Most-watched video this week: ${top.title}`;
+  return change !== null ? `Wikipedia views ${formatChange(change)}` : "No reading this week";
+}
+
 export function GameBoard({ games }: { games: Game[] }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<Sort>("change");
   const [filter, setFilter] = useState<Filter>("all");
   const [watchlist, setWatchlist] = useState<string[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
 
   useEffect(() => setWatchlist(readWatchlist()), []);
 
-  function toggle(slug: string) {
+  function toggleWatch(slug: string) {
     const next = watchlist.includes(slug) ? watchlist.filter((s) => s !== slug) : [...watchlist, slug];
     setWatchlist(next);
     try {
@@ -60,7 +75,6 @@ export function GameBoard({ games }: { games: Game[] }) {
         if (filter === "watchlist") return watchlist.includes(game.slug);
         return true;
       });
-    const topViews = (g: Game) => (g.youtube.state === "ok" ? (g.youtube.top_videos[0]?.views ?? null) : null);
     rows.sort((a, b) => {
       if (sort === "name") return a.game.name.localeCompare(b.game.name);
       if (sort === "wikipedia") return byDesc(a.game.wikipedia.last_7_days, b.game.wikipedia.last_7_days);
@@ -70,27 +84,45 @@ export function GameBoard({ games }: { games: Game[] }) {
     return rows;
   }, [games, query, sort, filter, watchlist]);
 
+  const filters: { key: Filter; label: string }[] = [
+    { key: "all", label: "All games" },
+    { key: "rising", label: "Rising curiosity" },
+    { key: "watchlist", label: `Watchlist (${watchlist.length})` },
+  ];
+
   return (
     <>
       <div className="controls">
-        <input
-          type="search"
-          placeholder="Search games"
-          aria-label="Search games"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {(["all", "rising", "watchlist"] as const).map((f) => (
-          <button key={f} type="button" className="chip" aria-pressed={filter === f} onClick={() => setFilter(f)}>
-            {f === "all" ? "All games" : f === "rising" ? "Rising curiosity" : `Watchlist (${watchlist.length})`}
-          </button>
-        ))}
-        <select aria-label="Sort games" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-          <option value="change">Biggest change in curiosity</option>
-          <option value="wikipedia">Most Wikipedia views</option>
-          <option value="youtube">Most-watched YouTube video this week</option>
-          <option value="name">Name</option>
-        </select>
+        <div className="chips" role="group" aria-label="Filter games">
+          {filters.map((f) => (
+            <button key={f.key} type="button" className="chip" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
+              {f.label}
+            </button>
+          ))}
+        </div>
+        <div className="tools">
+          <input
+            type="search"
+            placeholder="Search games"
+            aria-label="Search games"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          <label className="sort">
+            <span className="label">Sort:</span>
+            <select value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
+              <option value="change">Biggest change in curiosity</option>
+              <option value="wikipedia">Most Wikipedia views</option>
+              <option value="youtube">Most-watched YouTube video</option>
+              <option value="name">Name</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div className="list-head">
+        <h2>Games this week</h2>
+        <span className="label">Hover or tap a game for details</span>
       </div>
 
       {shown.length === 0 ? (
@@ -100,59 +132,99 @@ export function GameBoard({ games }: { games: Game[] }) {
             : "No game matches."}
         </p>
       ) : (
-        <div className="grid">
-          {shown.map(({ game, trend, change }) => (
-            <article key={game.slug} className="card" aria-labelledby={`g-${game.slug}`}>
-              <div className="card-head">
-                <h2 id={`g-${game.slug}`}>{game.name}</h2>
-                <button
-                  type="button"
-                  className="star"
-                  aria-pressed={watchlist.includes(game.slug)}
-                  aria-label={`${watchlist.includes(game.slug) ? "Remove" : "Add"} ${game.name} ${watchlist.includes(game.slug) ? "from" : "to"} watchlist`}
-                  onClick={() => toggle(game.slug)}
-                >
-                  {watchlist.includes(game.slug) ? "★" : "☆"}
-                </button>
-              </div>
-              <span className={`badge ${trend}`}>{TREND_LABEL[trend]}</span>
+        <ol className="rows">
+          {shown.map(({ game, trend, change }, index) => {
+            const watched = watchlist.includes(game.slug);
+            const expanded = open === game.slug;
+            const top = topViews(game);
+            return (
+              <li key={game.slug} className={`row ${trend}`} data-open={expanded}>
+                <div className="row-main">
+                  <button
+                    type="button"
+                    className="row-toggle"
+                    aria-expanded={expanded}
+                    aria-controls={`d-${game.slug}`}
+                    onClick={() => setOpen(expanded ? null : game.slug)}
+                  >
+                    <span className="rank mono" aria-hidden="true">
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <span className="row-title">
+                      <span className="name">{game.name}</span>
+                      <span className="trigger">{trigger(game, change)}</span>
+                    </span>
+                  </button>
+                  <div className="row-side">
+                    <span className="metric">
+                      <span className="label">Wikipedia 7d</span>
+                      <span className="mono value">{formatCount(game.wikipedia.last_7_days)}</span>
+                    </span>
+                    <span className={`pill ${trend}`}>{TREND_LABEL[trend]}</span>
+                    <button
+                      type="button"
+                      className="star"
+                      aria-pressed={watched}
+                      aria-label={`${watched ? "Remove" : "Add"} ${game.name} ${watched ? "from" : "to"} watchlist`}
+                      onClick={() => toggleWatch(game.slug)}
+                    >
+                      {watched ? "★" : "☆"}
+                    </button>
+                  </div>
+                </div>
 
-              <div className="signal">
-                <span className="label">Wikipedia views, last 7 days</span>
-                {game.wikipedia.state === "ok" ? (
-                  <>
-                    <span className="figure">{formatCount(game.wikipedia.last_7_days)}</span>
-                    <span className="sub">{formatChange(change)}</span>
-                    <Sparkline days={game.wikipedia.daily} label={`Daily Wikipedia views for ${game.name}`} />
-                  </>
-                ) : (
-                  <span className="missing">Not measured: no Wikipedia article is tracked for this game.</span>
-                )}
-              </div>
+                <div className="strip mono">
+                  <span>
+                    <span className="k">Wikipedia:</span> <span className="v">{formatCount(game.wikipedia.last_7_days)}</span>
+                  </span>
+                  <span>
+                    <span className="k">Change:</span>{" "}
+                    <span className={`v ${trend}`}>
+                      {change === null ? "no comparison" : `${change > 0 ? "+" : ""}${Math.round(change * 100)}%`}
+                    </span>
+                  </span>
+                  <span>
+                    <span className="k">Top video:</span> <span className="v">{top === null ? "not measured" : `${formatCount(top)} views`}</span>
+                  </span>
+                  <span>
+                    <span className="k">Steam / Twitch:</span> <span className="v muted">pending</span>
+                  </span>
+                </div>
 
-              <div className="signal">
-                <span className="label">Top YouTube videos this week</span>
-                {game.youtube.state === "ok" && game.youtube.top_videos.length > 0 ? (
-                  <ol className="videos">
-                    {game.youtube.top_videos.map((v) => (
-                      <li key={v.id}>
-                        <a href={`https://www.youtube.com/watch?v=${v.id}`} rel="noopener">
-                          {v.title}
-                        </a>
-                        <span className="mono"> {formatCount(v.views)} views</span>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <span className="missing">Not measured yet.</span>
-                )}
-                <span className="sub">From YouTube</span>
-              </div>
-
-              <p className="pending">Steam players and Twitch viewers: waiting for permission to show them.</p>
-            </article>
-          ))}
-        </div>
+                <div className="details" id={`d-${game.slug}`}>
+                  <div className="details-inner">
+                    <section>
+                      <span className="label">Daily Wikipedia views</span>
+                      {game.wikipedia.state === "ok" ? (
+                        <Sparkline days={game.wikipedia.daily} label={`Daily Wikipedia views for ${game.name}`} />
+                      ) : (
+                        <p className="missing">Not measured: no Wikipedia article is tracked for this game.</p>
+                      )}
+                    </section>
+                    <section>
+                      <span className="label">Top YouTube videos this week</span>
+                      {game.youtube.state === "ok" && game.youtube.top_videos.length > 0 ? (
+                        <ol className="videos">
+                          {game.youtube.top_videos.map((v) => (
+                            <li key={v.id}>
+                              <a href={`https://www.youtube.com/watch?v=${v.id}`} rel="noopener">
+                                {v.title}
+                              </a>
+                              <span className="mono"> {formatCount(v.views)} views</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="missing">Not measured yet.</p>
+                      )}
+                      <span className="sub">From YouTube</span>
+                    </section>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </>
   );
