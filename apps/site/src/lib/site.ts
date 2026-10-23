@@ -1,4 +1,4 @@
-// The shape `metaspike site-data` writes (version 2). Null always means "not measured".
+// The shape `metaspike site-data` writes (version 3). Null always means "not measured".
 export type Day = { day: string; views: number | null };
 
 export type Wikipedia =
@@ -18,6 +18,15 @@ export type YouTube = { state: "missing" } | { state: "ok"; retrieved_at: string
 
 export type Rise = { recent: number; baseline: number | null; ratio: number | null; new: boolean };
 
+// Several games of one studio rising together; `members` are game slugs, strongest first.
+export type Story = {
+  slug: string;
+  name: string;
+  role: "developer" | "publisher";
+  article: string | null;
+  members: string[];
+};
+
 export type Game = {
   slug: string;
   name: string;
@@ -25,6 +34,7 @@ export type Game = {
   igdb: string | null;
   steam_app: string | null;
   pinned: boolean;
+  story: { slug: string; name: string; lead: boolean } | null;
   rise: Rise | null;
   wikipedia: Wikipedia;
   youtube: YouTube;
@@ -37,8 +47,14 @@ export type SiteData = {
   generated_at: string;
   day: string;
   sources: { wikipedia: SourceState; youtube: SourceState; steam: SourceState; twitch: SourceState };
+  stories: Story[];
   games: Game[];
 };
+
+/** A story member other than its lead folds into the story card; pinned games never fold. */
+export function folded(game: Game): boolean {
+  return game.story !== null && !game.story.lead && !game.pinned;
+}
 
 export type Trend = "rising" | "steady" | "cooling" | "new" | "unknown";
 

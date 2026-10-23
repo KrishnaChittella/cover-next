@@ -62,6 +62,8 @@ from metaspike.discovery.catalogue import select as select_games
 from metaspike.discovery.dump import count_views, stream_lines
 from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
 from metaspike.discovery.store import DiscoveryStore
+from metaspike.discovery.studios import fetch_studios
+from metaspike.discovery.studios import group as group_stories
 from metaspike.discovery.wikidata import WIKIDATA_POLICY, fetch_games
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
@@ -1914,6 +1916,12 @@ def _discovered(
     return store, day, select_games(report, games)
 
 
+def _stories(root: Path, day: date) -> list[dict[str, Any]]:
+    """The day's studio stories; none when discovery ran before stories existed."""
+    path = root / f"stories-{day.isoformat()}.json"
+    return json.loads(path.read_text("utf-8")) if path.is_file() else []
+
+
 def _site_data(args: argparse.Namespace) -> int:
     found = _discovered(args.discovery_dir)
     if isinstance(found, str):
@@ -1923,7 +1931,7 @@ def _site_data(args: argparse.Namespace) -> int:
     youtube = (
         CreatorSupplyStore(args.creator_supply_dir) if args.creator_supply_dir.is_dir() else None
     )
-    data = build_site_data(selection, store, day, youtube, now)
+    data = build_site_data(selection, store, day, youtube, now, _stories(args.discovery_dir, day))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     args.out.write_text(text + "\n", encoding="utf-8")
@@ -2030,6 +2038,15 @@ def _discover_games(args: argparse.Namespace) -> int:
         )
         print(f"{article}: {detail}")
     print(f"\nReport: {out} ({len(report):,} games; {failed} history requests failed)")
+
+    selection = select_games(report, games)
+    with build_client() as client:
+        stories = group_stories(selection, fetch_studios(client, [g.qid for g, _, _ in selection]))
+    stories_out = store.root / f"stories-{day.isoformat()}.json"
+    stories_out.write_text(json.dumps(stories, indent=1, ensure_ascii=False), encoding="utf-8")
+    for story in stories:
+        print(f"Story: {story['name']} ({len(story['members'])} games)")
+    print(f"Stories: {stories_out} ({len(stories)})")
     return EXIT_OK
 
 

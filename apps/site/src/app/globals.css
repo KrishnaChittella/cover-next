@@ -1208,3 +1208,30 @@ select:focus-visible {
   flex-wrap: wrap;
   gap: 8px 16px;
 }
+
+.stories {
+  margin-bottom: 28px;
+}
+
+.story + .story {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.story-title {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.story summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.story details .mini {
+  margin-top: 10px;
+}

@@ -2,15 +2,16 @@ import Link from "next/link";
 
 import { LeftRail, Spotlight } from "@/components/Rails";
 import { RowList } from "@/components/RowList";
+import { StoryList } from "@/components/StoryList";
 import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { loadSiteData } from "@/lib/load";
-import { byRise, formatUpdated, trendOf } from "@/lib/site";
+import { byRise, folded, formatUpdated, trendOf } from "@/lib/site";
 
 const CONTENDERS = 15;
 
 export default function Home() {
   const data = loadSiteData();
-  const ranked = [...data.games].filter((g) => g.rise !== null).sort(byRise);
+  const ranked = data.games.filter((g) => g.rise !== null && !folded(g)).sort(byRise);
   const top = ranked.slice(0, CONTENDERS);
   const rising = data.games.filter((g) => trendOf(g) === "rising").length;
   return (
@@ -35,6 +36,7 @@ export default function Home() {
           Early preview. These are readings, not advice. Steam and Twitch figures will be added
           once each provider confirms we may show them.
         </p>
+        <StoryList stories={data.stories} games={data.games} />
         <div className="list-head">
           <h2>Top {CONTENDERS} gaining now</h2>
           <span className="label">Hover or tap for details</span>

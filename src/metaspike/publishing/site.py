@@ -35,7 +35,7 @@ from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.event_sources.candidates import words
 
-SITE_DATA_VERSION = "2"
+SITE_DATA_VERSION = "3"
 WEEK = 7
 TOP_VIDEOS = 3
 
@@ -140,7 +140,10 @@ def build_site_data(
     day: date,
     youtube: CreatorSupplyStore | None,
     now: datetime,
+    stories: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
+    """`stories` are `discovery.studios.group` output: each game names its story, if any."""
+    story_of = {m: s for s in stories for m in s["members"]}
     if not YOUTUBE_DATA_POLICY.cleared_for(DeploymentStage.PUBLIC_LAUNCH):
         youtube = None
     searches = youtube.searches(now) if youtube is not None else ()
@@ -160,6 +163,7 @@ def build_site_data(
                 "igdb": game.igdb[0] if game.igdb else None,
                 "steam_app": game.steam[0] if game.steam else None,
                 "pinned": pinned,
+                "story": _story_ref(story_of.get(slug_of(game)), slug_of(game)),
                 "rise": None
                 if riser is None
                 else {
@@ -187,5 +191,15 @@ def build_site_data(
             "steam": {"state": "pending"},
             "twitch": {"state": "pending"},
         },
+        "stories": [
+            {k: s[k] for k in ("slug", "name", "role", "article", "members")} for s in stories
+        ],
         "games": games,
     }
+
+
+def _story_ref(story: Mapping[str, Any] | None, slug: str) -> dict[str, Any] | None:
+    # The first member is the story's strongest riser and stays in the lists.
+    if story is None:
+        return None
+    return {"slug": story["slug"], "name": story["name"], "lead": story["members"][0] == slug}
