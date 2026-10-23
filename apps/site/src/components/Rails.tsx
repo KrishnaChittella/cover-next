@@ -16,7 +16,7 @@ export function LeftRail({ data }: { data: SiteData }) {
   const sources = [
     { name: "Wikipedia", state: s.wikipedia.state, note: s.wikipedia.games ? `${formatCount(s.wikipedia.games)} games read` : "" },
     { name: "YouTube", state: s.youtube.state, note: s.youtube.games ? `${s.youtube.games} games searched` : "" },
-    { name: "Steam", state: s.steam.state, note: "" },
+    { name: "Steam", state: s.steam.state, note: s.steam.games ? `${s.steam.games} games read` : "" },
     { name: "Twitch", state: s.twitch.state, note: "" },
   ];
   return (

@@ -4,8 +4,9 @@ The games are the discovered risers plus the pinned set (`discovery.catalogue`).
 its Wikipedia views for the last 31 days and how far its recent days rose above its own
 normal level (Wikimedia, CC0) and YouTube's most-watched recent videos, one by one (shown
 with YouTube attribution, refreshed daily so nothing shown is older than YouTube's 30-day
-limit, and only while YouTube's policy clears public launch). Steam and Twitch
-are not in this file: neither provider has said its figures may be shown publicly.
+limit, and only while YouTube's policy clears public launch), and Steam's concurrent
+players, one reading a day (`discovery.steam`, an owner decision recorded there). Twitch
+is not in this file: Twitch has not said its figures may be shown publicly.
 
 Missing is never zero: a game with no reading carries a `state` and null figures.
 """
@@ -30,12 +31,15 @@ from metaspike.creator_sources.youtube import (
 )
 from metaspike.discovery.catalogue import display_name, game_id, slug_of
 from metaspike.discovery.risers import WINDOW_DAYS
+from metaspike.discovery.steam import ATTRIBUTION as STEAM_ATTRIBUTION
+from metaspike.discovery.steam import SteamHistory
+from metaspike.discovery.steam import view as steam_view
 from metaspike.discovery.store import DiscoveryStore
 from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.event_sources.candidates import words
 
-SITE_DATA_VERSION = "3"
+SITE_DATA_VERSION = "4"
 WEEK = 7
 TOP_VIDEOS = 3
 
@@ -141,6 +145,7 @@ def build_site_data(
     youtube: CreatorSupplyStore | None,
     now: datetime,
     stories: Sequence[Mapping[str, Any]] = (),
+    steam: SteamHistory | None = None,
 ) -> dict[str, Any]:
     """`stories` are `discovery.studios.group` output: each game names its story, if any."""
     story_of = {m: s for s in stories for m in s["members"]}
@@ -174,6 +179,7 @@ def build_site_data(
                 },
                 "wikipedia": _wikipedia(store, game, day),
                 "youtube": _youtube(searches, details, names, catalogue, now),
+                "steam": _steam(steam, game, now.date()),
             }
         )
     with_videos = sum(g["youtube"]["state"] == "ok" for g in games)
@@ -188,7 +194,11 @@ def build_site_data(
                 "games": len(store.day(day) or {}),
             },
             "youtube": {"state": "ok" if with_videos else "missing", "games": with_videos},
-            "steam": {"state": "pending"},
+            "steam": {
+                "state": "ok" if any(g["steam"]["state"] == "ok" for g in games) else "missing",
+                "games": sum(g["steam"]["state"] == "ok" for g in games),
+                "attribution": STEAM_ATTRIBUTION,
+            },
             "twitch": {"state": "pending"},
         },
         "stories": [
@@ -196,6 +206,16 @@ def build_site_data(
         ],
         "games": games,
     }
+
+
+def _steam(history: SteamHistory | None, game: WikidataGame, day: date) -> dict[str, Any]:
+    # Not on Steam is a different state from not read: a console game has no count at all.
+    if not game.steam:
+        return {"state": "inapplicable"}
+    app = game.steam[0]
+    if history is None:
+        return {"state": "missing", "app": app, "daily": []}
+    return steam_view(history.get(app), day, app)
 
 
 def _story_ref(story: Mapping[str, Any] | None, slug: str) -> dict[str, Any] | None:

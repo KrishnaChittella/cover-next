@@ -787,6 +787,7 @@ def test_every_external_action_is_pinned_to_a_full_commit_sha() -> None:
         "actions/configure-pages",
         "actions/upload-pages-artifact",
         "actions/deploy-pages",
+        "actions/cache",
     }
     # One version of each action across all workflows.
     versions: dict[str, set[str]] = {}
@@ -821,8 +822,9 @@ def test_no_workflow_holds_a_key_or_a_hard_coded_credential() -> None:
         assert text.count("GOOGLE_APPLICATION_CREDENTIALS") == (
             1 if path.name == "deploy.yml" else 0
         )
-        # One stored secret in one place: the YouTube key for the public site's daily build.
-        allowed = ["secrets.METASPIKE_YOUTUBE_API_KEY"] if path.name == "site.yml" else []
+        # Two stored secrets, in the public site's daily build only: YouTube and Steam keys.
+        site = ["secrets.METASPIKE_YOUTUBE_API_KEY", "secrets.METASPIKE_STEAM_WEB_API_KEY"]
+        allowed = site if path.name == "site.yml" else []
         assert re.findall(r"secrets\.[A-Za-z_]+", text) == allowed, path.name
         assert not re.search(r"\b[0-9A-F]{32}\b", text)
         assert not re.search(

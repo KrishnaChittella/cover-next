@@ -61,6 +61,8 @@ from metaspike.discovery.catalogue import display_name, game_id
 from metaspike.discovery.catalogue import select as select_games
 from metaspike.discovery.dump import count_views, stream_lines
 from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
+from metaspike.discovery.steam import SteamHistory
+from metaspike.discovery.steam import collect as collect_steam
 from metaspike.discovery.store import DiscoveryStore
 from metaspike.discovery.studios import fetch_studios
 from metaspike.discovery.studios import group as group_stories
@@ -246,6 +248,7 @@ DEFAULT_CATALOGUE_STATE = Path(".metaspike/catalogue/state.json")
 DEFAULT_SAMPLE_STORE = Path(".metaspike/samples")
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
+DEFAULT_STEAM_DIR = Path(".metaspike/steam")
 DEFAULT_TWITCH_DIR = Path(".metaspike/twitch")
 DEFAULT_DISCOVERY_DIR = Path(".metaspike/discovery")
 # Daily YouTube searches spent on the top risers; pinned games are always searched too.
@@ -619,6 +622,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     sample.set_defaults(handler=_sample)
 
+    steam = commands.add_parser(
+        "collect-steam",
+        help="LIVE: today's Steam concurrent players for every selected game on Steam, "
+        "one reading a day, into the local history the public site reads",
+    )
+    steam.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
+    steam.add_argument("--store-dir", type=Path, default=DEFAULT_STEAM_DIR)
+    steam.set_defaults(handler=_collect_steam)
+
     youtube = commands.add_parser(
         "collect-youtube",
         help="LIVE: one YouTube search per top riser and pinned game for this week's most "
@@ -661,6 +673,7 @@ def _parser() -> argparse.ArgumentParser:
         "local YouTube store; offline",
     )
     site.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
+    site.add_argument("--steam-dir", type=Path, default=DEFAULT_STEAM_DIR)
     site.add_argument("--creator-supply-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
     site.add_argument("--out", type=Path, required=True)
     site.set_defaults(handler=_site_data)
@@ -1782,6 +1795,23 @@ def _sample(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _collect_steam(args: argparse.Namespace) -> int:
+    """One player count per selected game on Steam, kept under today's UTC date."""
+    found = _discovered(args.discovery_dir)
+    if isinstance(found, str):
+        return _fail(EXIT_INVALID_CATALOGUE, found)
+    _, _, selection = found
+    apps = list(dict.fromkeys(g.steam[0] for g, _, _ in selection if g.steam))
+    with build_client() as client:
+        try:
+            adapter = build_steam_players(client, default_limiter_pool())
+        except SourceError as error:
+            return _fail(EXIT_SOURCE_UNAVAILABLE, str(error))
+        read, failed = collect_steam(adapter, apps, SteamHistory(args.store_dir), _now().date())
+    print(f"Steam: {len(apps)} apps; {read} read, {failed} failed -> {args.store_dir}")
+    return EXIT_OK if failed == 0 else _fail(EXIT_SOURCE_UNAVAILABLE, "some readings failed")
+
+
 def _collect_youtube(args: argparse.Namespace) -> int:
     """One search per in-scope game; counts go to the store, never the key to the screen."""
     if args.days < 1:
@@ -1931,14 +1961,17 @@ def _site_data(args: argparse.Namespace) -> int:
     youtube = (
         CreatorSupplyStore(args.creator_supply_dir) if args.creator_supply_dir.is_dir() else None
     )
-    data = build_site_data(selection, store, day, youtube, now, _stories(args.discovery_dir, day))
+    steam = SteamHistory(args.steam_dir) if args.steam_dir.is_dir() else None
+    stories = _stories(args.discovery_dir, day)
+    data = build_site_data(selection, store, day, youtube, now, stories, steam)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
     args.out.write_text(text + "\n", encoding="utf-8")
-    held = {k: sum(g[k]["state"] == "ok" for g in data["games"]) for k in ("wikipedia", "youtube")}
+    sources = ("wikipedia", "youtube", "steam")
+    held = {k: sum(g[k]["state"] == "ok" for g in data["games"]) for k in sources}
     print(
         f"Site data for {day}: {len(selection)} games; Wikipedia {held['wikipedia']}, "
-        f"YouTube {held['youtube']} -> {args.out}"
+        f"YouTube {held['youtube']}, Steam {held['steam']} -> {args.out}"
     )
     return EXIT_OK
 

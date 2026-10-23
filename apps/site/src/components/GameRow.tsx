@@ -5,7 +5,7 @@ import { useState } from "react";
 
 import { Sparkline } from "@/components/Sparkline";
 import { Star } from "@/components/Star";
-import { TREND_LABEL, formatCount, formatRatio, topViews, trendOf, trigger, type Game } from "@/lib/site";
+import { TREND_LABEL, formatCount, formatRatio, steamNow, topViews, trendOf, trigger, type Game } from "@/lib/site";
 
 /** One game: rank, name, why it is moving, its rise, and a drawer on hover, focus or tap. */
 export function GameRow({ game, rank }: { game: Game; rank: number }) {
@@ -55,7 +55,7 @@ export function GameRow({ game, rank }: { game: Game; rank: number }) {
           <span className="k">Top video:</span> <span className="v">{top === null ? "not yet" : `${formatCount(top)} views`}</span>
         </span>
         <span>
-          <span className="k">Steam / Twitch:</span> <span className="v muted">pending</span>
+          <span className="k">Steam:</span> <span className="v">{steamNow(game)}</span>
         </span>
       </div>
 

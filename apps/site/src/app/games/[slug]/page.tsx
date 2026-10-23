@@ -97,6 +97,34 @@ export default async function GamePage({ params }: Props) {
         <p className="sub">From YouTube.</p>
       </section>
 
+      {game.steam.state !== "inapplicable" && (
+        <section className="panel">
+          <h2 className="panel-title">Players on Steam, one reading a day</h2>
+          {game.steam.state === "ok" ? (
+            <>
+              <p className="sub">
+                <span className="mono">{formatCount(game.steam.players_now)}</span> playing at today&apos;s
+                reading
+                {game.steam.normal !== null
+                  ? `; lately ${formatRatio(game.steam.ratio)} its normal of ${formatCount(game.steam.normal)}.`
+                  : ". A normal level needs two weeks of readings."}
+              </p>
+              <Chart
+                days={game.steam.daily.map((d) => ({ day: d.day, views: d.players }))}
+                baseline={game.steam.normal}
+                label={`Daily Steam players for ${game.name}`}
+              />
+            </>
+          ) : (
+            <p className="missing">Not read today.</p>
+          )}
+          <p className="sub">
+            {data.sources.steam.attribution}{" "}
+            <a href={`https://store.steampowered.com/app/${game.steam.app}/`}>Steam store page</a>
+          </p>
+        </section>
+      )}
+
       <section className="panel">
         <h2 className="panel-title">Sources</h2>
         <ul className="links">
@@ -119,7 +147,7 @@ export default async function GamePage({ params }: Props) {
             </li>
           )}
         </ul>
-        <p className="sub">Steam players and Twitch viewers: waiting for permission to show them.</p>
+        <p className="sub">Twitch viewers: waiting for permission to show them.</p>
       </section>
     </div>
   );
