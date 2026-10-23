@@ -24,7 +24,9 @@ export default function Home() {
               <span className="tag">Daily readings</span>
               <span className="label">Updated {formatUpdated(data.generated_at)}</span>
             </div>
-            <h1>Which game is worth a video right now?</h1>
+            <h1>
+              Which game is worth a video <span className="hot">right now?</span>
+            </h1>
             <p>
               Every day Cover Next reads Wikipedia views for all {"30,000"}-odd video games with an
               English article and finds the ones people are suddenly curious about, compared with
