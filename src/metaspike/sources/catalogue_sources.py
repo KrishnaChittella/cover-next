@@ -30,6 +30,7 @@ from metaspike.sources.igdb_auth import (
 from metaspike.sources.limiter import FileQuotaLedger, LimiterPool
 from metaspike.sources.registry import SourceRegistry
 from metaspike.sources.steam_catalogue import STEAM_CATALOGUE_POLICY, SteamCatalogueAdapter
+from metaspike.sources.twitch import TWITCH_HELIX_POLICY, TwitchHelixAdapter
 
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 # The catalogue-metadata sources and the policy each runs under. A caller that uses
@@ -69,6 +70,23 @@ def build_igdb(
     )
     http = LimitedHttpClient(client, pool.for_policy(IGDB_POLICY), CATALOGUE_RETRY)
     return IgdbCatalogueAdapter(http, auth)
+
+
+def build_twitch(
+    client: httpx.Client,
+    pool: LimiterPool,
+    environ: Mapping[str, str] | None = None,
+    token_cache: Path = DEFAULT_TOKEN_CACHE,
+) -> TwitchHelixAdapter:
+    """Helix with the IGDB application's credentials: one Twitch application, one token."""
+    auth = IgdbAuth(
+        LimitedHttpClient(client, pool.for_operations(TWITCH_OAUTH_OPERATIONS), CATALOGUE_RETRY),
+        secret_from_env(IGDB_CLIENT_ID_ENV, environ),
+        secret_from_env(IGDB_CLIENT_SECRET_ENV, environ),
+        TokenCache(token_cache),
+    )
+    http = LimitedHttpClient(client, pool.for_policy(TWITCH_HELIX_POLICY), CATALOGUE_RETRY)
+    return TwitchHelixAdapter(http, auth)
 
 
 def build_steam(

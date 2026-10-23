@@ -156,6 +156,7 @@ from metaspike.sources.catalogue_sources import (
     CATALOGUE_SOURCE_POLICIES,
     build_igdb,
     build_steam,
+    build_twitch,
     default_limiter_pool,
     register_catalogue_sources,
 )
@@ -164,7 +165,7 @@ from metaspike.sources.credentials import (
     Secret,
     secret_from_env,
 )
-from metaspike.sources.igdb import LOOKUP_TABLES
+from metaspike.sources.igdb import IGDB_POLICY, LOOKUP_TABLES
 from metaspike.sources.limiter import FileQuotaLedger, LimiterPool, RateLimiter
 from metaspike.sources.registry import SourcePolicyError, SourceRegistry, default_registry
 from metaspike.sources.replay import replay_client
@@ -183,6 +184,7 @@ from metaspike.sources.steam_players import (
 from metaspike.sources.steam_players import (
     SOURCE_ID as STEAM_PLAYERS_SOURCE,
 )
+from metaspike.sources.twitch import CACHE_HOURS, TWITCH_HELIX_POLICY, TwitchLive, TwitchLiveStore
 from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, build_client
 from metaspike.sources.wikimedia_warehouse import (
     EXPORT_MAX_ROWS,
@@ -230,6 +232,7 @@ DEFAULT_CATALOGUE_STATE = Path(".metaspike/catalogue/state.json")
 DEFAULT_SAMPLE_STORE = Path(".metaspike/samples")
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
+DEFAULT_TWITCH_DIR = Path(".metaspike/twitch")
 DEFAULT_PROBE_APP = 730
 _PLAYERS_HOST = "api.steampowered.com"
 _PLAYERS_PATH = "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
@@ -619,6 +622,18 @@ def _parser() -> argparse.ArgumentParser:
         help=f"search.list calls this run may spend (daily project limit {SEARCH_CALLS_PER_DAY})",
     )
     youtube.set_defaults(handler=_collect_youtube)
+
+    twitch = commands.add_parser(
+        "collect-twitch",
+        help="LIVE: live viewers and streams per bootstrap game on Twitch, kept 24 hours "
+        "in the local store",
+    )
+    twitch.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    twitch.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    twitch.add_argument("--store-dir", type=Path, default=DEFAULT_TWITCH_DIR)
+    twitch.set_defaults(handler=_collect_twitch)
 
     status = commands.add_parser(
         "sample-status", help="health of the local sample store; never values or secrets"
@@ -1764,6 +1779,69 @@ def _collect_youtube(args: argparse.Namespace) -> int:
     print(f"Store: {args.store_dir}")
     if summary.search_requests_sent == 0 or summary.search_requests_failed:
         return _fail(EXIT_SOURCE_UNAVAILABLE, "some or all searches did not succeed")
+    return EXIT_OK
+
+
+def _collect_twitch(args: argparse.Namespace) -> int:
+    """Twitch category by IGDB id, then live sums. Kept 24 hours, never longer."""
+    refusal = TWITCH_HELIX_POLICY.registration_refusal(
+        SourcePurpose.DEMAND_SIGNALS, DeploymentStage.PRIVATE_DEVELOPMENT
+    )
+    if refusal is not None:
+        return _fail(EXIT_SOURCE_POLICY, f"{TWITCH_HELIX_POLICY.source}: {refusal}")
+    records = _recorded(args.recorded)
+    try:
+        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    except IncompleteRecords as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
+    scope = bootstrap_scope()
+    # Identity comes from the catalogue's IGDB bindings; Twitch echoes the IGDB id back.
+    igdb: dict[str, list[str]] = {}
+    for binding in state.mapping.bindings:
+        if (
+            binding.key.source == IGDB_POLICY.source
+            and binding.canonical_game_id in scope
+            and binding.active_at(None)
+        ):
+            igdb.setdefault(binding.canonical_game_id, []).append(binding.key.source_id)
+    games = [g for g in state.catalogue.games if g.canonical_game_id in scope]
+    now = _now()
+    with build_client() as client:
+        try:
+            adapter = build_twitch(client, default_limiter_pool())
+            categories = adapter.categories(i for ids in igdb.values() for i in ids)
+        except SourceError as error:
+            return _fail(EXIT_SOURCE_UNAVAILABLE, error.message)
+        readings: list[TwitchLive] = []
+        for game in games:
+            found = sorted(
+                {categories[i] for i in igdb.get(game.canonical_game_id, []) if i in categories}
+            )
+            if len(found) == 1:
+                readings.append(adapter.live(game.canonical_game_id, found[0]))
+            else:
+                # None found, or several categories: not guessed, recorded as unmapped.
+                readings.append(
+                    TwitchLive(
+                        canonical_game_id=game.canonical_game_id,
+                        twitch_game_id=None,
+                        retrieved_at=now,
+                    )
+                )
+    path = TwitchLiveStore(args.store_dir).write(readings, now)
+    names = {g.canonical_game_id: g.name for g in games}
+    for reading in readings:
+        if reading.twitch_game_id is None:
+            detail = "no single Twitch category"
+        elif reading.error_code is not None:
+            detail = f"failed ({reading.error_code.value})"
+        else:
+            bound = "" if reading.complete else "at least "
+            detail = f"{bound}{reading.viewers:,} viewers, {bound}{reading.streams:,} streams"
+        print(f"  {names[reading.canonical_game_id]:<28} {detail}")
+    print(f"Store: {path} (deleted after {CACHE_HOURS} hours)")
+    if any(r.error_code is not None for r in readings):
+        return _fail(EXIT_SOURCE_UNAVAILABLE, "some readings failed")
     return EXIT_OK
 
 
