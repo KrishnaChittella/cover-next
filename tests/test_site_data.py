@@ -50,19 +50,23 @@ def test_youtube_is_shown_video_by_video_and_only_when_it_is_about_the_game() ->
         SearchResult,
         VideoDetail,
     )
-    from metaspike.publishing.site import _youtube
+    from metaspike.publishing.site import _about_game, _youtube
 
     game = GameNames.of("780b4850-6248-4a81-8fe0-7f0762376cfc", "Anthem")
     other = GameNames.of("9abc9607-45ea-4441-9da2-3eb00af9d4a3", "Dragon Age")
     catalogue = [game, other]
     moment = NOW - timedelta(hours=1)
+    game_topic = ("https://en.wikipedia.org/wiki/Action_game",)
+    music = ("https://en.wikipedia.org/wiki/Music",)
     videos = {
-        "v1": ("Anthem gameplay, the last mission", "20", 10),
-        "v2": ("Anthem in 2026: was it really that bad?", "20", 500),
-        "v3": ("Anthem boss fight", "20", None),  # no view count: not ranked
-        "v4": ("Anthem vs Dragon Age, which BioWare game aged better", "20", 9_000),
-        "v5": ("VCT Champions opening ceremony anthem", "10", 1_500_000),  # music
-        "v6": ("Opening ceremony highlights", "20", 2_000_000),  # never names the game
+        "v1": ("Anthem gameplay, the last mission", "20", 10, game_topic),
+        "v2": ("Anthem in 2026: was it really that bad?", "20", 500, game_topic),
+        "v3": ("Anthem boss fight", "20", None, game_topic),  # no view count: not ranked
+        "v4": ("Anthem vs Dragon Age, which BioWare game aged better", "20", 9_000, game_topic),
+        "v5": ("VCT Champions opening ceremony anthem", "10", 1_500_000, music),
+        "v6": ("Opening ceremony highlights", "20", 2_000_000, game_topic),  # no name
+        # The uploader chose Gaming for a music video; YouTube's own topic says music.
+        "v7": ("GOLU ANTHEM | MUSIC VIDEO", "20", 800_000, music),
     }
     search = SearchFetch(
         fetch_id="f",
@@ -73,19 +77,37 @@ def test_youtube_is_shown_video_by_video_and_only_when_it_is_about_the_game() ->
         status=FetchStatus.OK,
         results=tuple(
             SearchResult(video_id=i, channel_id="c", title=t, published_at=moment)
-            for i, (t, _, _) in videos.items()
+            for i, (t, _, _, _) in videos.items()
         ),
     )
     details = {
         i: VideoDetail(
-            video_id=i, channel_id="c", title=t, published_at=moment, category_id=c, view_count=v
+            video_id=i,
+            channel_id="c",
+            title=t,
+            published_at=moment,
+            category_id=c,
+            view_count=v,
+            topic_categories=topics,
         )
-        for i, (t, c, v) in videos.items()
+        for i, (t, c, v, topics) in videos.items()
     }
     shown = _youtube([search], details, game, catalogue, NOW)
     assert set(shown) == {"state", "retrieved_at", "top_videos"}  # no median, total or count
     # Music, unrelated titles and videos naming another tracked game are left out.
     assert [v["id"] for v in shown["top_videos"]] == ["v2", "v1"]
+    # A franchise name in the tags only is not enough: the title must name the game.
+    gate = GameNames.of("780b4850-6248-4a81-8fe0-7f0762376cfc", "Baldur's Gate")
+    short = VideoDetail(
+        video_id="s1",
+        channel_id="c",
+        title="How to find the rarest spell in #baldursgate3",
+        published_at=moment,
+        category_id="20",
+        tags=("baldur's gate",),
+        view_count=50_000,
+    )
+    assert not _about_game(gate, [gate], short)
     # Older than YouTube's 30 days: not shown at all.
     later = NOW + timedelta(days=31)
     assert _youtube([search], details, game, catalogue, later) == {"state": "missing"}
