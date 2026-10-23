@@ -20,7 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
@@ -28,6 +28,10 @@ jobs:
           enable-cache: true
       - name: Python
         run: uv python install && uv sync --locked
+      - name: Discover rising games (Wikidata + the day's Wikimedia pageview dump)
+        # shortcut: the runner starts empty, so each run re-reads ~2,000 games' history
+        # (about 12 minutes). Cache the discovery store between runs if this gets slow.
+        run: uv run metaspike discover-games
       - name: YouTube (skipped when the key is not set)
         env:
           METASPIKE_YOUTUBE_API_KEY: ${{ secrets.METASPIKE_YOUTUBE_API_KEY }}

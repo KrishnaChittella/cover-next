@@ -126,3 +126,32 @@ def test_too_few_views_or_days_are_not_a_story_and_a_new_game_has_no_ratio() -> 
     assert [r.article for r in rank([new, old])] == ["Old", "Wardogs"]
     with pytest.raises(ValueError):
         assess("Q5", "Short", [1, 2, 3])
+
+
+def test_the_selection_is_top_risers_then_new_games_then_pinned_once_each() -> None:
+    from metaspike.discovery.catalogue import display_name, game_id, select
+
+    games = [
+        WikidataGame(qid="Q1", article="Anthem_(video_game)", igdb=("anthem",)),
+        WikidataGame(qid="Q2", article="Aion_2"),
+        WikidataGame(qid="Q3", article="Wardogs", igdb=("wardogs",)),
+        WikidataGame(qid="Q4", article="Quiet"),
+    ]
+    report: list[dict[str, object]] = [
+        {"qid": "Q1", "ratio": 44.9, "new": False},
+        {"qid": "Q3", "ratio": 0.7, "new": False},
+        {"qid": "Q2", "ratio": None, "new": True},
+    ]
+    chosen = select(report, games, top=1)
+    assert [(g.article, pinned) for g, _, pinned in chosen] == [
+        ("Anthem_(video_game)", False),
+        ("Aion_2", False),
+        ("Wardogs", True),  # pinned, below the top-1 cut, still shown once with its row
+    ]
+    assert chosen[2][1] == report[1]
+    assert display_name("Anthem_(video_game)") == "Anthem"
+    assert display_name("Rust_(video_game)") == "Rust"
+    assert display_name("Exodus_(2027_video_game)") == "Exodus"
+    assert display_name("Shrek_2_(video_game)") == "Shrek 2"
+    assert display_name("Doom_(1993)") == "Doom (1993)"
+    assert game_id("Q1") == game_id("Q1") != game_id("Q2")

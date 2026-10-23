@@ -1,73 +1,76 @@
-/* Tokens from the owner's mocks: dark is "Code 1", light is "Code 2". The system setting
-   decides until the visitor picks one, kept in localStorage as data-theme on <html>. */
+/* Tokens from the owner's Stitch "Cover Next" mock (dark), with a light variant derived from
+   the same hues. The system setting decides until the visitor picks one (data-theme). */
 :root {
-  --bg: #f8fafc;
+  --bg: #f6f7fb;
   --s-lowest: #ffffff;
-  --s-low: #f8fafc;
-  --s: #f1f5f9;
-  --s-high: #e2e8f0;
-  --s-highest: #cbd5e1;
+  --s-low: #f9fafc;
+  --s: #f1f3f8;
+  --s-high: #e6e9f2;
+  --s-highest: #d5d9e6;
   --primary: #ea580c;
   --primary-2: #f97316;
   --secondary: #7c3aed;
   --tertiary: #0284c7;
-  --text: #0f172a;
-  --muted: #475569;
-  --outline: #94a3b8;
-  --border: #e2e8f0;
-  --border-soft: #eef2f6;
+  --text: #12131c;
+  --muted: #50566e;
+  --outline: #8a90a8;
+  --border: #e3e6ef;
+  --border-soft: #eef0f5;
   --error: #e11d48;
+  --ok: #059669;
   --haze: rgba(249, 115, 22, 0.06);
-  --shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow: 0 1px 2px rgba(18, 19, 28, 0.05);
   --glow: 0 6px 20px rgba(234, 88, 12, 0.12);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0b0b14;
-    --s-lowest: #07060e;
-    --s-low: #131124;
-    --s: #18152c;
-    --s-high: #221e3d;
-    --s-highest: #2e2952;
-    --primary: #ff6b35;
-    --primary-2: #f77f00;
+    --bg: #0a0b12;
+    --s-lowest: #121422;
+    --s-low: #161828;
+    --s: #1a1d30;
+    --s-high: #20243b;
+    --s-highest: #2a2f4a;
+    --primary: #f97316;
+    --primary-2: #fb923c;
     --secondary: #a855f7;
     --tertiary: #38bdf8;
-    --text: #f1f0fb;
-    --muted: #c4bfdd;
-    --outline: #78719c;
-    --border: rgba(168, 85, 247, 0.2);
-    --border-soft: rgba(168, 85, 247, 0.1);
+    --text: #eef0fa;
+    --muted: #a9aec8;
+    --outline: #6f7493;
+    --border: #20243b;
+    --border-soft: #191c2e;
     --error: #fb7185;
-    --haze: rgba(120, 40, 200, 0.18);
-    --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-    --glow: 0 8px 28px rgba(255, 107, 53, 0.15);
+    --ok: #34d399;
+    --haze: rgba(168, 85, 247, 0.12);
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    --glow: 0 8px 28px rgba(249, 115, 22, 0.16);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b0b14;
-  --s-lowest: #07060e;
-  --s-low: #131124;
-  --s: #18152c;
-  --s-high: #221e3d;
-  --s-highest: #2e2952;
-  --primary: #ff6b35;
-  --primary-2: #f77f00;
+  --bg: #0a0b12;
+  --s-lowest: #121422;
+  --s-low: #161828;
+  --s: #1a1d30;
+  --s-high: #20243b;
+  --s-highest: #2a2f4a;
+  --primary: #f97316;
+  --primary-2: #fb923c;
   --secondary: #a855f7;
   --tertiary: #38bdf8;
-  --text: #f1f0fb;
-  --muted: #c4bfdd;
-  --outline: #78719c;
-  --border: rgba(168, 85, 247, 0.2);
-  --border-soft: rgba(168, 85, 247, 0.1);
+  --text: #eef0fa;
+  --muted: #a9aec8;
+  --outline: #6f7493;
+  --border: #20243b;
+  --border-soft: #191c2e;
   --error: #fb7185;
-  --haze: rgba(120, 40, 200, 0.18);
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  --glow: 0 8px 28px rgba(255, 107, 53, 0.15);
+  --ok: #34d399;
+  --haze: rgba(168, 85, 247, 0.12);
+  --shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  --glow: 0 8px 28px rgba(249, 115, 22, 0.16);
   color-scheme: dark;
 }
 
@@ -124,7 +127,7 @@ select:focus-visible {
 }
 
 .wrap {
-  max-width: 1120px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: 0 16px;
 }
@@ -153,6 +156,7 @@ select:focus-visible {
 }
 
 .brand-name {
+  white-space: nowrap;
   font-weight: 800;
   font-size: 16px;
   line-height: 20px;
@@ -659,6 +663,11 @@ select:focus-visible {
     display: none;
   }
 
+  .top nav {
+    gap: 12px;
+    font-size: 13px;
+  }
+
   .tools input {
     max-width: none;
   }
@@ -816,4 +825,386 @@ select:focus-visible {
 
 .foot p {
   margin: 4px 0;
+}
+
+/* page layouts */
+.main {
+  padding-bottom: 48px;
+}
+
+.three {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 300px;
+  gap: 24px;
+  align-items: start;
+  padding-top: 24px;
+}
+
+.single {
+  max-width: 920px;
+  margin: 0 auto;
+  padding-top: 8px;
+}
+
+.rail {
+  position: sticky;
+  top: 88px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feed .intro {
+  padding-top: 0;
+}
+
+@media (max-width: 1180px) {
+  .three {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  .rail-left {
+    display: none;
+  }
+}
+
+@media (max-width: 860px) {
+  .three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    position: static;
+  }
+}
+
+/* panels in the rails and on game pages */
+.panel {
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--s-lowest);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.rail .panel {
+  margin-bottom: 0;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+.nav-list,
+.mini,
+.sources,
+.links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.nav-list a {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.nav-list a:hover {
+  background: var(--s);
+  color: var(--primary);
+}
+
+.nav-list .mono {
+  color: var(--outline);
+  font-size: 12px;
+}
+
+.mini {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mini li {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13px;
+}
+
+.mini li:last-child {
+  border-bottom: 0;
+}
+
+.mini a {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini a:hover {
+  color: var(--primary);
+}
+
+.mini .mono {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.mini .up {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.sources li {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  column-gap: 8px;
+  font-size: 13px;
+  padding: 3px 0;
+}
+
+.sources .sub {
+  grid-column: 2 / 4;
+  font-size: 11px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--outline);
+}
+
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+
+.dot.pending {
+  background: transparent;
+  border: 1px solid var(--outline);
+}
+
+.spotlight {
+  background: linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--primary) 12%, transparent),
+      color-mix(in srgb, var(--secondary) 10%, transparent) 60%,
+      transparent
+    ),
+    var(--s-lowest);
+}
+
+.spotlight .tag {
+  align-self: flex-start;
+}
+
+.spot-name {
+  font-size: 20px;
+  margin: 0;
+}
+
+.spot-name a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.spot-figure {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.spot-figure .sub {
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pin {
+  margin-left: 8px;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--secondary);
+  border: 1px solid color-mix(in srgb, var(--secondary) 40%, transparent);
+  border-radius: 6px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+.pill.new {
+  color: var(--secondary);
+  border-color: color-mix(in srgb, var(--secondary) 30%, transparent);
+  background: color-mix(in srgb, var(--secondary) 12%, transparent);
+}
+
+.pill.cooling {
+  color: var(--outline);
+  border-color: color-mix(in srgb, var(--outline) 40%, transparent);
+  background: transparent;
+}
+
+.more,
+.see-all {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.see-all {
+  display: block;
+  text-align: center;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 45%, transparent);
+  margin-top: 4px;
+}
+
+.see-all:hover,
+.load-more:hover {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.load-more {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--s-lowest);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.count {
+  margin: 0 4px 10px;
+}
+
+.rows {
+  padding-bottom: 8px;
+}
+
+/* game page */
+.crumbs {
+  margin: 16px 0 8px;
+}
+
+.crumbs a {
+  color: var(--outline);
+}
+
+.game-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.game-head h1 {
+  font-size: clamp(28px, 5vw, 40px);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  margin: 8px 0 4px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--s-lowest);
+  border: 1px solid var(--border);
+}
+
+.tile-v {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.chart {
+  margin: 0;
+}
+
+.chart svg {
+  width: 100%;
+  height: 180px;
+  display: block;
+}
+
+.chart-line {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 2.2;
+}
+
+.chart-area {
+  fill: color-mix(in srgb, var(--primary) 14%, transparent);
+}
+
+.chart-base {
+  stroke: var(--tertiary);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 5;
+}
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--outline);
+  margin-top: 6px;
+}
+
+.videos.big {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }

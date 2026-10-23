@@ -57,6 +57,8 @@ from metaspike.creator_sources.youtube import (
     YouTubeAdapter,
     YouTubeQuota,
 )
+from metaspike.discovery.catalogue import display_name, game_id
+from metaspike.discovery.catalogue import select as select_games
 from metaspike.discovery.dump import count_views, stream_lines
 from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
 from metaspike.discovery.store import DiscoveryStore
@@ -244,6 +246,8 @@ DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
 DEFAULT_TWITCH_DIR = Path(".metaspike/twitch")
 DEFAULT_DISCOVERY_DIR = Path(".metaspike/discovery")
+# Daily YouTube searches spent on the top risers; pinned games are always searched too.
+YOUTUBE_RISER_SEARCHES = 60
 DEFAULT_PROBE_APP = 730
 _PLAYERS_HOST = "api.steampowered.com"
 _PLAYERS_PATH = "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
@@ -615,13 +619,10 @@ def _parser() -> argparse.ArgumentParser:
 
     youtube = commands.add_parser(
         "collect-youtube",
-        help="LIVE: one YouTube search per bootstrap game for this week's most relevant "
-        "gaming videos, plus their public counts, into the local creator-supply store",
+        help="LIVE: one YouTube search per top riser and pinned game for this week's most "
+        "relevant gaming videos, plus their public counts, into the local store",
     )
-    youtube.add_argument(
-        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
-    )
-    youtube.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    youtube.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
     youtube.add_argument("--store-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
     youtube.add_argument(
         "--days", type=int, default=7, help="only videos published in the last N days"
@@ -629,7 +630,7 @@ def _parser() -> argparse.ArgumentParser:
     youtube.add_argument(
         "--max-searches",
         type=int,
-        default=20,
+        default=80,
         help=f"search.list calls this run may spend (daily project limit {SEARCH_CALLS_PER_DAY})",
     )
     youtube.add_argument(
@@ -654,13 +655,10 @@ def _parser() -> argparse.ArgumentParser:
 
     site = commands.add_parser(
         "site-data",
-        help="LIVE (Wikimedia): write the public site's data file from Wikimedia pageviews "
-        "and the local YouTube store",
+        help="write the public site's data file from the latest discovery run and the "
+        "local YouTube store; offline",
     )
-    site.add_argument(
-        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
-    )
-    site.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    site.add_argument("--discovery-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
     site.add_argument("--creator-supply-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
     site.add_argument("--out", type=Path, required=True)
     site.set_defaults(handler=_site_data)
@@ -1794,24 +1792,25 @@ def _collect_youtube(args: argparse.Namespace) -> int:
         key = secret_from_env(YOUTUBE_API_KEY_ENV)
     except SourceError as error:
         return _fail(EXIT_SOURCE_UNAVAILABLE, str(error))
-    records = _recorded(args.recorded)
-    try:
-        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
-    except IncompleteRecords as error:
-        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
+    found = _discovered(args.discovery_dir)
+    if isinstance(found, str):
+        return _fail(EXIT_INVALID_CATALOGUE, found)
+    _, _, selection = found
     now = _now()
-    scope = bootstrap_scope()
+    # The day's top risers first (they are why anyone looks), then every pinned game.
+    risers = [g for g, row, pinned in selection if row is not None and not pinned]
+    pinned_games = [g for g, _, pinned in selection if pinned]
+    targets = (risers[:YOUTUBE_RISER_SEARCHES] + pinned_games)[: args.max_searches]
     queries = [
         SearchQuery(
-            canonical_game_id=game.canonical_game_id,
-            text=game.name,
+            canonical_game_id=game_id(game.qid),
+            text=display_name(game.article),
             # Relevance, not date: the newest uploads are minutes old and have no views yet.
             order="relevance",
             published_after=now - timedelta(days=args.days),
             video_category_id=GAMING_CATEGORY_ID,
         )
-        for game in state.catalogue.games
-        if game.canonical_game_id in scope
+        for game in targets
     ]
     # shortcut: the quota account lives for one run; several runs a day can overspend the
     # project's 100 search calls (YouTube then refuses, recorded as not sent). Persist a
@@ -1900,32 +1899,36 @@ def _collect_twitch(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _discovered(
+    root: Path,
+) -> tuple[DiscoveryStore, date, list[tuple[Any, Any, bool]]] | str:
+    """The latest discovery run's store, day and selection, or why there is none."""
+    store = DiscoveryStore(root)
+    games = store.games()
+    reports = sorted(root.glob("risers-*.json"))
+    if games is None or not reports:
+        return f"no discovery run in {root}: run `metaspike discover-games` first"
+    day = date.fromisoformat(reports[-1].stem.removeprefix("risers-"))
+    report = json.loads(reports[-1].read_text("utf-8"))
+    return store, day, select_games(report, games)
+
+
 def _site_data(args: argparse.Namespace) -> int:
-    records = _recorded(args.recorded)
-    try:
-        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
-    except IncompleteRecords as error:
-        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
-    scope = bootstrap_scope()
-    games = [g for g in state.catalogue.games if g.canonical_game_id in scope]
+    found = _discovered(args.discovery_dir)
+    if isinstance(found, str):
+        return _fail(EXIT_INVALID_CATALOGUE, found)
+    store, day, selection = found
     now = _now()
-    with build_client() as client:
-        report = collect(
-            state.catalogue,
-            default_registry(client),
-            window_ending(latest_complete_day(now)),
-            observed_at=now,
-            clock=_now,
-        )
     youtube = (
         CreatorSupplyStore(args.creator_supply_dir) if args.creator_supply_dir.is_dir() else None
     )
-    data = build_site_data(games, report, youtube, now)
+    data = build_site_data(selection, store, day, youtube, now)
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    args.out.write_text(text + "\n", encoding="utf-8")
     held = {k: sum(g[k]["state"] == "ok" for g in data["games"]) for k in ("wikipedia", "youtube")}
     print(
-        f"Site data: {len(games)} games; Wikipedia {held['wikipedia']}, "
+        f"Site data for {day}: {len(selection)} games; Wikipedia {held['wikipedia']}, "
         f"YouTube {held['youtube']} -> {args.out}"
     )
     return EXIT_OK

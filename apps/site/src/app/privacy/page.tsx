@@ -42,8 +42,8 @@ export default function Privacy() {
 
       <h2>Other sources</h2>
       <p>
-        Wikipedia page view counts come from the Wikimedia Foundation and are public domain
-        (CC0). Steam and Twitch data are collected privately for testing and are not shown on this
+        Wikipedia page view counts come from the Wikimedia Foundation and game identifiers from
+        Wikidata; both are public domain (CC0). Steam and Twitch data are collected privately for testing and are not shown on this
         site.
       </p>
 

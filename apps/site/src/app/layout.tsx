@@ -1,12 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { JetBrains_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import Link from "next/link";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 import "./globals.css";
 
-const sans = Inter({ subsets: ["latin"], variable: "--font-sans" });
+const sans = Plus_Jakarta_Sans({ subsets: ["latin"], variable: "--font-sans" });
 const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
@@ -34,17 +34,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <span className="label">What to make a video about</span>
             </Link>
             <nav aria-label="Main">
+              <Link href="/games/">All games</Link>
               <Link href="/how-it-works/">How it works</Link>
               <Link href="/privacy/">Privacy</Link>
               <ThemeToggle />
             </nav>
           </div>
         </header>
-        <main className="wrap">{children}</main>
+        <main className="wrap main">{children}</main>
         <footer className="foot">
           <div className="wrap">
             <p>
-              Page views from <a href="https://wikimedia.org/api/rest_v1/">Wikimedia</a> (CC0). Video
+              Page views from <a href="https://wikimedia.org/api/rest_v1/">Wikimedia</a> and game
+              identifiers from <a href="https://www.wikidata.org">Wikidata</a> (both CC0). Video
               data from <a href="https://www.youtube.com/">YouTube</a>, via YouTube API Services (
               <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>).
             </p>

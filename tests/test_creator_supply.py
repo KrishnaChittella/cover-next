@@ -64,6 +64,9 @@ from metaspike.creator_sources.youtube import (
     parse_videos,
     replay_youtube_client,
 )
+from metaspike.discovery.catalogue import game_id
+from metaspike.discovery.store import DiscoveryStore
+from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.families import SourceFamily
 from metaspike.domain.signals import SourceErrorCode
 from metaspike.domain.source_policy import DeploymentStage, Permission, SourcePurpose
@@ -1689,10 +1692,23 @@ def test_collect_youtube_asks_once_per_game_and_never_prints_the_key(
         cli, "build_client", lambda: httpx.Client(transport=httpx.MockTransport(handler))
     )
     store = tmp_path / "supply"
+    discovery = DiscoveryStore(tmp_path / "discovery")
+    discovery.save_games(
+        [
+            WikidataGame(qid="Q1", article="Anthem_(video_game)"),
+            WikidataGame(qid="Q2", article="Shattered_Steel"),
+            WikidataGame(qid="Q3", article="Wardogs"),
+        ]
+    )
+    risers = [
+        {"qid": q, "article": a, "recent": 900.0, "baseline": 30.0, "ratio": 9.0, "new": False}
+        for q, a in (("Q1", "Anthem_(video_game)"), ("Q2", "Shattered_Steel"))
+    ]
+    (discovery.root / "risers-2026-10-22.json").write_text(json.dumps(risers))
     arguments = [
         "collect-youtube",
-        "--state",
-        str(tmp_path / "state.json"),
+        "--discovery-dir",
+        str(discovery.root),
         "--store-dir",
         str(store),
     ]
@@ -1702,12 +1718,16 @@ def test_collect_youtube_asks_once_per_game_and_never_prints_the_key(
     assert not sent
 
     monkeypatch.setenv("METASPIKE_YOUTUBE_API_KEY", key)
-    assert cli.main([*arguments, "--max-searches", "3"]) == cli.EXIT_OK
+    assert cli.main([*arguments, "--max-searches", "2"]) == cli.EXIT_OK
     searches = [r for r in sent if r.url.path.endswith("/search")]
-    assert len(searches) == 3  # the rest are recorded as not sent, never over budget
+    # Risers first, then pinned games, within the budget: Wardogs waits for the next run.
+    assert [r.url.params["q"] for r in searches] == ["Anthem", "Shattered Steel"]
     assert all(r.url.params["key"] == key for r in sent)
     assert all(r.url.params["videoCategoryId"] == "20" for r in searches)
-    assert len(CreatorSupplyStore(store).searches()) == 15
+    assert {f.query.canonical_game_id for f in CreatorSupplyStore(store).searches()} == {
+        game_id("Q1"),
+        game_id("Q2"),
+    }
     captured = capsys.readouterr()
     assert key not in captured.out + captured.err
-    assert "searches 3 sent, 0 failed, 12 not sent" in captured.out
+    assert "searches 2 sent, 0 failed, 0 not sent" in captured.out
