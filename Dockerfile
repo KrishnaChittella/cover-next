@@ -33,12 +33,12 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
-# Dependencies first, exactly as locked (the `site` group is the public site build's only), so this layer is reused until the lock changes.
+# Dependencies first, exactly as locked, so this layer is reused until the lock changes.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --locked --no-dev --no-group site --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 
 COPY src ./src
-RUN uv sync --locked --no-dev --no-group site --no-editable
+RUN uv sync --locked --no-dev --no-editable
 
 # dbt, exactly as locked, in its own environment. Its development group (the offline
 # DuckDB adapter the tests use) is left out: production needs only dbt and BigQuery.

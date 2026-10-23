@@ -18,15 +18,13 @@ export type YouTube = { state: "missing" } | { state: "ok"; retrieved_at: string
 
 export type Rise = { recent: number; baseline: number | null; ratio: number | null; new: boolean };
 
-// Several games of one studio rising together. `headline` is an AI summary of the
-// studio's Wikipedia lead, or null; `members` are game slugs, strongest first.
+// Several games of one studio rising together; `members` are game slugs, strongest first.
 export type Story = {
   slug: string;
   name: string;
   role: "developer" | "publisher";
   article: string | null;
   members: string[];
-  headline: string | null;
 };
 
 export type Game = {

@@ -23,9 +23,6 @@ dev = [
     "types-jsonschema>=4.23",
     "types-pyyaml>=6",
 ]
-site = [
-    "anthropic>=2.2.0",
-]
 
 [build-system]
 requires = ["hatchling"]
@@ -62,7 +59,3 @@ markers = [
     "live: hits a real source API; run explicitly with `uv run pytest -m live`",
     "slow: an offline proof that takes minutes; run explicitly with `uv run pytest -m slow`",
 ]
-
-[tool.uv]
-# `site`: the public site build only (studio-story headlines); kept out of the job image.
-default-groups = ["dev", "site"]

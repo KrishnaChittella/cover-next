@@ -26,9 +26,7 @@ export default function HowItWorks() {
       <p>
         When three or more rising games share a developer or publisher on Wikidata, they are shown
         as one story instead of filling the list. The strongest game stays in the list, and the
-        rest are tucked inside the story. A story&apos;s headline is a one-line AI summary (written
-        by Claude) of the studio&apos;s Wikipedia article. Treat it as a pointer and check the
-        article. When there is no summary, the headline is just the count.
+        rest are tucked inside the story.
       </p>
 
       <h2>What each number means</h2>

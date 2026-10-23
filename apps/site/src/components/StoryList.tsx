@@ -14,16 +14,7 @@ export function StoryList({ stories, games }: { stories: Story[]; games: Game[] 
         const count = `${members.length} ${s.role === "developer" ? "games by" : "games published by"} ${s.name} rising together`;
         return (
           <article key={s.slug} id={s.slug} className="story">
-            <h3 className="story-title">{s.headline ?? count}</h3>
-            {s.headline && s.article && (
-              <p className="sub">
-                {count}. AI summary of{" "}
-                <a href={`https://en.wikipedia.org/wiki/${encodeURIComponent(s.article)}`}>
-                  Wikipedia&apos;s {s.name} article
-                </a>{" "}
-                (CC BY-SA 4.0); check it before you rely on it.
-              </p>
-            )}
+            <h3 className="story-title">{count}</h3>
             <details>
               <summary>Show the {members.length} games</summary>
               <ul className="mini">

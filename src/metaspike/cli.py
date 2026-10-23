@@ -62,9 +62,8 @@ from metaspike.discovery.catalogue import select as select_games
 from metaspike.discovery.dump import count_views, stream_lines
 from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
 from metaspike.discovery.store import DiscoveryStore
-from metaspike.discovery.studios import add_headlines, fetch_studios
+from metaspike.discovery.studios import fetch_studios
 from metaspike.discovery.studios import group as group_stories
-from metaspike.discovery.studios import names_of as studio_names
 from metaspike.discovery.wikidata import WIKIDATA_POLICY, fetch_games
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
@@ -2043,13 +2042,11 @@ def _discover_games(args: argparse.Namespace) -> int:
     selection = select_games(report, games)
     with build_client() as client:
         stories = group_stories(selection, fetch_studios(client, [g.qid for g, _, _ in selection]))
-        written = add_headlines(stories, studio_names(selection), client)
     stories_out = store.root / f"stories-{day.isoformat()}.json"
     stories_out.write_text(json.dumps(stories, indent=1, ensure_ascii=False), encoding="utf-8")
     for story in stories:
-        line_ = story["headline"] or "(no AI headline)"
-        print(f"Story: {story['name']} ({len(story['members'])} games): {line_}")
-    print(f"Stories: {stories_out} ({len(stories)}; {written} AI headlines)")
+        print(f"Story: {story['name']} ({len(story['members'])} games)")
+    print(f"Stories: {stories_out} ({len(stories)})")
     return EXIT_OK
 
 

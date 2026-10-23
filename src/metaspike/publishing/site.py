@@ -192,8 +192,7 @@ def build_site_data(
             "twitch": {"state": "pending"},
         },
         "stories": [
-            {k: s[k] for k in ("slug", "name", "role", "article", "members", "headline")}
-            for s in stories
+            {k: s[k] for k in ("slug", "name", "role", "article", "members")} for s in stories
         ],
         "games": games,
     }

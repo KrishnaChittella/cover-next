@@ -63,25 +63,3 @@ def test_site_data_marks_the_lead_and_folds_the_rest(tmp_path: Path) -> None:
     refs = [g["story"] for g in data["games"]]
     assert [r["lead"] for r in refs] == [True, False, False]
     assert data["stories"][0]["members"] == ["game-0", "game-1", "game-2"]
-    assert data["stories"][0]["headline"] is None
-
-
-def test_headline_takes_the_first_line_and_drops_quotes_and_full_stop() -> None:
-    from types import SimpleNamespace
-
-    from metaspike.discovery.studios import headline
-
-    reply = SimpleNamespace(
-        stop_reason="end_turn",
-        content=[
-            SimpleNamespace(type="text", text='"EA closes BioWare, fans revisit Mass Effect."\n')
-        ],
-    )
-    client = SimpleNamespace(
-        beta=SimpleNamespace(messages=SimpleNamespace(create=lambda **_: reply))
-    )
-    assert headline(client, "BioWare", ["Anthem"], "lead") == (  # type: ignore[arg-type]
-        "EA closes BioWare, fans revisit Mass Effect"
-    )
-    reply.stop_reason = "refusal"
-    assert headline(client, "BioWare", ["Anthem"], "lead") is None  # type: ignore[arg-type]
