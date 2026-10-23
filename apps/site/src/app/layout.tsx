@@ -48,6 +48,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>).
             </p>
             <p>
+              Game metadata from <a href="https://www.igdb.com">IGDB.com</a>.
+            </p>
+            <p>
               A project by <a href="https://krishnachittella.dev">Krishna Chittella</a>. Source code on{" "}
               <a href="https://github.com/KrishnaChittella/cover-next">GitHub</a>.
             </p>

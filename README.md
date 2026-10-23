@@ -733,3 +733,11 @@ articles; the other games have no recording, which exercises partial failure.
 Phase 4 Part C2 (safe, low-cost, unattended collection), planned in
 `docs/phase4-c2-plan.md` and not started, then Part D (baseline state, parity and soak).
 Nothing is public before the single production release.
+
+## Data attribution
+
+Game metadata from [IGDB.com](https://www.igdb.com). The recorded IGDB rows under
+`tests/fixtures/` (identity fields only: names, release dates, platforms, companies,
+external ids) are the catalogue's source records and the identity golden set; they are not
+a dataset for reuse. Page views from Wikimedia (CC0). Video data from YouTube, via YouTube
+API Services.
