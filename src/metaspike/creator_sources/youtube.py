@@ -1,9 +1,9 @@
 """YouTube Data API v3, as far as creator supply needs it: `search.list`, `videos.list`.
 
-OFFLINE ONLY. Nothing here has ever called YouTube. There is no API project, no key and
-no live client; the adapter is exercised against recorded-shaped files through a replay
-transport, and every file in the repository that looks like a YouTube response is
-synthetic. The request and response shapes, costs and limits below follow the official
+Live on the owner's machine only (`metaspike collect-youtube`, key from
+METASPIKE_YOUTUBE_API_KEY). Tests use a replay transport, and every file in the
+repository that looks like a YouTube response is synthetic: live answers stay in the
+git-ignored local store. The request and response shapes, costs and limits below follow the official
 documentation as read on 2026-10-14:
 
     search.list   1 call in its own "Search Queries" bucket; default 100 calls a day.
@@ -55,6 +55,7 @@ from metaspike.domain.source_policy import (
 from metaspike.sources.credentials import Secret
 
 SOURCE_ID: Final = "youtube_data"
+API_KEY_ENV: Final = "METASPIKE_YOUTUBE_API_KEY"
 API_HOST: Final = "www.googleapis.com"
 SEARCH_URL: Final = f"https://{API_HOST}/youtube/v3/search"
 VIDEOS_URL: Final = f"https://{API_HOST}/youtube/v3/videos"
@@ -108,9 +109,9 @@ YOUTUBE_DATA_POLICY = SourcePolicy(
             stage=DeploymentStage.PRIVATE_DEVELOPMENT,
             cleared=True,
             reason=(
-                "Parsing and reading YouTube-shaped responses offline. No API project "
-                "exists, no key is held, no request has been sent and no API Data is "
-                "stored: every response in the repository is synthetic."
+                "Bounded live searches from the owner's machine with the project's own "
+                "key, kept in a git-ignored local store for at most 30 days. Nothing is "
+                "collected unattended and nothing is shown publicly."
             ),
         ),
         StageClearance(
