@@ -10,7 +10,7 @@ promise that a video will do well:
 
     score = round(100 * mean(curiosity rank, supply-gap rank))
 
-YouTube is deliberately absent: its policies forbid figures derived from its data. A game
+Video-platform data is deliberately absent: its policies forbid figures derived from it. A game
 without both halves (or with fewer than MIN_STREAMS live streams) gets no score, never a
 zero. Saturation names the supply-gap third:
 Low (top third), Medium, High.
