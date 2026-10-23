@@ -51,7 +51,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>).
             </p>
             <p>
-              Game metadata from <a href="https://www.igdb.com">IGDB.com</a>.
+              Game metadata from <a href="https://www.igdb.com">IGDB.com</a>. Player counts from{" "}
+              <a href="https://store.steampowered.com/">Steam</a>, provided by Valve via the{" "}
+              <a href="https://steamcommunity.com/dev">Steam Web API</a>, as is; not endorsed by or
+              affiliated with Valve.
             </p>
             <p>
               A project by <a href="https://krishnachittella.dev">Krishna Chittella</a>. Source code on{" "}

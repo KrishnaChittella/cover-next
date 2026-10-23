@@ -62,15 +62,24 @@ export default function HowItWorks() {
               them: YouTube&apos;s rules do not allow figures combined across channels.
             </td>
           </tr>
+          <tr>
+            <td>Steam playing</td>
+            <td>Steam Web API (Valve)</td>
+            <td>
+              How many people were playing the game on Steam at our daily reading, around 13:30 UTC.
+              One reading a day, so it shows the trend across days, not the daily peak. After two
+              weeks of readings it is also compared with the game&apos;s own normal. Games not on
+              Steam say so.
+            </td>
+          </tr>
         </tbody>
       </table>
 
       <h2>What it does not measure</h2>
       <ul>
         <li>
-          <strong>Steam players and Twitch viewers</strong> are collected privately but not shown
-          yet. Twitch only allows its data to be kept for 24 hours without written permission,
-          which we have asked for.
+          <strong>Twitch viewers</strong> are not shown yet. Twitch only allows its data to be kept
+          for 24 hours without written permission, which we have asked for.
         </li>
         <li>
           <strong>PlayStation and Xbox</strong> have no public source for player numbers, and

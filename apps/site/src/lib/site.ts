@@ -1,4 +1,4 @@
-// The shape `metaspike site-data` writes (version 3). Null always means "not measured".
+// The shape `metaspike site-data` writes (version 4). Null always means "not measured".
 export type Day = { day: string; views: number | null };
 
 export type Wikipedia =
@@ -15,6 +15,20 @@ export type Video = { id: string; title: string; views: number | null; published
 
 // Individual videos only: YouTube's policies forbid figures derived across channels.
 export type YouTube = { state: "missing" } | { state: "ok"; retrieved_at: string; top_videos: Video[] };
+
+// One Steam concurrent-players reading a day. "inapplicable": the game is not on Steam.
+export type Steam =
+  | { state: "inapplicable" }
+  | { state: "missing"; app: string; daily: [] }
+  | {
+      state: "ok";
+      app: string;
+      players_now: number;
+      daily: { day: string; players: number | null }[];
+      recent: number;
+      normal: number | null;
+      ratio: number | null;
+    };
 
 export type Rise = { recent: number; baseline: number | null; ratio: number | null; new: boolean };
 
@@ -38,9 +52,10 @@ export type Game = {
   rise: Rise | null;
   wikipedia: Wikipedia;
   youtube: YouTube;
+  steam: Steam;
 };
 
-type SourceState = { state: "ok" | "missing" | "pending"; day?: string; games?: number };
+type SourceState = { state: "ok" | "missing" | "pending"; day?: string; games?: number; attribution?: string };
 
 export type SiteData = {
   version: string;
@@ -122,6 +137,11 @@ export function byRise(a: Game, b: Game): number {
   if (ra === null) return 1;
   if (rb === null) return -1;
   return rb - ra;
+}
+
+export function steamNow(game: Game): string {
+  if (game.steam.state === "inapplicable") return "not on Steam";
+  return game.steam.state === "ok" ? `${formatCount(game.steam.players_now)} playing` : "not read";
 }
 
 export function topViews(game: Game): number | null {

@@ -41,6 +41,22 @@ jobs:
           else
             uv run metaspike collect-youtube --stage private_collection || echo "::warning::some YouTube searches failed"
           fi
+      # Steam history: one reading a day, carried between runs in GitHub's cache (each run
+      # saves a new entry; the newest is restored). A lost cache only shortens the history.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .metaspike/steam
+          key: steam-${{ github.run_id }}
+          restore-keys: steam-
+      - name: Steam players (skipped when the key is not set)
+        env:
+          METASPIKE_STEAM_WEB_API_KEY: ${{ secrets.METASPIKE_STEAM_WEB_API_KEY }}
+        run: |
+          if [ -z "$METASPIKE_STEAM_WEB_API_KEY" ]; then
+            echo "::warning::METASPIKE_STEAM_WEB_API_KEY is not set; Steam shows as not read"
+          else
+            uv run metaspike collect-steam || echo "::warning::some Steam readings failed"
+          fi
       - name: Site data
         run: uv run metaspike site-data --out apps/site/data/site.json
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
