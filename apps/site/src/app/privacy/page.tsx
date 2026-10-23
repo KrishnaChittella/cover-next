@@ -51,10 +51,23 @@ export default function Privacy() {
         with Valve or Steam.
       </p>
 
+      <h2>Twitch data</h2>
+      <p>
+        Once a day Cover Next asks the Twitch API which streams are live for each game it follows
+        and keeps two totals per game: how many people were watching and how many streams were
+        live. No stream title, channel name, user or other personal detail is kept, and nothing
+        about you is read. The totals are kept in the same GitHub storage as the Steam history.
+        Our reasons are set out in{" "}
+        <a href="https://discuss.dev.twitch.com/t/can-i-store-aggregated-twitch-game-stats-for-longer-than-24-hours/65174">
+          this Twitch developer forum thread
+        </a>
+        ; if Twitch asks us to change this, we will. Cover Next is not endorsed by Twitch.
+      </p>
+
       <h2>Other sources</h2>
       <p>
         Wikipedia page view counts come from the Wikimedia Foundation and game identifiers from
-        Wikidata; both are public domain (CC0). Twitch data is not shown on this site.
+        Wikidata; both are public domain (CC0).
       </p>
 
       <h2>Contact</h2>

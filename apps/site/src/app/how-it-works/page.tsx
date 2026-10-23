@@ -72,15 +72,25 @@ export default function HowItWorks() {
               Steam say so.
             </td>
           </tr>
+          <tr>
+            <td>Twitch watching</td>
+            <td>Twitch API</td>
+            <td>
+              Live viewers and the number of live streams for the game at our daily reading, summed
+              over its top 300 streams. A game with more streams than that shows &quot;at least&quot;.
+              Only these two totals are kept, nothing about any stream or person. Games are matched
+              to Twitch by IGDB id, never by name. See{" "}
+              <a href="https://discuss.dev.twitch.com/t/can-i-store-aggregated-twitch-game-stats-for-longer-than-24-hours/65174">
+                this Twitch developer forum answer
+              </a>{" "}
+              on keeping such totals.
+            </td>
+          </tr>
         </tbody>
       </table>
 
       <h2>What it does not measure</h2>
       <ul>
-        <li>
-          <strong>Twitch viewers</strong> are not shown yet. Twitch only allows its data to be kept
-          for 24 hours without written permission, which we have asked for.
-        </li>
         <li>
           <strong>PlayStation and Xbox</strong> have no public source for player numbers, and
           reading their stores automatically is against their terms. They are left out.

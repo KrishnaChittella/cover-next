@@ -33,8 +33,7 @@ export default function Home() {
           </div>
         </section>
         <p className="notice">
-          Early preview. These are readings, not advice. Twitch figures will be added once Twitch
-          confirms we may show them.
+          Early preview. These are readings, not advice.
         </p>
         <StoryList stories={data.stories} games={data.games} />
         <div className="list-head">

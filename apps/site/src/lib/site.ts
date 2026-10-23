@@ -1,4 +1,4 @@
-// The shape `metaspike site-data` writes (version 4). Null always means "not measured".
+// The shape `metaspike site-data` writes (version 5). Null always means "not measured".
 export type Day = { day: string; views: number | null };
 
 export type Wikipedia =
@@ -16,19 +16,24 @@ export type Video = { id: string; title: string; views: number | null; published
 // Individual videos only: YouTube's policies forbid figures derived across channels.
 export type YouTube = { state: "missing" } | { state: "ok"; retrieved_at: string; top_videos: Video[] };
 
-// One Steam concurrent-players reading a day. "inapplicable": the game is not on Steam.
-export type Steam =
-  | { state: "inapplicable" }
-  | { state: "missing"; app: string; daily: [] }
-  | {
-      state: "ok";
-      app: string;
-      players_now: number;
-      daily: { day: string; players: number | null }[];
-      recent: number;
-      normal: number | null;
-      ratio: number | null;
-    };
+// One reading a day, kept as a history: Steam players, Twitch viewers.
+export type Daily = {
+  state: "ok";
+  now: number;
+  daily: { day: string; value: number | null }[];
+  recent: number;
+  normal: number | null;
+  ratio: number | null;
+};
+
+// "inapplicable": the game is not on Steam.
+export type Steam = { state: "inapplicable" } | { state: "missing"; app: string; daily: [] } | (Daily & { app: string });
+
+// "unmapped": Twitch links no category to the game's IGDB id. Lower bound: pages left unread.
+export type Twitch =
+  | { state: "unmapped" }
+  | { state: "missing"; daily: [] }
+  | (Daily & { streams_now: number | null; lower_bound: boolean });
 
 export type Rise = { recent: number; baseline: number | null; ratio: number | null; new: boolean };
 
@@ -53,9 +58,16 @@ export type Game = {
   wikipedia: Wikipedia;
   youtube: YouTube;
   steam: Steam;
+  twitch: Twitch;
 };
 
-type SourceState = { state: "ok" | "missing" | "pending"; day?: string; games?: number; attribution?: string };
+type SourceState = {
+  state: "ok" | "missing" | "pending";
+  day?: string;
+  games?: number;
+  attribution?: string;
+  basis?: string;
+};
 
 export type SiteData = {
   version: string;
@@ -141,7 +153,14 @@ export function byRise(a: Game, b: Game): number {
 
 export function steamNow(game: Game): string {
   if (game.steam.state === "inapplicable") return "not on Steam";
-  return game.steam.state === "ok" ? `${formatCount(game.steam.players_now)} playing` : "not read";
+  return game.steam.state === "ok" ? `${formatCount(game.steam.now)} playing` : "not read";
+}
+
+export function twitchNow(game: Game): string {
+  const t = game.twitch;
+  if (t.state === "unmapped") return "no Twitch category";
+  if (t.state !== "ok") return "not read";
+  return `${t.lower_bound ? "at least " : ""}${formatCount(t.now)} watching`;
 }
 
 export function topViews(game: Game): number | null {

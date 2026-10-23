@@ -41,13 +41,16 @@ jobs:
           else
             uv run metaspike collect-youtube --stage private_collection || echo "::warning::some YouTube searches failed"
           fi
-      # Steam history: one reading a day, carried between runs in GitHub's cache (each run
-      # saves a new entry; the newest is restored). A lost cache only shortens the history.
+      # Steam and Twitch history: one reading a day, carried between runs in GitHub's cache
+      # (each run saves a new entry; the newest is restored). A lost cache only shortens it.
+      # Never a token: .metaspike/tokens stays out of the cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: .metaspike/steam
-          key: steam-${{ github.run_id }}
-          restore-keys: steam-
+          path: |
+            .metaspike/steam
+            .metaspike/twitch-daily
+          key: daily-${{ github.run_id }}
+          restore-keys: daily-
       - name: Steam players (skipped when the key is not set)
         env:
           METASPIKE_STEAM_WEB_API_KEY: ${{ secrets.METASPIKE_STEAM_WEB_API_KEY }}
@@ -56,6 +59,16 @@ jobs:
             echo "::warning::METASPIKE_STEAM_WEB_API_KEY is not set; Steam shows as not read"
           else
             uv run metaspike collect-steam || echo "::warning::some Steam readings failed"
+          fi
+      - name: Twitch live sums (skipped when the IGDB/Twitch credentials are not set)
+        env:
+          METASPIKE_IGDB_CLIENT_ID: ${{ secrets.METASPIKE_IGDB_CLIENT_ID }}
+          METASPIKE_IGDB_CLIENT_SECRET: ${{ secrets.METASPIKE_IGDB_CLIENT_SECRET }}
+        run: |
+          if [ -z "$METASPIKE_IGDB_CLIENT_ID" ] || [ -z "$METASPIKE_IGDB_CLIENT_SECRET" ]; then
+            echo "::warning::IGDB/Twitch credentials are not set; Twitch shows as not read"
+          else
+            uv run metaspike collect-twitch-daily || echo "::warning::some Twitch readings failed"
           fi
       - name: Site data
         run: uv run metaspike site-data --out apps/site/data/site.json

@@ -331,6 +331,24 @@ class IgdbCatalogueAdapter:
             records.extend(self._games(f"{where}; limit {MAX_PAGE_SIZE};"))
         return records
 
+    def ids_for_slugs(self, slugs: Iterable[str]) -> dict[str, int]:
+        """IGDB slug -> IGDB game id: the same game, named by IGDB's own two keys."""
+        wanted = sorted({s for s in slugs if re.fullmatch(r"[a-z0-9-]+", s)})
+        found: dict[str, int] = {}
+        for start in range(0, len(wanted), MAX_PAGE_SIZE):
+            chunk = wanted[start : start + MAX_PAGE_SIZE]
+            where = ",".join(f'"{s}"' for s in chunk)
+            for row in self._query(
+                "games", f"fields id,slug; where slug = ({where}); limit {MAX_PAGE_SIZE};"
+            ):
+                if (
+                    isinstance(row, dict)
+                    and row.get("slug") in chunk
+                    and isinstance(row.get("id"), int)
+                ):
+                    found[row["slug"]] = row["id"]
+        return found
+
     def search_games(self, title: str, limit: int = 50) -> list[SourceRecord]:
         """IGDB's own text search. Candidates only: a hit is not evidence of identity."""
         text = re.sub(r'["\\;]', " ", title).strip()
