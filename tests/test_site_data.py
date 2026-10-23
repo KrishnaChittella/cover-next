@@ -1,35 +1,47 @@
 """The public site's data file: absent sources are states, never zeros."""
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from metaspike.catalogue.seed import bootstrap_catalogue
-from metaspike.domain.timeseries import TimeWindow
-from metaspike.pipeline.collection import CollectionReport
+from metaspike.discovery.store import DiscoveryStore
+from metaspike.discovery.wikidata import WikidataGame
 from metaspike.publishing.site import build_site_data
 
 NOW = datetime(2026, 10, 23, 12, tzinfo=UTC)
 
 
-def test_a_game_with_no_readings_says_missing_and_holds_no_numbers() -> None:
-    games = bootstrap_catalogue().games[:2]
-    empty = CollectionReport(
-        window=TimeWindow.of_days(date(2026, 10, 1), date(2026, 10, 22)), observed_at=NOW, runs=()
-    )
-    data = build_site_data(games, empty, None, NOW)
-    assert [g["slug"] for g in data["games"]] == [g.slug for g in games]
-    for game in data["games"]:
-        assert game["wikipedia"] == {
-            "state": "missing",
-            "daily": [],
-            "last_7_days": None,
-            "previous_7_days": None,
-        }
-        assert game["youtube"] == {"state": "missing"}
+def test_a_game_with_no_readings_says_missing_and_holds_no_numbers(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path)
+    quiet = WikidataGame(qid="Q9", article="Quiet_Game")
+    data = build_site_data([(quiet, None, True)], store, NOW.date(), None, NOW)
+    game = data["games"][0]
+    assert game["slug"] == "quiet-game" and game["pinned"] and game["rise"] is None
+    assert game["wikipedia"] == {
+        "state": "missing",
+        "daily": [],
+        "last_7_days": None,
+        "previous_7_days": None,
+    }
+    assert game["youtube"] == {"state": "missing"}
+    assert data["sources"]["wikipedia"]["state"] == "missing"
+
+
+def test_a_week_with_an_unknown_day_has_no_total(tmp_path: Path) -> None:
+    store = DiscoveryStore(tmp_path)
+    game = WikidataGame(qid="Q1", article="Hollow_Knight", igdb=("hollow-knight",))
+    day = NOW.date()
+    for back in range(14):
+        if back != 9:  # one day of the previous week was never read
+            store.save_day(day - timedelta(days=back), {"Hollow_Knight": 100})
+    riser = {"recent": 100.0, "baseline": 100.0, "ratio": 1.0, "new": False}
+    shown = build_site_data([(game, riser, False)], store, day, None, NOW)["games"][0]
+    assert shown["slug"] == "hollow-knight" and shown["name"] == "Hollow Knight"
+    assert shown["wikipedia"]["last_7_days"] == 700
+    assert shown["wikipedia"]["previous_7_days"] is None
+    assert len(shown["wikipedia"]["daily"]) == 31
 
 
 def test_youtube_is_shown_video_by_video_and_nothing_is_derived() -> None:
-    from datetime import timedelta
-
     from metaspike.creator_sources.youtube import (
         FetchStatus,
         SearchFetch,

@@ -7,9 +7,19 @@ export default function HowItWorks() {
     <article className="prose">
       <h1>How it works</h1>
       <p>
-        Once a day Cover Next asks a few public sources about the same list of games and puts
-        what they say side by side. A game is matched across sources by fixed identifiers, never
-        by its title.
+        Once a day Cover Next reads the Wikipedia views of every video game with an English
+        Wikipedia article, about 30,000 of them, listed by Wikidata. It then picks out the games
+        people are suddenly curious about and checks what is being watched on YouTube for them.
+        Games are matched across sources by fixed identifiers from Wikidata, never by title.
+      </p>
+
+      <h2>How a game makes the list</h2>
+      <p>
+        Each game is compared with itself, not with bigger games. Its average views over the last
+        3 days are set against its normal level: the middle value of the 28 days before. A small
+        indie going from 300 to 3,000 views a day ranks above a blockbuster holding steady at 8,000.
+        Games need at least 300 views a day to count, so tiny blips are ignored. A game with too
+        little history to have a normal level yet is shown as <strong>New</strong>.
       </p>
 
       <h2>What each number means</h2>
@@ -23,29 +33,26 @@ export default function HowItWorks() {
         </thead>
         <tbody>
           <tr>
-            <td>Wikipedia views, last 7 days</td>
+            <td>vs normal (×)</td>
             <td>Wikimedia page views</td>
             <td>
-              How many people looked the game up. A sudden rise often follows an update, a launch
-              or news, and usually comes before a wave of videos.
+              How many times its usual daily views the game is getting lately. Rising at ×1.25 or
+              more, cooling at ×0.8 or less.
             </td>
           </tr>
           <tr>
-            <td>Rising curiosity / Steady / Cooling</td>
+            <td>Wiki 7d</td>
             <td>Wikimedia page views</td>
-            <td>
-              The last 7 days against the 7 before: rising at +25% or more, cooling at -20% or
-              less. If either week has a missing day there is no comparison.
-            </td>
+            <td>Wikipedia views over the last 7 days. Missing if any of those days was not measured.</td>
           </tr>
           <tr>
             <td>Top YouTube videos this week</td>
             <td>YouTube Data API</td>
             <td>
-              The three most-watched of the gaming videos YouTube ranks most relevant for the
-              game among those published in the last 7 days, each with its own view count. It
-              shows what is working right now. We do not add these numbers up or average them:
-              YouTube&apos;s rules do not allow figures combined across channels.
+              The most-watched of the gaming videos YouTube ranks most relevant for the game among
+              those published in the last 7 days, each with its own view count. YouTube is searched
+              for the top risers and pinned games each day. We never add these numbers up or average
+              them: YouTube&apos;s rules do not allow figures combined across channels.
             </td>
           </tr>
         </tbody>
