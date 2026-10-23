@@ -5,7 +5,6 @@ description = "MetaSpike data-intelligence pipeline: which game has the stronges
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "anthropic>=2.2.0",
     "httpx>=0.28,<1",
     "pydantic>=2.9,<3",
 ]
@@ -23,6 +22,9 @@ dev = [
     "ruff>=0.8",
     "types-jsonschema>=4.23",
     "types-pyyaml>=6",
+]
+site = [
+    "anthropic>=2.2.0",
 ]
 
 [build-system]
@@ -60,3 +62,7 @@ markers = [
     "live: hits a real source API; run explicitly with `uv run pytest -m live`",
     "slow: an offline proof that takes minutes; run explicitly with `uv run pytest -m slow`",
 ]
+
+[tool.uv]
+# `site`: the public site build only (studio-story headlines); kept out of the job image.
+default-groups = ["dev", "site"]

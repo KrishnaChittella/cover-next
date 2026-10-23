@@ -14,15 +14,17 @@ headline is None and the site shows the deterministic line built from the counts
 import os
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final
 from urllib.parse import quote, unquote
 
-import anthropic
 import httpx
 
 from metaspike.discovery.catalogue import display_name, slug_of
 from metaspike.discovery.wikidata import SPARQL_URL, WikidataGame
 from metaspike.domain.model import FrozenModel
+
+if TYPE_CHECKING:  # the `site` dependency group; the job image does not carry it
+    import anthropic
 
 MIN_MEMBERS: Final = 3
 # A story is about games rising together; a steady game does not join one.
@@ -166,8 +168,10 @@ marks, no trailing full stop. Reply with the headline only."""
 
 
 def headline(
-    client: anthropic.Anthropic, studio: str, games: Sequence[str], lead: str
+    client: "anthropic.Anthropic", studio: str, games: Sequence[str], lead: str
 ) -> str | None:
+    import anthropic
+
     try:
         response = client.beta.messages.create(
             model=MODEL,
@@ -199,6 +203,8 @@ def add_headlines(
     """Fill each story's headline in place when a key is set. Returns how many were written."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return 0
+    import anthropic
+
     llm = anthropic.Anthropic()
     written = 0
     for story in stories:
