@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from time import perf_counter
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -56,11 +57,15 @@ from metaspike.creator_sources.youtube import (
     YouTubeAdapter,
     YouTubeQuota,
 )
+from metaspike.discovery.dump import count_views, stream_lines
+from metaspike.discovery.risers import MIN_RECENT, WINDOW_DAYS, assess, rank
+from metaspike.discovery.store import DiscoveryStore
+from metaspike.discovery.wikidata import WIKIDATA_POLICY, fetch_games
 from metaspike.domain.samples import SampleStatus
 from metaspike.domain.signals import CollectionStatus, SignalKey
 from metaspike.domain.source_policy import DeploymentStage, SourcePolicy, SourcePurpose
 from metaspike.domain.source_records import SourceRecord
-from metaspike.domain.timeseries import Granularity
+from metaspike.domain.timeseries import Granularity, TimeWindow
 from metaspike.event_sources.candidates import (
     EVENT_CLASSIFICATION_RULES_V1,
     EVENT_CLASSIFICATION_RULES_V2,
@@ -186,7 +191,11 @@ from metaspike.sources.steam_players import (
     SOURCE_ID as STEAM_PLAYERS_SOURCE,
 )
 from metaspike.sources.twitch import CACHE_HOURS, TWITCH_HELIX_POLICY, TwitchLive, TwitchLiveStore
-from metaspike.sources.wikimedia import WIKIMEDIA_PAGEVIEWS_POLICY, build_client
+from metaspike.sources.wikimedia import (
+    WIKIMEDIA_PAGEVIEWS_POLICY,
+    WikimediaPageviewsAdapter,
+    build_client,
+)
 from metaspike.sources.wikimedia_warehouse import (
     EXPORT_MAX_ROWS,
     MAX_BYTES_BILLED,
@@ -234,6 +243,7 @@ DEFAULT_SAMPLE_STORE = Path(".metaspike/samples")
 DEFAULT_QUOTA_DIR = Path(".metaspike/quota")
 DEFAULT_CREATOR_SUPPLY_DIR = Path(".metaspike/creator-supply")
 DEFAULT_TWITCH_DIR = Path(".metaspike/twitch")
+DEFAULT_DISCOVERY_DIR = Path(".metaspike/discovery")
 DEFAULT_PROBE_APP = 730
 _PLAYERS_HOST = "api.steampowered.com"
 _PLAYERS_PATH = "/ISteamUserStats/GetNumberOfCurrentPlayers/v1/"
@@ -654,6 +664,29 @@ def _parser() -> argparse.ArgumentParser:
     site.add_argument("--creator-supply-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
     site.add_argument("--out", type=Path, required=True)
     site.set_defaults(handler=_site_data)
+
+    discover = commands.add_parser(
+        "discover-games",
+        help="LIVE (Wikimedia, Wikidata): rank every English-Wikipedia video game by how far "
+        "its recent views rose above its own normal level",
+    )
+    discover.add_argument(
+        "--day",
+        type=date.fromisoformat,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="the last day to read (default: yesterday, UTC)",
+    )
+    discover.add_argument("--store-dir", type=Path, default=DEFAULT_DISCOVERY_DIR)
+    discover.add_argument("--refresh-games", action="store_true", help="re-read Wikidata now")
+    discover.add_argument(
+        "--max-backfill", type=int, default=4000, help="history requests this run may send"
+    )
+    discover.add_argument("--top", type=int, default=25, help="risers to print")
+    discover.add_argument(
+        "--show", nargs="*", default=[], metavar="ARTICLE", help="also print these articles"
+    )
+    discover.set_defaults(handler=_discover_games)
 
     status = commands.add_parser(
         "sample-status", help="health of the local sample store; never values or secrets"
@@ -1895,6 +1928,104 @@ def _site_data(args: argparse.Namespace) -> int:
         f"Site data: {len(games)} games; Wikipedia {held['wikipedia']}, "
         f"YouTube {held['youtube']} -> {args.out}"
     )
+    return EXIT_OK
+
+
+def _discover_games(args: argparse.Namespace) -> int:
+    """Read one day for every game, backfill history where it matters, rank the risers."""
+    for policy in (WIKIDATA_POLICY, WIKIMEDIA_PAGEVIEWS_POLICY):
+        if not policy.cleared_for(DeploymentStage.PRIVATE_DEVELOPMENT):
+            return _fail(EXIT_SOURCE_POLICY, f"{policy.source}: not cleared")
+    day: date = args.day or latest_complete_day(_now())
+    store = DiscoveryStore(args.store_dir)
+    with build_client() as client:
+        games = store.games()
+        age = store.games_age_days(day)
+        if games is None or args.refresh_games or (age is not None and age > 7):
+            try:
+                games = fetch_games(client)
+            except SourceError as error:
+                return _fail(EXIT_SOURCE_UNAVAILABLE, error.message)
+            store.save_games(games)
+        print(f"Games: {len(games):,} English-Wikipedia video games from Wikidata")
+        if store.day(day) is None:
+            print(f"Reading the {day} pageview dump (about 750 MB, a few minutes)...")
+            try:
+                views = count_views(stream_lines(client, day), {g.article for g in games})
+            except SourceError as error:
+                return _fail(EXIT_SOURCE_UNAVAILABLE, error.message)
+            store.save_day(day, views)
+        today = store.day(day) or {}
+        print(f"{day}: {len(today):,} game articles viewed at least once")
+
+        # History only where it can matter: enough views today, too few known days so far.
+        window = TimeWindow.of_days(day - timedelta(days=WINDOW_DAYS - 1), day)
+        wanted = [
+            g
+            for g in games
+            if today.get(g.article, 0) >= MIN_RECENT // 2
+            and sum(v is not None for v in store.series(g, day, WINDOW_DAYS)) < WINDOW_DAYS - 3
+        ]
+        wanted.sort(key=lambda g: -today.get(g.article, 0))
+        wanted = wanted[: max(args.max_backfill, 0)]
+        if wanted:
+            rate = WIKIMEDIA_PAGEVIEWS_POLICY.operations.rate_limit
+            minutes = len(wanted) * rate.per_seconds / rate.max_requests / 60
+            print(f"Backfilling {len(wanted):,} games' history (about {minutes:.0f} min)...")
+        api = WikimediaPageviewsAdapter(client)
+        failed = 0
+        for done, game in enumerate(wanted, 1):
+            try:
+                store.save_backfill(
+                    game.qid, api.article_views("en.wikipedia", game.article, window)
+                )
+            except SourceError:
+                failed += 1
+            if done % 500 == 0:
+                print(f"  {done:,}/{len(wanted):,}")
+
+    assessed = [
+        riser
+        for g in games
+        if today.get(g.article, 0) >= MIN_RECENT // 2
+        and (riser := assess(g.qid, g.article, store.series(g, day, WINDOW_DAYS))) is not None
+    ]
+    ranked = rank(assessed)
+    by_qid = {g.qid: g for g in games}
+    report = [
+        {
+            **riser.model_dump(mode="json"),
+            "igdb": list(by_qid[riser.qid].igdb),
+            "steam": list(by_qid[riser.qid].steam),
+        }
+        for riser in ranked
+    ]
+    out = store.root / f"risers-{day.isoformat()}.json"
+    out.write_text(json.dumps(report, indent=1), encoding="utf-8")
+
+    def line(row: dict[str, Any]) -> str:
+        ratio = "new" if row["ratio"] is None else f"x{row['ratio']:.1f}"
+        base = "-" if row["baseline"] is None else f"{row['baseline']:,.0f}"
+        return f"  {ratio:>6}  {row['recent']:>9,.0f}/day  (normal {base:>7})  {row['article']}"
+
+    rising = [row for row in report if row["ratio"] is not None]
+    print(f"\nTop {args.top} risers on {day} (recent 3 days against the 28 before):")
+    for row in rising[: args.top]:
+        print(line(row))
+    fresh = [row for row in report if row["ratio"] is None][:10]
+    if fresh:
+        print("\nNo normal level yet (new or newly noticed), by volume:")
+        for row in fresh:
+            print(line(row))
+    for article in args.show:
+        found = next((n for n, row in enumerate(report) if row["article"] == article), None)
+        detail = (
+            "not ranked (too few views)"
+            if found is None
+            else f"#{found + 1}: {line(report[found]).strip()}"
+        )
+        print(f"{article}: {detail}")
+    print(f"\nReport: {out} ({len(report):,} games; {failed} history requests failed)")
     return EXIT_OK
 
 
