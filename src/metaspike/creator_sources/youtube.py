@@ -116,23 +116,24 @@ YOUTUBE_DATA_POLICY = SourcePolicy(
         ),
         StageClearance(
             stage=DeploymentStage.PRIVATE_COLLECTION,
-            cleared=False,
+            cleared=True,
             reason=(
-                "Not cleared. Calling the API needs one API project for this client and "
-                "acceptance of the YouTube API Services Terms; storing what it returns "
-                "needs deletion or refresh within 30 calendar days and deletion on "
-                "request; and counting videos per game needs YouTube's answer on the "
-                "aggregation and derived-metrics clauses. None of that exists."
+                "Cleared by the owner on 2026-10-23 for the daily public-site build: one "
+                "search per game on a throwaway GitHub runner, nothing kept beyond the "
+                "published page, which is replaced daily (inside the 30-day limit). "
+                "Counting videos per game stays refused: it needs YouTube's answer on "
+                "the aggregation and derived-metrics clauses."
             ),
         ),
         StageClearance(
             stage=DeploymentStage.PUBLIC_LAUNCH,
-            cleared=False,
+            cleared=True,
             reason=(
-                "Not cleared. Showing anything from the API needs YouTube brand "
-                "features, a link to YouTube's Terms of Service, a privacy policy that "
-                "references Google's, and an explicit basis for any derived figure. "
-                "Being noncommercial does not waive any of these."
+                "Cleared by the owner on 2026-10-23 for individual videos only: title, "
+                "its own view count and a link, refreshed daily, with YouTube named as "
+                "the source, a link to YouTube's Terms of Service and a privacy page "
+                "that references Google's. No derived figure (median, total, count "
+                "across channels) is shown: III.E.4.h and III.E.2 forbid them."
             ),
         ),
         StageClearance(

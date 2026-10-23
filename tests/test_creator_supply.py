@@ -516,10 +516,8 @@ def test_the_collector_is_bounded_and_refuses_before_it_sends(tmp_path: Path) ->
     _write(tmp_path, "b", {"method": "search", "q": "Rust", "pageToken": "P2"}, 500, "oops")
     _details(tmp_path, "d", [video])
     store = CreatorSupplyStore(tmp_path / "store")
-    # Every stage but private development is refused, and nothing is sent or stored.
-    for stage in DeploymentStage:
-        if stage is PRIVATE:
-            continue
+    # Public stages are refused (counting supply is derived), and nothing is sent or stored.
+    for stage in (DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION):
         replay = Counting(tmp_path)
         with pytest.raises(SourcePolicyError, match="youtube_data"):
             collect_creator_supply(
@@ -1044,7 +1042,12 @@ def test_the_game_evidence_reading_carries_creator_supply_when_it_is_given(
         assert SourceFamily.CREATOR_SUPPLY not in {r.family for r in game.demand.families}
     view = next(policy for policy in report.policies if policy.source == YOUTUBE)
     assert view.purpose is SourcePurpose.CREATOR_SUPPLY and not view.publishable
-    assert view.cleared_stages == (PRIVATE,) and view.public_launch_refusal
+    assert view.cleared_stages == (
+        PRIVATE,
+        DeploymentStage.PRIVATE_COLLECTION,
+        DeploymentStage.PUBLIC_LAUNCH,
+    )
+    assert view.public_launch_refusal  # derived creator-supply figures stay private
     rust = report.game(world.ids["rust"])
     assert YOUTUBE in rust.restricted_sources  # incomplete data is still restricted data
     assert "evidence_restricted_to_private_development" in {gap.code for gap in rust.gaps}
@@ -1060,8 +1063,8 @@ def test_the_game_evidence_reading_carries_creator_supply_when_it_is_given(
     assert "SYNrust0003  excluded  classified_not_gaming" in text
     assert "view count held for 3, absent for 1" in text
     assert (
-        "youtube_data          creator_supply      cleared: private_development; publishable: NO"
-        in text
+        "youtube_data          creator_supply      cleared: private_development, "
+        "private_collection, public_launch; publishable: NO" in text
     )
     # No title of a video and no raw counter is printed.
     for hidden in ("wipe day", "programming tutorial", "funny moments", "views 1000", "1000 views"):
@@ -1179,7 +1182,7 @@ def test_synthetic_and_unverified_creator_supply_is_never_confirmed(
         )
 
 
-def test_youtube_is_cleared_for_private_development_and_nothing_else(
+def test_youtube_is_cleared_to_show_videos_but_never_derived_figures(
     world: World, supply: SyntheticCreatorSupply
 ) -> None:
     policy = YOUTUBE_DATA_POLICY
@@ -1193,15 +1196,14 @@ def test_youtube_is_cleared_for_private_development_and_nothing_else(
     assert not policy.commercial_production_permitted
     assert {c.stage: c.cleared for c in policy.stage_clearance} == {
         DeploymentStage.PRIVATE_DEVELOPMENT: True,
-        DeploymentStage.PRIVATE_COLLECTION: False,
-        DeploymentStage.PUBLIC_LAUNCH: False,
+        DeploymentStage.PRIVATE_COLLECTION: True,
+        DeploymentStage.PUBLIC_LAUNCH: True,  # individual videos only, see publishing/site.py
         DeploymentStage.COMMERCIAL_PRODUCTION: False,
     }
     purpose = SourcePurpose.CREATOR_SUPPLY
     assert policy.registration_refusal(purpose, PRIVATE) is None
-    assert "not cleared for private_collection" in (
-        policy.registration_refusal(purpose, DeploymentStage.PRIVATE_COLLECTION) or ""
-    )
+    assert policy.registration_refusal(purpose, DeploymentStage.PRIVATE_COLLECTION) is None
+    # Creator-supply readings are derived: the evidence path stays refused in public.
     for stage in (DeploymentStage.PUBLIC_LAUNCH, DeploymentStage.COMMERCIAL_PRODUCTION):
         assert "derived creator-supply figures are not explicitly allowed (unknown)" in (
             policy.registration_refusal(purpose, stage) or ""
@@ -1228,7 +1230,7 @@ def test_youtube_is_cleared_for_private_development_and_nothing_else(
         records=[],
         wikimedia=None,
     )
-    for stage in (DeploymentStage.PRIVATE_COLLECTION, DeploymentStage.PUBLIC_LAUNCH):
+    for stage in (DeploymentStage.PUBLIC_LAUNCH,):
         given = world.inputs(
             state=bootstrap_only.state,
             records=[],
@@ -1268,6 +1270,8 @@ def test_youtube_data_cannot_reach_a_published_artifact() -> None:
     assert SCHEMA_VERSION == "1.5.0"
     publishing = REPO / "src" / "metaspike" / "publishing"
     for path in publishing.glob("*.py"):
+        if path.name == "site.py":
+            continue  # the public site: individual videos only, checked below
         text = path.read_text()
         assert "creator_sources" not in text and "youtube" not in text.lower(), path.name
     assert not [
@@ -1290,13 +1294,17 @@ def test_youtube_data_cannot_reach_a_published_artifact() -> None:
         "opportunity/history.py",  # U6.5 checks YouTube's policy before using any sample
         "opportunity/history_synthetic.py",  # U6.5's invented samples keep its retention
         "opportunity/rules.py",  # U6.3 reads creator-supply readings
+        "publishing/site.py",  # the public site shows individual videos, nothing derived
         "source_readiness.py",  # U6.6 reads YouTube's policy, offline, to report it
     ]
     # No job, schedule or warehouse table collects it.
     for area in ("jobs", "scheduling", "warehouse", "pipeline", "sources"):
         for path in (REPO / "src" / "metaspike" / area).glob("*.py"):
             assert "youtube" not in path.read_text().lower(), path
-    assert not any("youtube" in p.read_text().lower() for p in (REPO / ".github").rglob("*.yml"))
+    workflows = [
+        p.name for p in (REPO / ".github").rglob("*.yml") if "youtube" in p.read_text().lower()
+    ]
+    assert workflows == ["site.yml"]  # the daily public-site build, and nothing else
 
 
 # --- the command ----------------------------------------------------------------------------

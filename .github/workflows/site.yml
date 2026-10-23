@@ -1,0 +1,66 @@
+# Cover Next: collect, build and publish the public site to GitHub Pages, once a day.
+#
+# Nothing collected here is committed. The runner is thrown away after each run, so
+# YouTube data lives only in the published page, which is replaced every day (YouTube
+# allows 30 days). No Google Cloud access: this workflow has no WIF identity.
+name: site
+
+on:
+  schedule:
+    - cron: "30 13 * * *" # daily, after Wikimedia has published the previous day
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+      - name: Python
+        run: uv python install && uv sync --locked
+      - name: YouTube (skipped when the key is not set)
+        env:
+          METASPIKE_YOUTUBE_API_KEY: ${{ secrets.METASPIKE_YOUTUBE_API_KEY }}
+        run: |
+          if [ -z "$METASPIKE_YOUTUBE_API_KEY" ]; then
+            echo "::warning::METASPIKE_YOUTUBE_API_KEY is not set; YouTube shows as not measured"
+          else
+            uv run metaspike collect-youtube --stage private_collection || echo "::warning::some YouTube searches failed"
+          fi
+      - name: Site data
+        run: uv run metaspike site-data --out apps/site/data/site.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/site/package-lock.json
+      - name: Build
+        working-directory: apps/site
+        run: npm ci && npm run check
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: apps/site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write # GitHub Pages' own deployment token, not Google Cloud
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

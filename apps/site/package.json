@@ -1,0 +1,28 @@
+{
+  "name": "cover-next-site",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cover Next: the public static site at cover-next.krishnachittella.dev.",
+  "type": "module",
+  "engines": {
+    "node": ">=20.9.0"
+  },
+  "scripts": {
+    "data": "cd ../.. && uv run metaspike site-data --out apps/site/data/site.json",
+    "dev": "next dev --hostname 127.0.0.1 --port 3001",
+    "build": "next build",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run build"
+  },
+  "dependencies": {
+    "next": "^16.4.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "typescript": "^6.0.3"
+  }
+}
