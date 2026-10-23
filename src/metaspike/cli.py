@@ -145,6 +145,7 @@ from metaspike.publishing.build import EventInputs
 from metaspike.publishing.event_views import event_as_of
 from metaspike.publishing.publisher import to_json
 from metaspike.publishing.schemas import export_schemas, stale_schemas
+from metaspike.publishing.site import build_site_data
 from metaspike.publishing.validation import ArtifactValidationError, validate_published
 from metaspike.resolution.evaluate import evaluate
 from metaspike.resolution.golden import load_golden_set
@@ -604,8 +605,8 @@ def _parser() -> argparse.ArgumentParser:
 
     youtube = commands.add_parser(
         "collect-youtube",
-        help="LIVE: one YouTube search per bootstrap game for recent gaming videos, plus "
-        "their public counts, into the local creator-supply store",
+        help="LIVE: one YouTube search per bootstrap game for this week's most relevant "
+        "gaming videos, plus their public counts, into the local creator-supply store",
     )
     youtube.add_argument(
         "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
@@ -621,6 +622,12 @@ def _parser() -> argparse.ArgumentParser:
         default=20,
         help=f"search.list calls this run may spend (daily project limit {SEARCH_CALLS_PER_DAY})",
     )
+    youtube.add_argument(
+        "--stage",
+        type=DeploymentStage,
+        default=DeploymentStage.PRIVATE_DEVELOPMENT,
+        help="private_development on the owner's machine; private_collection unattended",
+    )
     youtube.set_defaults(handler=_collect_youtube)
 
     twitch = commands.add_parser(
@@ -634,6 +641,19 @@ def _parser() -> argparse.ArgumentParser:
     twitch.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
     twitch.add_argument("--store-dir", type=Path, default=DEFAULT_TWITCH_DIR)
     twitch.set_defaults(handler=_collect_twitch)
+
+    site = commands.add_parser(
+        "site-data",
+        help="LIVE (Wikimedia): write the public site's data file from Wikimedia pageviews "
+        "and the local YouTube store",
+    )
+    site.add_argument(
+        "--recorded", type=Path, nargs="+", default=list(DEFAULT_RECORDED_DIRECTORIES)
+    )
+    site.add_argument("--state", type=Path, default=DEFAULT_CATALOGUE_STATE)
+    site.add_argument("--creator-supply-dir", type=Path, default=DEFAULT_CREATOR_SUPPLY_DIR)
+    site.add_argument("--out", type=Path, required=True)
+    site.set_defaults(handler=_site_data)
 
     status = commands.add_parser(
         "sample-status", help="health of the local sample store; never values or secrets"
@@ -1752,6 +1772,8 @@ def _collect_youtube(args: argparse.Namespace) -> int:
         SearchQuery(
             canonical_game_id=game.canonical_game_id,
             text=game.name,
+            # Relevance, not date: the newest uploads are minutes old and have no views yet.
+            order="relevance",
             published_after=now - timedelta(days=args.days),
             video_category_id=GAMING_CATEGORY_ID,
         )
@@ -1768,7 +1790,7 @@ def _collect_youtube(args: argparse.Namespace) -> int:
             YOUTUBE_DATA_POLICY,
             queries,
             CreatorSupplyStore(args.store_dir),
-            stage=DeploymentStage.PRIVATE_DEVELOPMENT,
+            stage=args.stage,
         )
     print(
         f"YouTube: {summary.queries} games; searches {summary.search_requests_sent} sent, "
@@ -1842,6 +1864,37 @@ def _collect_twitch(args: argparse.Namespace) -> int:
     print(f"Store: {path} (deleted after {CACHE_HOURS} hours)")
     if any(r.error_code is not None for r in readings):
         return _fail(EXIT_SOURCE_UNAVAILABLE, "some readings failed")
+    return EXIT_OK
+
+
+def _site_data(args: argparse.Namespace) -> int:
+    records = _recorded(args.recorded)
+    try:
+        state = _load_or_generate_state(args.state, records, DeploymentStage.PRIVATE_DEVELOPMENT)
+    except IncompleteRecords as error:
+        return _fail(EXIT_INVALID_CATALOGUE, f"catalogue state cannot be reused: {error}")
+    scope = bootstrap_scope()
+    games = [g for g in state.catalogue.games if g.canonical_game_id in scope]
+    now = _now()
+    with build_client() as client:
+        report = collect(
+            state.catalogue,
+            default_registry(client),
+            window_ending(latest_complete_day(now)),
+            observed_at=now,
+            clock=_now,
+        )
+    youtube = (
+        CreatorSupplyStore(args.creator_supply_dir) if args.creator_supply_dir.is_dir() else None
+    )
+    data = build_site_data(games, report, youtube, now)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    held = {k: sum(g[k]["state"] == "ok" for g in data["games"]) for k in ("wikipedia", "youtube")}
+    print(
+        f"Site data: {len(games)} games; Wikipedia {held['wikipedia']}, "
+        f"YouTube {held['youtube']} -> {args.out}"
+    )
     return EXIT_OK
 
 
