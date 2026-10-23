@@ -4,7 +4,7 @@ import Ajv2020, { type ErrorObject } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 
 import schema from "./report.schema.json";
-import { OPPORTUNITY_RULES_VERSION, type OpportunityReport } from "./types";
+import { OPPORTUNITY_RULES_VERSIONS, type OpportunityReport } from "./types";
 
 export interface Violation {
   path: string;
@@ -36,7 +36,7 @@ export function checkReport(value: unknown): Checked {
     return { kind: "invalid", details: [{ path: "(root)", message: "is not an object" }] };
   }
   const version = (value as { rules_version?: unknown }).rules_version;
-  if (version !== OPPORTUNITY_RULES_VERSION) {
+  if (typeof version !== "string" || !OPPORTUNITY_RULES_VERSIONS.includes(version)) {
     return { kind: "unsupported_version", version: typeof version === "string" ? version : String(version) };
   }
   const validate = validator();

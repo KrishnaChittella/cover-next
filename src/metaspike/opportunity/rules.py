@@ -40,10 +40,22 @@ ORDER, lexicographic, each step explained, no numbers mixed across sources:
 readiness; number of families moving up; no disagreement before disagreement; a timely
 event; a confirmed angle; coverage known; how many sources answered at all; and then
 the canonical id, which carries no meaning and says so.
+
+VERSION 2 (`creator_opportunity_rules_v2`, from the first real reads, 22 Oct 2026). v1 is
+unchanged and stays the default. v2 differs in exactly two ways, both UNVALIDATED:
+
+    reaction window   an event that has already happened is still timely for
+                      REACTION_WINDOW after it starts. Under the frozen event rules a
+                      minor patch decays at once, so v1 never reads a shipped patch as
+                      a reason for content; reaction content is made in the days after.
+    event-first       a game is also a candidate with a timely event and its angle, a
+                      demand family measured and not down, and no disagreement, when
+                      creator coverage is not known. Unknown coverage is then a stated
+                      caveat, never low competition.
 """
 
 from collections.abc import Callable, Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Final, Literal
 
@@ -66,6 +78,11 @@ from metaspike.features.semantics import Availability
 from metaspike.scoring.v0 import ROBUST_Z_OUTLIER_THRESHOLD
 
 OPPORTUNITY_RULES_VERSION: Final = "creator_opportunity_rules_v1"
+OPPORTUNITY_RULES_VERSION_V2: Final = "creator_opportunity_rules_v2"
+RulesVersion = Literal["creator_opportunity_rules_v1", "creator_opportunity_rules_v2"]
+RULES_VERSIONS: Final = (OPPORTUNITY_RULES_VERSION, OPPORTUNITY_RULES_VERSION_V2)
+# v2 only: how long after it starts an event still makes reaction content timely. UNVALIDATED.
+REACTION_WINDOW: Final = timedelta(hours=72)
 # Borrowed from score v0, where it is the conventional outlier threshold. Here it is
 # UNVALIDATED: no historical evaluation has shown it marks useful opportunities.
 NOTEWORTHY_ROBUST_Z: Final = ROBUST_Z_OUTLIER_THRESHOLD
@@ -156,7 +173,7 @@ class Facts(FrozenModel):
 
 
 class OpportunityAssessment(FrozenModel):
-    rules_version: Literal["creator_opportunity_rules_v1"] = OPPORTUNITY_RULES_VERSION
+    rules_version: RulesVersion = OPPORTUNITY_RULES_VERSION
     canonical_game_id: str
     slug: str
     name: str
@@ -226,7 +243,18 @@ def _movements(game: GameEvidence) -> tuple[MovementNote, ...]:
     return tuple(notes)
 
 
-def _events(game: GameEvidence) -> tuple[EventNote, ...]:
+def _timely_phase(phase: Phase, starts_at: datetime, as_of: datetime, version: str) -> bool:
+    if phase in _EVENT_PHASES:
+        return True
+    # v2: a shipped event is still a reason for reaction content for a while.
+    return (
+        version == OPPORTUNITY_RULES_VERSION_V2
+        and phase is Phase.DECAYING
+        and timedelta(0) <= as_of - starts_at <= REACTION_WINDOW
+    )
+
+
+def _events(game: GameEvidence, version: str = OPPORTUNITY_RULES_VERSION) -> tuple[EventNote, ...]:
     if game.events.availability is not EventAvailability.AVAILABLE:
         return ()
     standing = game.source("steam_news").provenance.standing
@@ -240,7 +268,7 @@ def _events(game: GameEvidence) -> tuple[EventNote, ...]:
             standing=standing,
         )
         for c in game.events.contributions
-        if c.evaluation.phase in _EVENT_PHASES
+        if _timely_phase(c.evaluation.phase, c.evaluation.starts_at, game.as_of, version)
     )
 
 
@@ -280,14 +308,24 @@ def _angles(game: GameEvidence, events: Sequence[EventNote]) -> tuple[VideoAngle
                 )
             )
     for event in events:
+        shipped = event.phase == Phase.DECAYING.value
         angles.append(
             VideoAngle(
                 origin="event",
-                addresses=f"the {event.event_type.replace('_', ' ')} ({event.phase})",
+                addresses=(
+                    f"reaction to the {event.event_type.replace('_', ' ')}, "
+                    f"{_hours_since(event.starts_at, game.as_of)} after it started"
+                    if shipped
+                    else f"the {event.event_type.replace('_', ' ')} ({event.phase})"
+                ),
                 about=(f"starts {event.starts_at:%Y-%m-%d} ({event.time_precision} precision)",),
                 references=(event.event_id,),
                 timely=True,
-                timely_reason=f"{event.phase} at the moment assessed",
+                timely_reason=(
+                    f"started within the {_hours(REACTION_WINDOW)} reaction window"
+                    if shipped
+                    else f"{event.phase} at the moment assessed"
+                ),
                 standing=event.standing,
                 confirmed=_counts(event.standing),
                 assumptions=(
@@ -341,6 +379,40 @@ def readiness(facts: Facts) -> Readiness:
     return Readiness.INSUFFICIENT
 
 
+def _demand_measured(
+    movements: Sequence[MovementNote], counted: Callable[[Standing], bool]
+) -> bool:
+    """A counted demand family was measured, and none moved down."""
+    readable = [
+        m for m in movements if counted(m.standing) and m.direction is not Direction.UNKNOWN
+    ]
+    return bool(readable) and all(m.direction is not Direction.DOWN for m in readable)
+
+
+def readiness_v2(
+    facts: Facts, movements: Sequence[MovementNote], counted: Callable[[Standing], bool]
+) -> Readiness:
+    """v1's readiness, plus the event-first candidate when coverage is not known."""
+    if (
+        readiness(facts) is not Readiness.CANDIDATE
+        and facts.timely_event
+        and facts.angle
+        and not facts.disagreement
+        and not facts.coverage_known
+        and _demand_measured(movements, counted)
+    ):
+        return Readiness.CANDIDATE
+    return readiness(facts)
+
+
+def _hours(span: timedelta) -> str:
+    return f"{span.total_seconds() / 3600:.0f} h"
+
+
+def _hours_since(moment: datetime, as_of: datetime) -> str:
+    return _hours(as_of - moment)
+
+
 def _statements(
     movements: Sequence[MovementNote],
     events: Sequence[EventNote],
@@ -362,8 +434,9 @@ def _statements(
     for e in events:
         found.append(
             Statement(
-                text=f"a {e.event_type.replace('_', ' ')} is {e.phase}, starting "
-                f"{e.starts_at:%Y-%m-%d} ({e.time_precision} precision)",
+                text=f"a {e.event_type.replace('_', ' ')} "
+                + ("shipped" if e.phase == Phase.DECAYING.value else f"is {e.phase}, starting")
+                + f" {e.starts_at:%Y-%m-%d} ({e.time_precision} precision)",
                 standing=e.standing,
                 references=(e.event_id,),
             )
@@ -396,10 +469,12 @@ def _community_text(game: GameEvidence) -> str:
     return f"[{standing}] {community.summary}"
 
 
-def assess_opportunity(game: GameEvidence) -> OpportunityAssessment:
+def assess_opportunity(
+    game: GameEvidence, version: RulesVersion = OPPORTUNITY_RULES_VERSION
+) -> OpportunityAssessment:
     """The rubric applied to one game's evidence. Reads; adds no data of its own."""
     movements = _movements(game)
-    events = _events(game)
+    events = _events(game, version)
     angles = _angles(game, events)
     facts = _facts(game, movements, events, angles, _counts)
     simulated = _facts(game, movements, events, angles, _simulated)
@@ -417,6 +492,20 @@ def assess_opportunity(game: GameEvidence) -> OpportunityAssessment:
             caveats.append(f"{s.source}'s sample is incomplete")
     if game.creator_supply is not None:
         caveats.append("total creator competition is unknown: a sample is a lower bound")
+    if version == OPPORTUNITY_RULES_VERSION_V2:
+        real, sim = (
+            readiness_v2(facts, movements, _counts),
+            readiness_v2(simulated, movements, _simulated),
+        )
+        if Readiness.CANDIDATE in (real, sim) and not (
+            facts.coverage_known and simulated.coverage_known
+        ):
+            caveats.append(
+                "creator coverage was not measured: this says nothing about how many "
+                "videos already cover it, and unknown is not low competition"
+            )
+    else:
+        real, sim = readiness(facts), readiness(simulated)
     if game.synthetic_sources:
         caveats.append(f"SYNTHETIC, counted for nothing: {', '.join(game.synthetic_sources)}")
     if game.unverified_sources:
@@ -428,13 +517,14 @@ def assess_opportunity(game: GameEvidence) -> OpportunityAssessment:
         "been validated against outcomes, so no readiness here is a calibrated likelihood."
     )
     return OpportunityAssessment(
+        rules_version=version,
         canonical_game_id=game.canonical_game_id,
         slug=game.identity.slug,
         name=game.identity.name,
         as_of=game.as_of,
-        readiness=readiness(facts),
+        readiness=real,
         facts=facts,
-        simulated_readiness=readiness(simulated),
+        simulated_readiness=sim,
         simulated_facts=simulated,
         sources=tuple(
             SourceNote(
@@ -505,7 +595,7 @@ class ShortlistEntry(FrozenModel):
 
 
 class OpportunityShortlist(FrozenModel):
-    rules_version: Literal["creator_opportunity_rules_v1"] = OPPORTUNITY_RULES_VERSION
+    rules_version: RulesVersion = OPPORTUNITY_RULES_VERSION
     as_of: AwareDatetime
     distribution: Literal["private_development_only"] = "private_development_only"
     contains_synthetic: bool
@@ -545,9 +635,11 @@ def _order(
     return tuple(entries)
 
 
-def shortlist(report: EvidenceReport) -> OpportunityShortlist:
+def shortlist(
+    report: EvidenceReport, version: RulesVersion = OPPORTUNITY_RULES_VERSION
+) -> OpportunityShortlist:
     """Every game's assessment, in an explained order. Deterministic; private."""
-    assessments = tuple(assess_opportunity(game) for game in report.games)
+    assessments = tuple(assess_opportunity(game, version) for game in report.games)
     entries = _order(assessments, simulated=False)
     real = [e for e in entries if e.readiness is not Readiness.INSUFFICIENT]
     summary = (
@@ -557,6 +649,7 @@ def shortlist(report: EvidenceReport) -> OpportunityShortlist:
         "says 'now'."
     )
     return OpportunityShortlist(
+        rules_version=version,
         as_of=report.as_of,
         contains_synthetic=report.contains_synthetic,
         contains_unverified=report.contains_unverified,
