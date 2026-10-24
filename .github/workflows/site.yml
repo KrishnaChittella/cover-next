@@ -102,7 +102,9 @@ jobs:
         if: ${{ inputs.design_only && inputs.site_data_gz != '' }}
         env:
           SITE_DATA_GZ: ${{ inputs.site_data_gz }}
-        run: printf '%s' "$SITE_DATA_GZ" | base64 -d | gunzip > apps/site/data/site.json
+        run: |
+          mkdir -p apps/site/data
+          printf '%s' "$SITE_DATA_GZ" | base64 -d | gunzip > apps/site/data/site.json
       - name: Cached site data matches this build (design_only)
         if: ${{ inputs.design_only }}
         run: |
