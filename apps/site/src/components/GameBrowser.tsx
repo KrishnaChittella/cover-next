@@ -17,6 +17,11 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "watchlist", label: "Watchlist" },
 ];
 
+function initialQuery(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("q") ?? "";
+}
+
 function initialFilter(): Filter {
   if (typeof window === "undefined") return "all";
   const f = new URLSearchParams(window.location.search).get("f");
@@ -30,7 +35,10 @@ export function GameBrowser({ games }: { games: Game[] }) {
   const [sort, setSort] = useState<Sort>("rise");
   const [shown, setShown] = useState(PAGE);
 
-  useEffect(() => setFilter(initialFilter()), []);
+  useEffect(() => {
+    setFilter(initialFilter());
+    setQuery(initialQuery());
+  }, []);
   useEffect(() => setShown(PAGE), [query, filter, sort]);
 
   const rows = useMemo(() => {

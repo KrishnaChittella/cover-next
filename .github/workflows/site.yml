@@ -1,14 +1,23 @@
 # Cover Next: collect, build and publish the public site to GitHub Pages, once a day.
 #
 # Nothing collected here is committed. The runner is thrown away after each run, so
-# YouTube data lives only in the published page, which is replaced every day (YouTube
-# allows 30 days). No Google Cloud access: this workflow has no WIF identity.
+# YouTube data lives only in the published page and in the cached site data file, both
+# replaced every day (YouTube allows 30 days; an unused cache entry is evicted after 7).
+# No Google Cloud access: this workflow has no WIF identity.
+#
+# design_only (manual runs): skip every source and rebuild the site from the last run's
+# site data, for design changes between the daily collections.
 name: site
 
 on:
   schedule:
     - cron: "30 13 * * *" # daily, after Wikimedia has published the previous day
   workflow_dispatch:
+    inputs:
+      design_only:
+        description: "Rebuild from the last site data without calling any source"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,10 +38,12 @@ jobs:
       - name: Python
         run: uv python install && uv sync --locked
       - name: Discover rising games (Wikidata + the day's Wikimedia pageview dump)
+        if: ${{ !inputs.design_only }}
         # shortcut: the runner starts empty, so each run re-reads ~2,000 games' history
         # (about 12 minutes). Cache the discovery store between runs if this gets slow.
         run: uv run metaspike discover-games
       - name: YouTube (skipped when the key is not set)
+        if: ${{ !inputs.design_only }}
         env:
           METASPIKE_YOUTUBE_API_KEY: ${{ secrets.METASPIKE_YOUTUBE_API_KEY }}
         run: |
@@ -45,6 +56,7 @@ jobs:
       # (each run saves a new entry; the newest is restored). A lost cache only shortens it.
       # Never a token: .metaspike/tokens stays out of the cache.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !inputs.design_only }}
         with:
           path: |
             .metaspike/steam
@@ -52,6 +64,7 @@ jobs:
           key: daily-${{ github.run_id }}
           restore-keys: daily-
       - name: Steam players (skipped when the key is not set)
+        if: ${{ !inputs.design_only }}
         env:
           METASPIKE_STEAM_WEB_API_KEY: ${{ secrets.METASPIKE_STEAM_WEB_API_KEY }}
         run: |
@@ -61,6 +74,7 @@ jobs:
             uv run metaspike collect-steam || echo "::warning::some Steam readings failed"
           fi
       - name: Twitch live sums (skipped when the IGDB/Twitch credentials are not set)
+        if: ${{ !inputs.design_only }}
         env:
           METASPIKE_IGDB_CLIENT_ID: ${{ secrets.METASPIKE_IGDB_CLIENT_ID }}
           METASPIKE_IGDB_CLIENT_SECRET: ${{ secrets.METASPIKE_IGDB_CLIENT_SECRET }}
@@ -70,8 +84,24 @@ jobs:
           else
             uv run metaspike collect-twitch-daily || echo "::warning::some Twitch readings failed"
           fi
+      # The built site's data file, so a design_only run can rebuild without any source.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/site/data/site.json
+          key: site-data-${{ github.run_id }}
+          restore-keys: site-data-
       - name: Site data
+        if: ${{ !inputs.design_only }}
         run: uv run metaspike site-data --out apps/site/data/site.json
+      - name: Cached site data matches this build (design_only)
+        if: ${{ inputs.design_only }}
+        run: |
+          uv run python -c "
+          import json, sys
+          from metaspike.publishing.site import SITE_DATA_VERSION as want
+          got = json.load(open('apps/site/data/site.json'))['version']
+          sys.exit(0 if got == want else f'cached site data is version {got}, this build needs {want}: run a full build')
+          "
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22

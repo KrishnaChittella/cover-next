@@ -41,8 +41,10 @@ from metaspike.discovery.twitch import TwitchDaily
 from metaspike.discovery.wikidata import WikidataGame
 from metaspike.domain.source_policy import DeploymentStage
 from metaspike.event_sources.candidates import words
+from metaspike.publishing.opportunity import readings as opportunity_readings
+from metaspike.publishing.opportunity import spotlight as opportunity_spotlight
 
-SITE_DATA_VERSION = "5"
+SITE_DATA_VERSION = "6"
 WEEK = 7
 TOP_VIDEOS = 3
 
@@ -187,6 +189,9 @@ def build_site_data(
                 "twitch": _twitch(twitch, game, now.date()),
             }
         )
+    scores = opportunity_readings(games)
+    for g in games:
+        g["opportunity"] = scores.get(g["slug"])
     with_videos = sum(g["youtube"]["state"] == "ok" for g in games)
     return {
         "version": SITE_DATA_VERSION,
@@ -214,6 +219,7 @@ def build_site_data(
         "stories": [
             {k: s[k] for k in ("slug", "name", "role", "article", "members")} for s in stories
         ],
+        "spotlight": opportunity_spotlight(games, scores),
         "games": games,
     }
 

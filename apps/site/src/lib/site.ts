@@ -1,4 +1,4 @@
-// The shape `metaspike site-data` writes (version 5). Null always means "not measured".
+// The shape `metaspike site-data` writes (version 6). Null always means "not measured".
 export type Day = { day: string; views: number | null };
 
 export type Wikipedia =
@@ -46,6 +46,16 @@ export type Story = {
   members: string[];
 };
 
+// Rule site_opportunity_v1: ranks among today's tracked games, 0-1. Null without both halves.
+export type Opportunity = {
+  rule: string;
+  score: number;
+  curiosity_rank: number;
+  supply_gap_rank: number;
+  viewers_per_stream: number;
+  saturation: "Low" | "Medium" | "High";
+};
+
 export type Game = {
   slug: string;
   name: string;
@@ -59,6 +69,7 @@ export type Game = {
   youtube: YouTube;
   steam: Steam;
   twitch: Twitch;
+  opportunity: Opportunity | null;
 };
 
 type SourceState = {
@@ -75,6 +86,7 @@ export type SiteData = {
   day: string;
   sources: { wikipedia: SourceState; youtube: SourceState; steam: SourceState; twitch: SourceState };
   stories: Story[];
+  spotlight: string | null;
   games: Game[];
 };
 
@@ -161,6 +173,12 @@ export function twitchNow(game: Game): string {
   if (t.state === "unmapped") return "no Twitch category";
   if (t.state !== "ok") return "not read";
   return `${t.lower_bound ? "at least " : ""}${formatCount(t.now)} watching`;
+}
+
+/** "12.3k": compact counts for tight rails. */
+export function formatShort(value: number | null | undefined): string {
+  if (value === null || value === undefined) return "-";
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 export function topViews(game: Game): number | null {
