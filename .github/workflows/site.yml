@@ -6,7 +6,8 @@
 # No Google Cloud access: this workflow has no WIF identity.
 #
 # design_only (manual runs): skip every source and rebuild the site from the last run's
-# site data, for design changes between the daily collections.
+# site data, for design changes between the daily collections. site_data_gz seeds that file
+# when no run has cached one yet (it is published as the site anyway).
 name: site
 
 on:
@@ -18,6 +19,10 @@ on:
         description: "Rebuild from the last site data without calling any source"
         type: boolean
         default: false
+      site_data_gz:
+        description: "design_only, first run only: the site data file, gzip then base64"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -93,6 +98,11 @@ jobs:
       - name: Site data
         if: ${{ !inputs.design_only }}
         run: uv run metaspike site-data --out apps/site/data/site.json
+      - name: Seed site data from the input (design_only, when given)
+        if: ${{ inputs.design_only && inputs.site_data_gz != '' }}
+        env:
+          SITE_DATA_GZ: ${{ inputs.site_data_gz }}
+        run: printf '%s' "$SITE_DATA_GZ" | base64 -d | gunzip > apps/site/data/site.json
       - name: Cached site data matches this build (design_only)
         if: ${{ inputs.design_only }}
         run: |
